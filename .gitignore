@@ -1,0 +1,40 @@
+# RVFuse Project
+
+# Third-party submodules (managed via git submodule)
+third_party/qemu/
+third_party/llvm-project/
+third_party/newlib/
+
+# Git
+.git/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+.env*
+
+# Build artifacts (future)
+builds/
+results/
+
+# Python (future)
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+
+# Coverage (future)
+coverage/
