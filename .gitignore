@@ -1,0 +1,41 @@
+# RVFuse Project
+
+# Git
+.git/
+
+# Third-party submodule build artifacts (if built locally)
+third_party/*/build/
+third_party/*/*.o
+third_party/*/*.a
+third_party/*/*.so
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+.env*
+
+# Build artifacts (future)
+builds/
+results/
+
+# Python (future)
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+
+# Coverage (future)
+coverage/
