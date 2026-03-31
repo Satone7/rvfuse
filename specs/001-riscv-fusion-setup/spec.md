@@ -1,134 +1,108 @@
-# Feature Specification: RVFuse Project Structure
+# Feature Specification: RVFuse Project Setup Foundation
 
-**Feature Branch**: `001-riscv-fusion-setup`
-**Created**: 2026-03-31
-**Status**: Draft
-**Input**: User description: "设计该项目的目录结构并完成相关目录创建，通过添加submodule的方式clone第三方项目。该项目是为了实现RISC-V指令融合的需求发现和测试，从具体应用（如onnxruntime）出发，通过qemu模拟器定位热点函数和热点基本块，实现基于基本块的DFG生成，找到具有数据依赖关系的高频指令组合，然后在模拟器内尝试通过新指令的方式将指令组合融合成一条指令，并验证其cycle，比对效果。"
+**Feature Branch**: `001-riscv-fusion-setup`  
+**Created**: 2026-03-31  
+**Status**: Draft  
+**Input**: User description: "设计该项目的目录结构并完成相关目录创建，通过添加submodule的方式clone第三方项目。该项目是为了实现RISC-V指令融合的需求发现和测试，从具体应用（如onnxruntime）出发，通过qemu模拟器定位热点函数和热点基本块，实现基于基本块的DFG生成，找到具有数据依赖关系的高频指令组合，然后在模拟器内尝试通过新指令的方式将指令组合融合成一条指令，并验证其cycle，比对效果。" This input describes the long-term project vision; the current feature scope is intentionally limited to project structure and dependency access.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Project Initialization (Priority: P1)
+### User Story 1 - Prepare the Project Baseline (Priority: P1)
 
-A developer sets up the RVFuse project environment by cloning the repository and initializing all necessary dependencies (Xuantie QEMU, LLVM, newlib as submodules) to begin instruction fusion research.
+A contributor prepares the RVFuse repository so the project has a clear workspace structure and an unambiguous setup baseline for future research work.
 
-**Why this priority**: Without proper project structure and submodule initialization, no other development work can proceed. This is the foundational setup that enables all subsequent research activities.
+**Why this priority**: No later research or implementation work can start until contributors share the same repository structure, setup expectations, and dependency baseline.
 
-**Independent Test**: Can be fully tested by verifying directory structure exists and all submodules are properly initialized with correct commit references.
+**Independent Test**: Can be fully tested by reviewing the setup documents and confirming that a new contributor can identify the required workspace areas and the current completion criteria for the setup phase.
 
 **Acceptance Scenarios**:
 
-1. **Given** a clean workspace, **When** developer clones RVFuse repository, **Then** all project directories are created with correct structure
-2. **Given** cloned repository, **When** developer runs `git submodule update --init`, **Then** Xuantie QEMU, LLVM, and newlib are cloned to their respective locations
-3. **Given** initialized submodules, **When** developer verifies submodule status, **Then** all submodules show correct remote URLs and commit hashes
+1. **Given** a clean checkout of the repository, **When** a contributor reads the setup specification, **Then** the contributor can identify the required project structure for the current phase
+2. **Given** the current setup phase, **When** a contributor reviews the setup documentation, **Then** the contributor can distinguish current setup work from future research workflow work
+3. **Given** the setup baseline, **When** a contributor completes the documented setup steps, **Then** the contributor can verify completion without relying on profiling, DFG generation, or fusion validation features
 
 ---
 
-### User Story 2 - Hotspot Detection Workflow (Priority: P2)
+### User Story 2 - Understand Dependency Sources (Priority: P2)
 
-A researcher runs an application (e.g., ONNX Runtime) through the QEMU emulator to identify hot functions and hot basic blocks for fusion candidate analysis.
+A contributor understands which external dependencies are required now, which are optional, and where their canonical upstream sources are located.
 
-**Why this priority**: This is the core research workflow that identifies fusion candidates. Without this, fusion analysis cannot proceed.
+**Why this priority**: Dependency ambiguity creates setup failures, inconsistent environments, and future rework.
 
-**Independent Test**: Can be tested by running a sample application through QEMU and verifying profiling output contains function/block timing data.
+**Independent Test**: Can be tested by checking whether a contributor can identify the required external dependencies, optional dependencies, and their documented sources without making assumptions.
 
 **Acceptance Scenarios**:
 
-1. **Given** compiled test application, **When** researcher runs it under QEMU with profiling enabled, **Then** hotspot analysis output is generated with function/block metrics
-2. **Given** profiling output, **When** researcher queries hot functions, **Then** results show top N functions ranked by execution frequency or cycle count
-3. **Given** hot function identified, **When** researcher requests basic block breakdown, **Then** system shows block-level timing distribution
+1. **Given** the dependency section of the project documents, **When** a contributor reviews it, **Then** the contributor can tell which dependencies are mandatory in the current phase
+2. **Given** an optional dependency, **When** a contributor reviews the documentation, **Then** the contributor can understand when that dependency becomes necessary
+3. **Given** any documented external dependency, **When** a contributor follows the reference information, **Then** the contributor can find its canonical upstream source
 
 ---
 
-### User Story 3 - DFG Generation (Priority: P3)
+### User Story 3 - Verify Contributor Readiness (Priority: P3)
 
-A researcher generates Data Flow Graph (DFG) representations from identified hot basic blocks to analyze instruction dependencies and identify fusion candidates.
+A new contributor uses the setup documentation to confirm readiness for the current phase without being blocked by later-stage research requirements.
 
-**Why this priority**: DFG generation is required for dependency analysis, which enables fusion candidate identification.
+**Why this priority**: The setup phase only succeeds if onboarding and verification are simple, bounded, and reproducible.
 
-**Independent Test**: Can be tested by providing a sample basic block and verifying DFG output correctly represents instruction dependencies.
-
-**Acceptance Scenarios**:
-
-1. **Given** hot basic block data, **When** researcher triggers DFG generation, **Then** DFG output shows instruction nodes and dependency edges
-2. **Given** generated DFG, **When** researcher queries data dependencies, **Then** system identifies chains of dependent instructions
-3. **Given** DFG with dependencies, **When** researcher requests fusion candidates, **Then** system suggests instruction combinations with dependency analysis
-
----
-
-### User Story 4 - Fusion Testing (Priority: P4)
-
-A researcher tests instruction fusion by implementing a new fused instruction in the emulator and comparing cycle counts against the original instruction sequence.
-
-**Why this priority**: This validates the fusion hypothesis and demonstrates performance improvement potential.
-
-**Independent Test**: Can be tested by implementing a known fusion candidate and verifying cycle reduction matches expected improvement.
+**Independent Test**: Can be tested by asking a new contributor to follow the setup guidance and confirm readiness using only the documented verification criteria for this phase.
 
 **Acceptance Scenarios**:
 
-1. **Given** identified fusion candidate, **When** researcher implements fused instruction in QEMU, **Then** emulator accepts and executes the new instruction
-2. **Given** fused instruction implementation, **When** researcher runs benchmark with fused instruction, **Then** cycle count is recorded
-3. **Given** both original and fused cycle counts, **When** researcher compares results, **Then** system provides performance improvement percentage
+1. **Given** a new contributor onboarding to RVFuse, **When** the contributor follows the setup guidance, **Then** the contributor can determine whether the setup phase is complete
+2. **Given** setup timing expectations, **When** the contributor reviews the success criteria, **Then** the contributor can tell which activities are included and excluded from the setup duration
+3. **Given** a future workload example is referenced in setup materials, **When** the contributor reviews that reference, **Then** the contributor can trace it back to a real source rather than an invented sample
 
 ---
 
 ### Edge Cases
 
-- What happens when submodule clone fails due to network issues? System MUST provide retry mechanism and document manual fallback steps
-- How does system handle applications with no significant hotspots? System MUST report "no candidates found" with profiling summary, not error
-- What if fusion candidate instructions are already optimal? System MUST document analysis result and skip fusion testing
-- How to handle fused instruction encoding conflicts? System MUST validate against RISC-V encoding rules before implementation
+- What happens when a mandatory dependency source is temporarily unavailable? The project MUST provide a documented fallback or retry path rather than leaving the dependency state ambiguous
+- How does the project handle optional dependencies that are not needed in the current phase? The setup phase MUST remain completable without treating optional dependencies as blockers
+- What happens when future workload examples are mentioned before a full analysis workflow exists? Any referenced workload MUST include a traceable source and MUST NOT be presented as a current-phase acceptance requirement
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: System MUST provide a defined directory structure for all project components
-- **FR-002**: System MUST integrate Xuantie QEMU as a git submodule at `third_party/qemu`
-- **FR-003**: System MUST integrate Xuantie LLVM as a git submodule at `third_party/llvm-project`
-- **FR-004**: System MUST integrate Xuantie newlib as a git submodule at `third_party/newlib` (conditionally, only when needed for bare-metal targets)
-- **FR-005**: System MUST provide a profiling workflow to identify hot functions from application execution
-- **FR-006**: System MUST provide a profiling workflow to identify hot basic blocks within functions
-- **FR-007**: System MUST generate DFG representations from basic block instruction sequences
-- **FR-008**: System MUST identify instruction combinations with data dependencies as fusion candidates
-- **FR-009**: System MUST support implementing and testing fused instructions in the emulator
-- **FR-010**: System MUST provide cycle count comparison between original and fused instruction sequences
-- **FR-011**: System MUST document all directory structures and their purposes
-- **FR-012**: System MUST provide build instructions for all third-party dependencies
+- **FR-001**: The project MUST define the repository structure required for the current setup phase
+- **FR-002**: The project MUST identify the external dependencies that are mandatory for the current setup phase
+- **FR-003**: The project MUST preserve canonical source references for external dependencies that are optional in the current setup phase
+- **FR-004**: The project MUST document the conditions under which an optional dependency becomes required
+- **FR-005**: The project MUST provide contributor-facing setup guidance for the current phase
+- **FR-006**: The project MUST provide contributor-facing verification guidance for the current phase
+- **FR-007**: The project MUST distinguish current setup capabilities from later research workflow capabilities
+- **FR-008**: Any future workload or benchmark example referenced in current-phase documentation MUST have a traceable source
 
 ### Key Entities
 
-- **Application**: Target workload for profiling (e.g., ONNX Runtime, custom benchmarks)
-- **Hot Function**: Function identified as consuming significant execution time
-- **Hot Basic Block**: Basic block within a hot function with high execution frequency
-- **DFG Node**: Single instruction representation in the data flow graph
-- **DFG Edge**: Data dependency relationship between instructions
-- **Fusion Candidate**: Instruction sequence identified as potential fusion target
-- **Fused Instruction**: New instruction combining multiple dependent instructions
-- **Cycle Count**: Performance metric measuring instruction execution cost
+- **Project Workspace**: The repository structure and documented areas that define the setup baseline for RVFuse
+- **Mandatory Dependency**: An external dependency that contributors need for the current setup phase
+- **Optional Dependency**: An external dependency that is not required in the current setup phase but may become required for later scenarios
+- **Dependency Source Reference**: The canonical upstream location recorded for a dependency
+- **Setup Verification Criteria**: The documented checks that determine whether the current setup phase is complete
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: Project structure is complete with all required directories created within 1 setup attempt
-- **SC-002**: All three submodules (QEMU, LLVM, newlib) initialize successfully with correct upstream URLs
-- **SC-003**: Hotspot detection workflow produces profiling output within 10 minutes for a standard test application
-- **SC-004**: DFG generation produces valid dependency graphs for 95% of analyzed basic blocks
-- **SC-005**: Fusion testing workflow provides cycle comparison results within 5 minutes per candidate
-- **SC-006**: Directory structure documentation covers all paths and their purposes completely
-- **SC-007**: New team members can complete project setup within 30 minutes following documentation
+- **SC-001**: 100% of current-phase repository areas and dependency roles are described in the project documents without conflicting mandatory or optional status
+- **SC-002**: A contributor can identify all current-phase mandatory dependencies and all current-phase optional dependencies from the documentation on the first read
+- **SC-003**: A contributor can verify completion of the current setup phase without invoking later profiling, DFG, or fusion-validation workflows
+- **SC-004**: A new contributor can complete the documented current-phase setup process within 30 minutes, excluding network download time, first-time dependency synchronization time, and third-party build time
+- **SC-005**: 100% of workload or benchmark examples referenced in current-phase documents point to a traceable source
 
 ## Assumptions
 
-- Developers have access to Xuantie GitHub repositories (no authentication required for public repos)
-- Target applications can be compiled for RISC-V architecture
-- QEMU profiling features support function and basic block level timing
-- LLVM infrastructure can be extended for custom instruction analysis
-- Minimum 8GB RAM and 20GB disk space available for submodule builds
+- The current phase is limited to project structure and dependency access
+- The current phase does not include hotspot detection, DFG generation, fusion candidate analysis, or fused instruction validation
+- Xuantie newlib remains an optional dependency in the current phase and its canonical source reference should still be preserved for later use
+- Future analysis and validation workflows will be specified in separate follow-up features
 
 ## Out of Scope
 
-- Actual implementation of specific fused instructions (this is research workflow setup only)
-- Performance benchmarking of production applications
-- LLVM backend modifications for new instruction encoding
-- Hardware validation of fusion candidates
+- Hotspot detection workflows
+- DFG generation and DFG validity criteria
+- Fusion candidate analysis
+- Implementing fused instructions
+- Cycle comparison and performance validation

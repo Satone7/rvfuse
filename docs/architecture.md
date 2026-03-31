@@ -1,8 +1,8 @@
 # Software Architecture Design: RVFuse
 
-**Version**: 1.0 | **Date**: 2026-03-31 | **Status**: Draft
+**Version**: 1.1 | **Date**: 2026-03-31 | **Status**: Draft
 
-**Purpose**: This document captures the high-signal architectural data AI agents need to implement features correctly and safely for the RVFuse RISC-V instruction fusion research platform.
+**Purpose**: This document describes the current architectural scope of RVFuse for the present phase, which is limited to repository structure, dependency access, and setup guidance. Research workflows such as hotspot analysis, DFG generation, and instruction-fusion validation remain future work.
 
 ---
 
@@ -13,7 +13,7 @@
 3. System Overview (C4)
 4. Deployment Summary
 5. Architecture Decisions (ADR Log)
-6. Quality Attributes (Targets & Strategies)
+6. Quality Attributes
 7. Risks & Technical Debt
 8. Agent Checklist
 
@@ -21,40 +21,39 @@
 
 ## 1. Executive Summary
 
-- **What**: RVFuse is a research platform for discovering and validating RISC-V instruction fusion candidates. It profiles applications via QEMU emulation, identifies hot functions and basic blocks, generates Data Flow Graphs (DFG), and tests potential fused instructions for cycle reduction.
-- **Why**: Enable RISC-V architecture optimization research by providing automated tooling to identify, analyze, and validate instruction fusion opportunities that can improve processor performance.
-- **Core Tech**: Python 3.11+ for analysis tools, Xuantie QEMU (emulation/profiling), Xuantie LLVM (instruction analysis), Git submodules for dependency management, JSON/Markdown for outputs.
+- **What**: RVFuse is a RISC-V instruction fusion research project whose current phase establishes the project workspace, dependency references, and setup baseline.
+- **Why**: A stable and well-documented setup foundation is required before any profiling, DFG, or fusion-validation work can be designed and implemented safely.
+- **Current Scope**: Repository structure, dependency source references, optional dependency policy, setup guidance, and setup verification criteria.
+- **Deferred Scope**: Hotspot detection, DFG generation, fusion candidate discovery, fused instruction implementation, and cycle comparison.
 
 ---
 
 ## 2. Architecture Snapshot
 
 - **Business Goals**:
-  1. Automate hotspot detection in RISC-V applications
-  2. Generate accurate DFG representations from basic blocks
-  3. Identify fusion candidates with data dependency analysis
-  4. Validate fusion effectiveness via cycle comparison
-  5. Provide reproducible research workflow
-  6. Enable extension to new applications and architectures
+  1. Define a clear repository structure for the current phase
+  2. Document mandatory and optional external dependencies without ambiguity
+  3. Preserve canonical source references for future dependency acquisition
+  4. Make contributor onboarding repeatable and auditable
+  5. Reserve clean extension points for later research workflows
 
 - **Constraints**:
-  - Xuantie toolchain required (QEMU, LLVM, newlib from GitHub)
-  - RISC-V target applications must be cross-compiled
-  - Minimum 8GB RAM, 20GB disk for submodule builds
-  - Linux development environment (x86_64 host)
-  - Git submodule architecture for third-party code
+  - Current phase is limited to project structure and dependency access
+  - Development is local-first on Linux x86_64 hosts
+  - External repositories are allowed for dependency acquisition and reference
+  - Xuantie newlib is optional in the current phase and must remain documented
+  - Any future workload example referenced in current documents must have a traceable source
 
 - **Quality Targets**:
-  - Performance: Profiling output within 10 min for standard apps; DFG generation <5 min per candidate
-  - Availability: Research tooling, not production - 95% acceptable
-  - Security: Local execution only, no external network calls
-  - Maintainability: 80% test coverage for analysis tools
+  - Setup guidance is understandable without relying on future workflow assumptions
+  - Mandatory and optional dependency status is consistent across documents
+  - Current-phase setup can be completed within 30 minutes, excluding network download time, first-time dependency synchronization time, and third-party build time
+  - Current-phase documents do not require profiling, DFG, or fusion-validation capabilities to verify setup completion
 
 - **Key Dependencies**:
   - Xuantie QEMU: https://github.com/XUANTIE-RV/qemu
   - Xuantie LLVM: https://github.com/XUANTIE-RV/llvm-project
-  - Xuantie newlib: https://github.com/XUANTIE-RV/newlib (optional)
-  - ONNX Runtime (sample workload for profiling)
+  - Xuantie newlib: https://github.com/XUANTIE-RV/newlib
 
 ---
 
@@ -64,371 +63,231 @@
 
 ```mermaid
 graph TB
-    Researcher[Researcher] -->|Profile App| RVFuse[RVFuse Platform]
-    Researcher -->|Analyze DFG| RVFuse
-    Researcher -->|Test Fusion| RVFuse
-    RVFuse -->|Emulate| QEMU[Xuantie QEMU]
-    RVFuse -->|Parse IR| LLVM[Xuantie LLVM]
-    RVFuse -->|Cross-compile| AppBench[Target Applications]
-    QEMU -->|Profiling Data| RVFuse
-    LLVM -->|Instruction Info| RVFuse
+    Contributor[Contributor] -->|Read setup guidance| RVFuse[RVFuse Setup Foundation]
+    Contributor -->|Review dependency policy| RVFuse
+    RVFuse -->|Reference upstream source| QEMU[Xuantie QEMU]
+    RVFuse -->|Reference upstream source| LLVM[Xuantie LLVM]
+    RVFuse -->|Reference optional source| Newlib[Xuantie newlib]
+    RVFuse -.future planning.-> FutureFlow[Future Research Workflow]
 ```
 
 **Context Description**:
-- **Researcher**: Primary user running profiling and analysis workflows
-- **RVFuse Platform**: Core analysis and orchestration system
-- **Xuantie QEMU**: RISC-V emulator with profiling capabilities
-- **Xuantie LLVM**: Compiler infrastructure for instruction analysis
-- **Target Applications**: RISC-V compiled workloads (ONNX Runtime, benchmarks)
+- **Contributor**: Developer or researcher preparing the workspace for the current phase
+- **RVFuse Setup Foundation**: Repository structure, setup documentation, dependency policy, and verification criteria
+- **Xuantie QEMU / LLVM**: External toolchain dependencies that are part of the current dependency baseline
+- **Xuantie newlib**: Optional external dependency retained as a documented source for future scenarios
+- **Future Research Workflow**: Later-phase profiling, DFG, and fusion-validation work that is intentionally outside the current delivery scope
 
 ### 3.2 Containers
 
 ```mermaid
 graph TB
-    Researcher -->|CLI| Analyzer[Analysis Tools<br/>Python]
-    Analyzer -->|Execute| Profiler[QEMU Profiler<br/>third_party/qemu]
-    Analyzer -->|Parse| Compiler[LLVM Tools<br/>third_party/llvm-project]
-    Analyzer -->|Read/Write| DataDir[(Data Directory<br/>results/)]
-    Analyzer -->|Config| ConfigFile[config.yaml]
-    Profiler -->|Raw Profile| DataDir
-    Compiler -->|Binary/IR| AppBuild[Build Artifacts<br/>builds/]
-    AppBuild -->|Execute| Profiler
+    Contributor -->|Read| Docs[Project Documents]
+    Contributor -->|Follow| SetupGuide[Setup Guidance]
+    SetupGuide -->|Define| Workspace[Workspace Layout]
+    SetupGuide -->|Reference| Deps[Dependency Catalog]
+    Deps -.future use.-> FutureModules[Future Analysis Modules]
 ```
 
 **Container Description**:
-| Container | Technology | Purpose |
-|-----------|------------|---------|
-| Analysis Tools | Python 3.11+ | Core analysis pipeline: profiling orchestration, DFG generation, fusion detection |
-| QEMU Profiler | Xuantie QEMU (C) | RISC-V emulation with function/block timing instrumentation |
-| LLVM Tools | Xuantie LLVM (C++) | Disassembly, IR analysis, instruction metadata extraction |
-| Data Directory | JSON/Markdown files | Profiling results, DFG outputs, fusion reports |
-| Build Artifacts | RISC-V binaries | Cross-compiled target applications for profiling |
-| Config | YAML | Analysis parameters, threshold settings, paths |
+| Container | Purpose |
+|-----------|---------|
+| Project Documents | Capture scope, architecture, and decisions for the current phase |
+| Setup Guidance | Explain how contributors prepare and verify the current-phase workspace |
+| Workspace Layout | Defines the repository areas expected in the setup phase |
+| Dependency Catalog | Records mandatory and optional dependency references and their roles |
+| Future Analysis Modules | Placeholder for later research capabilities that are not part of the current phase |
 
-### 3.3 Components (Key Interfaces)
+### 3.3 Components
 
 ```mermaid
 graph TB
-    CLI[CLI Entry<br/>main.py] --> ProfilerCtl[Profiler Controller]
-    CLI --> DFGGen[DFG Generator]
-    CLI --> FusionDetect[Fusion Detector]
-    CLI --> CycleCompare[Cycle Comparator]
-
-    ProfilerCtl --> QEMUInterface[QEMU Interface]
-    ProfilerCtl --> HotspotAnalyzer[Hotspot Analyzer]
-
-    DFGGen --> BlockParser[Block Parser]
-    DFGGen --> DependencyGraph[Dependency Graph]
-
-    FusionDetect --> PatternMatcher[Pattern Matcher]
-    FusionDetect --> CandidateFilter[Candidate Filter]
-
-    CycleCompare --> BenchmarkRunner[Benchmark Runner]
-    CycleCompare --> ReportGen[Report Generator]
-
-    QEMUInterface --> QEMUBin[qemu-system-riscv64]
-    BlockParser --> LLVMDis[llvm-dis]
+    SetupGuide[Setup Guide] --> LayoutPolicy[Workspace Layout Policy]
+    SetupGuide --> DependencyPolicy[Dependency Policy]
+    SetupGuide --> VerificationChecklist[Setup Verification Checklist]
+    DependencyPolicy --> MandatoryDeps[Mandatory Dependencies]
+    DependencyPolicy --> OptionalDeps[Optional Dependencies]
+    VerificationChecklist -.future boundary.-> DeferredWork[Deferred Workflow Boundary]
 ```
 
 **Component Responsibilities**:
 | Component | Responsibility |
 |-----------|---------------|
-| CLI Entry | Command-line interface, workflow orchestration |
-| Profiler Controller | Launch QEMU with profiling, collect timing data |
-| Hotspot Analyzer | Rank functions/blocks by execution frequency |
-| Block Parser | Extract instruction sequences from basic blocks |
-| DFG Generator | Build data flow graph from instruction dependencies |
-| Fusion Detector | Identify instruction sequences eligible for fusion |
-| Pattern Matcher | Match known fusion patterns in instruction sequences |
-| Cycle Comparator | Run benchmarks comparing original vs fused cycles |
-| Report Generator | Output Markdown/JSON reports with results |
+| Setup Guide | Describe the current-phase setup flow for contributors |
+| Workspace Layout Policy | Define the repository structure expected in the current phase |
+| Dependency Policy | Distinguish mandatory and optional dependencies and preserve source references |
+| Setup Verification Checklist | Define how contributors confirm setup completion |
+| Deferred Workflow Boundary | State what remains outside the current phase |
 
 ---
 
 ## 4. Deployment Summary
 
-- **Runtime**: Linux workstation (x86_64 host), local execution
-- **Environment**: Ubuntu 22.04+ or equivalent Linux distribution
-- **Submodules**: Git submodules at `third_party/` (QEMU, LLVM, newlib)
-- **Build Artifacts**: Compiled binaries stored in `builds/` directory
-- **Results**: Analysis outputs in `results/` directory (JSON + Markdown)
-- **CI/CD**: GitHub Actions for submodule integrity checks, Python linting, basic tests
+- **Runtime**: Local Linux workstation
+- **Primary Audience**: Contributors preparing the repository for future RVFuse research work
+- **Current Deliverables**: Project documents, dependency references, setup policy, and setup verification guidance
+- **Dependency Access Model**: External toolchain repositories are tracked by reference and are intended to be integrated through the repository setup process
 
-**Directory Structure**:
-```
+**Current-Phase Workspace Layout**:
+```text
 RVFuse/
-├── src/                    # Python analysis tools
-│   ├── profiler/           # QEMU profiling interface
-│   ├── dfg/                # DFG generation module
-│   ├── fusion/             # Fusion detection module
-│   └── report/             # Report generation
-├── tests/                  # Test suite
-│   ├── unit/
-│   ├── integration/
-│   └── contract/
-├── third_party/            # Git submodules
-│   ├── qemu/               # Xuantie QEMU
-│   ├── llvm-project/       # Xuantie LLVM
-│   └── newlib/             # Xuantie newlib (optional)
-├── builds/                 # Compiled target applications
-├── results/                # Analysis outputs
-│   ├── profiles/
-│   ├── dfg/
-│   └── reports/
-├── configs/                # Configuration files
-├── docs/                   # Documentation
-└── specs/                  # Feature specifications
+├── docs/                   # Architecture and contributor-facing project documents
+├── specs/                  # Feature specifications for scoped project work
+├── memory/                 # Project governance and working memory artifacts
+└── third_party/            # External dependency integration point for current and future phases
+    ├── qemu/               # Xuantie QEMU
+    ├── llvm-project/       # Xuantie LLVM
+    └── newlib/             # Xuantie newlib (optional in current phase)
 ```
+
+**Deferred Layout Areas**:
+- `src/`, `tests/`, `builds/`, `results/`, and analysis-specific configuration assets are future-phase workspace areas and are not required for current-phase setup completion.
 
 ---
 
 ## 5. Architecture Decisions (ADR Log)
 
 | ID | Title | Status | Date |
-| ---- | ------- |--------|------|
-| ADR-001 | Git Submodules for Toolchain | Accepted | 2026-03-31 |
-| ADR-002 | Python Analysis Pipeline | Accepted | 2026-03-31 |
-| ADR-003 | JSON + Markdown Output Format | Accepted | 2026-03-31 |
-| ADR-004 | Modular Pipeline Architecture | Accepted | 2026-03-31 |
-| ADR-005 | Local Execution Only | Accepted | 2026-03-31 |
+|----|-------|--------|------|
+| ADR-001 | Use Git Submodules for External Toolchain Integration | Accepted | 2026-03-31 |
+| ADR-002 | Deliver the Project in Stages | Accepted | 2026-03-31 |
+| ADR-003 | Keep newlib Optional in the Current Phase | Accepted | 2026-03-31 |
+| ADR-004 | Require Traceable Workload References | Accepted | 2026-03-31 |
 
-### ADR-001: Git Submodules for Toolchain
+### ADR-001: Use Git Submodules for External Toolchain Integration
 
-**Context**: Need to integrate Xuantie QEMU, LLVM, and newlib which are actively developed on GitHub.
+**Context**: RVFuse depends on upstream toolchain repositories that must remain versionable and attributable.
 
-**Decision**: Use git submodules at `third_party/` directory instead of vendoring or package managers.
-
-**Consequences**:
-- (+) Explicit version tracking via submodule commits
-- (+) Easy updates via `git submodule update`
-- (-) Initial clone requires submodule initialization
-- (-) Large repository size after submodule clone
-
-### ADR-002: Python Analysis Pipeline
-
-**Context**: Analysis tools need to process profiling data, generate DFGs, and identify fusion patterns.
-
-**Decision**: Python 3.11+ for all analysis code; leverage existing libraries for graph processing and data analysis.
+**Decision**: Use `third_party/` as the integration point for external repositories and manage those integrations through Git submodule-based setup work.
 
 **Consequences**:
-- (+) Rich ecosystem for data processing (networkx for graphs, pandas for data)
-- (+) Quick prototyping and iteration
-- (+) Good CLI support via argparse/click
-- (-) Performance limitations for very large datasets
-- (-) Requires Python environment setup
+- (+) Keeps upstream provenance explicit
+- (+) Supports repeatable dependency synchronization
+- (-) First-time dependency synchronization can be slow
+- (-) Large upstream repositories increase local checkout cost
 
-### ADR-003: JSON + Markdown Output Format
+### ADR-002: Deliver the Project in Stages
 
-**Context**: Analysis results need to be both machine-parseable and human-readable.
+**Context**: The end-state research platform is broader than the current setup work.
 
-**Decision**: Use JSON for structured data (profiles, DFGs), Markdown for reports.
-
-**Consequences**:
-- (+) JSON enables downstream processing and visualization
-- (+) Markdown provides readable reports for researchers
-- (+) Both formats widely supported
-- (-) Need to maintain format consistency between JSON and Markdown
-
-### ADR-004: Modular Pipeline Architecture
-
-**Context**: Analysis workflow has distinct phases: profiling → hotspot → DFG → fusion → testing.
-
-**Decision**: Design as modular pipeline where each phase is an independent module with clear interfaces.
+**Decision**: Limit the present phase to project structure and dependency access, and defer profiling, DFG, and fusion-validation design to later features.
 
 **Consequences**:
-- (+) Each module testable independently
-- (+) Easy to swap implementations (e.g., different DFG algorithms)
-- (+) Pipeline can run partially (stop at any phase)
-- (-) More initial design effort
-- (-) Need to define clear data contracts between modules
+- (+) Prevents current documents from overcommitting future implementation work
+- (+) Makes setup validation simpler and more objective
+- (-) Some future architecture details remain intentionally unspecified
 
-### ADR-005: Local Execution Only
+### ADR-003: Keep newlib Optional in the Current Phase
 
-**Context**: This is a research tool for local workstation use.
+**Context**: Not every current scenario requires bare-metal runtime support.
 
-**Decision**: No cloud deployment, no external API calls, all execution local.
+**Decision**: Treat Xuantie newlib as optional for the current phase while preserving its canonical source reference for later scenarios.
 
 **Consequences**:
-- (+) Simple deployment, no infrastructure costs
-- (+) No security concerns for external access
-- (+) Full control over execution environment
-- (-) Cannot scale to distributed analysis
-- (-) Each researcher needs full setup
+- (+) Avoids blocking current setup on an unnecessary dependency
+- (+) Keeps future bare-metal expansion visible
+- (-) Future features must explicitly state when newlib becomes mandatory
+
+### ADR-004: Require Traceable Workload References
+
+**Context**: Future validation examples must be attributable to real sources.
+
+**Decision**: Any workload or benchmark mentioned in current-phase documents must have a traceable origin instead of being invented for convenience.
+
+**Consequences**:
+- (+) Improves credibility of future validation planning
+- (+) Reduces ambiguity in later acceptance criteria
+- (-) Workload examples cannot be added casually without source documentation
 
 ---
 
-## 6. Quality Attributes (Targets & Strategies)
+## 6. Quality Attributes
 
-### 6.1 Performance
-
-- **Targets**:
-  - Profiling workflow: <10 min for standard test application
-  - DFG generation: <5 min per hot basic block
-  - Cycle comparison: <5 min per fusion candidate
-
-- **Strategies**:
-  - Cache QEMU profiling results to avoid re-running
-  - Use efficient graph algorithms for DFG (networkx with optimized traversal)
-  - Parallelize candidate analysis where possible
-  - Limit hotspot analysis to top N functions/blocks
-
-### 6.2 Scalability
+### 6.1 Setup Clarity
 
 - **Targets**:
-  - Support applications with 10k+ functions
-  - Handle basic blocks with 100+ instructions
-  - Process 50+ fusion candidates per run
+  - Contributors can distinguish setup work from deferred research work on first read
+  - Current-phase setup verification does not depend on unfinished later-stage capabilities
 
 - **Strategies**:
-  - Streaming processing for large profiling outputs
-  - Memory-efficient DFG representation
-  - Thresholds to filter low-impact candidates
-  - Configurable analysis depth
+  - Keep current-phase and deferred-phase sections explicit
+  - Use one dependency policy across spec and architecture documents
+  - Define setup completion criteria in contributor-facing language
 
-### 6.3 Availability & Reliability
+### 6.2 Reproducibility
 
-- **Targets**: 95% successful analysis runs (research tool, not production)
+- **Targets**:
+  - Mandatory dependency status is consistent across planning documents
+  - Optional dependencies include activation conditions
+  - Dependency sources remain traceable
 
 - **Strategies**:
-  - Graceful handling of QEMU crashes
-  - Fallback paths when profiling fails
-  - Validation of input data before processing
-  - Clear error messages with actionable guidance
+  - Maintain one canonical dependency list
+  - Keep optional dependency rules near the setup guidance
+  - Preserve upstream repository references in architecture and setup documentation
 
-### 6.4 Security
+### 6.3 Reliability
 
-- **Baseline**: Local execution, no network calls
-- **Practices**:
-  - No credential storage required
-  - Sandboxed QEMU execution
-  - Input validation for configuration files
-  - No PII or sensitive data in outputs
+- **Targets**:
+  - Contributors can recover from temporary dependency acquisition failures using documented fallback guidance
+  - Current-phase setup can be validated without third-party compilation success
 
-### 6.5 Maintainability & Observability
+- **Strategies**:
+  - Document retry and fallback expectations
+  - Separate dependency acquisition from later build and execution workflows
+  - Keep current acceptance focused on structure and access, not on deferred runtime behavior
 
-- **Tests**:
-  - Unit tests for all modules (target 80% coverage)
-  - Integration tests for pipeline phases
-  - Contract tests for data format validity
+### 6.4 Scope Control
 
-- **Telemetry**:
-  - Structured logging (JSON format) to `logs/` directory
-  - Progress indicators for long-running operations
-  - Debug mode for verbose pipeline tracing
-  - Output artifacts for reproducibility
+- **Targets**:
+  - Profiling, DFG, and fusion-validation requirements do not appear as current-phase deliverables
+  - Deferred technical decisions remain visible without blocking the current phase
+
+- **Strategies**:
+  - Move future workflow capabilities into later features
+  - Record only current-phase architectural decisions here
+  - Flag future work explicitly rather than implying readiness
 
 ---
 
 ## 7. Risks & Technical Debt
 
 | ID | Risk/Debt | Impact | Mitigation/Plan |
-| ---- | ----------- |--------|-----------------|
-| R-001 | Xuantie repo availability | High | Document manual download procedure; pin to specific commits |
-| R-002 | QEMU build complexity | Medium | Provide detailed build guide; containerized build option |
-| R-003 | LLVM IR parsing changes | Medium | Version-specific parsers; abstraction layer for LLVM interface |
-| R-004 | Large submodule size | Medium | Shallow clone option for quick setup |
-| TD-001 | No visualization tooling | Low | Future: add web-based DFG visualization |
-| TD-002 | Manual fusion implementation | Low | Future: automated fused instruction template generation |
+|----|-----------|--------|-----------------|
+| R-001 | Upstream repository availability | High | Preserve canonical source links and document retry or manual fallback expectations |
+| R-002 | Large dependency footprint | Medium | Keep setup timing separate from download and build costs |
+| R-003 | Optional dependency confusion | Medium | Keep mandatory and optional status synchronized across documents |
+| TD-001 | Profiling workflow remains unspecified | Low | Define it in a later feature after setup completion |
+| TD-002 | DFG validity criteria remain unspecified | Low | Resolve in a future DFG-focused specification rather than in the setup phase |
+| TD-003 | Benchmark selection policy is only partially defined | Low | Require traceable sources and formalize selection criteria in a future validation feature |
 
 ---
 
 ## 8. Agent Checklist
 
 ### Inputs
-- **Application Binary**: RISC-V ELF executable at `builds/<app>/`
-- **Configuration**: YAML file at `configs/analysis.yaml`
-- **Thresholds**: Hotspot cutoff (cycles/frequency), DFG complexity limit
+- Project scope confirmation for the current phase
+- Repository structure expectations
+- Mandatory dependency list
+- Optional dependency list and activation conditions
+- Canonical upstream source references
 
 ### Outputs
-- **Profile Data**: JSON at `results/profiles/<app>_profile.json`
-- **Hotspot Report**: JSON at `results/profiles/<app>_hotspots.json`
-- **DFG Files**: JSON at `results/dfg/<block_id>_dfg.json`
-- **Fusion Report**: Markdown at `results/reports/<app>_fusion_report.md`
+- Current-phase setup documentation
+- Repository structure definition
+- Dependency policy with mandatory and optional status
+- Setup verification guidance
+- Deferred-work boundary notes
 
-### Data Contracts
-```json
-// Profile Data Schema
-{
-  "app_name": "string",
-  "total_cycles": "integer",
-  "functions": [
-    {
-      "name": "string",
-      "address": "hex_string",
-      "cycles": "integer",
-      "blocks": [
-        {
-          "id": "string",
-          "address": "hex_string",
-          "cycles": "integer",
-          "instruction_count": "integer"
-        }
-      ]
-    }
-  ]
-}
-
-// DFG Schema
-{
-  "block_id": "string",
-  "instructions": [
-    {
-      "id": "string",
-      "opcode": "string",
-      "operands": ["string"],
-      "type": "load|store|compute|branch"
-    }
-  ],
-  "edges": [
-    {
-      "from": "instruction_id",
-      "to": "instruction_id",
-      "dependency": "data|control"
-    }
-  ]
-}
-```
-
-### SLOs
-- Profiling: 95% success rate, <10 min runtime
-- DFG: 95% valid graphs, <5 min per block
-- Reports: Human-readable, actionable recommendations
-
-### Config
-```yaml
-# configs/analysis.yaml structure
-analysis:
-  hotspot_threshold: 1000  # minimum cycles to consider
-  top_functions: 20        # number of top functions to analyze
-  top_blocks_per_function: 5
-  fusion_patterns:
-    - pattern: "load-compute"
-      min_dependency_depth: 2
-    - pattern: "compute-compute"
-      min_dependency_depth: 3
-```
-
-### Failure Modes
-- **QEMU crash**: Retry with reduced profiling scope, log error
-- **Invalid binary**: Validate ELF format before profiling
-- **Empty profile**: Report "no candidates found" with summary
-- **Build failure**: Provide manual build guide link
-
-### Module Interfaces
-| Module | Input | Output | Interface |
-|--------|-------|--------|-----------|
-| Profiler Controller | Binary path, config | Profile JSON | `profiler.run(binary, config)` |
-| Hotspot Analyzer | Profile JSON | Hotspot JSON | `analyzer.analyze(profile, thresholds)` |
-| Block Parser | Block data | Instruction list | `parser.parse(block)` |
-| DFG Generator | Instruction list | DFG JSON | `dfg.generate(instructions)` |
-| Fusion Detector | DFG JSON | Candidates JSON | `fusion.detect(dfg, patterns)` |
-| Cycle Comparator | Original binary, fused instruction | Comparison JSON | `compare.run(original, fused)` |
+### Acceptance Guardrails
+- Do not treat hotspot analysis, DFG generation, or fusion validation as current-phase deliverables
+- Do not mark Xuantie newlib as mandatory in the current phase
+- Do not include download time, first-time dependency synchronization time, or third-party build time in the 30-minute setup target
+- Do not reference benchmark or workload examples without a traceable source
 
 ---
 
 **Notes**
 
-- All diagrams use Mermaid format for rendering in markdown viewers
-- Values are concrete (paths, thresholds, formats) for agent implementation
-- Ground-rules principles (Code Quality, Testing, UX, Performance) apply to all Python code
-- Submodule URLs verified at specification creation time
+- This document intentionally describes the current delivery phase rather than the full long-term research platform
+- Future profiling, DFG, and fusion-validation architecture should be introduced through separate feature specifications and follow-up architecture revisions
