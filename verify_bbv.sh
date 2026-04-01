@@ -41,7 +41,8 @@ EOF
 fi
 
 echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
-${WORKSPACE}/tools/docker-llvm/riscv-clang -nostdlib -o "${DEMO_ELF}" "${DEMO_SRC}"
+cd "${WORKSPACE}"
+./tools/docker-llvm/riscv-clang -nostdlib -o demo.elf demo.c
 if [ -f "${DEMO_ELF}" ]; then
     echo "[OK] Demo 编译成功: ${DEMO_ELF}"
 else
