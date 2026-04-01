@@ -6,7 +6,7 @@ set -e
 # 此脚本用于一键验证 QEMU BBV (Basic Block Vector) 插件的编译和运行流程。
 # ==============================================================================
 
-WORKSPACE="/workspace"
+WORKSPACE="."
 QEMU_DIR="${WORKSPACE}/third_party/qemu"
 DEMO_SRC="${WORKSPACE}/demo.c"
 DEMO_ELF="${WORKSPACE}/demo.elf"
