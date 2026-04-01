@@ -42,7 +42,7 @@ fi
 
 echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
 cd "${WORKSPACE}"
-./tools/docker-llvm/riscv-clang -nostdlib -o demo.elf demo.c
+./tools/docker-llvm/riscv-clang -nostdlib -mno-relax -o demo.elf demo.c
 if [ -f "${DEMO_ELF}" ]; then
     echo "[OK] Demo 编译成功: ${DEMO_ELF}"
 else
