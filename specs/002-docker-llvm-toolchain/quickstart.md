@@ -185,7 +185,7 @@ riscv-clang --version  # Uses custom image
 
 ---
 
-## Version Compatibility Note
+## Version Compatibility Note (User Story 2)
 
 The Docker toolchain uses **upstream LLVM 13.0.0**, which may differ slightly from the **Xuantie LLVM** submodule (llvmorg-13.0.0-rc1 based).
 
@@ -193,6 +193,9 @@ The Docker toolchain uses **upstream LLVM 13.0.0**, which may differ slightly fr
 - Xuantie-specific patches not in upstream
 - Different default target configurations
 - Additional RISC-V extensions
+
+**How to Verify Compatibility:**
+To ensure your binaries are compatible across both environments, you can compile the same source code with both the Docker toolchain and the submodule LLVM, then use `readelf` or `llvm-objdump` to compare the resulting ABIs and disassembly.
 
 For critical work requiring exact Xuantie compatibility, use the submodule LLVM when possible.
 
