@@ -1,6 +1,7 @@
 [submodule "third_party/qemu"]
 	path = third_party/qemu
-	url = https://github.com/XUANTIE-RV/qemu
+	url = https://github.com/Satone7/xuantie-qemu.git
+	branch = feat/add-bbv-plugin
 [submodule "third_party/llvm-project"]
 	path = third_party/llvm-project
 	url = https://github.com/XUANTIE-RV/llvm-project
