@@ -28,6 +28,8 @@ static char *filename;
 static struct qemu_plugin_scoreboard *vcpus;
 static uint64_t interval = 100000000;
 
+static void vcpu_flush_bbv(unsigned int vcpu_index, Vcpu *vcpu);
+
 static void plugin_exit(qemu_plugin_id_t id, void *p)
 {
     Vcpu *vcpu;
@@ -35,6 +37,9 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
     for (int i = 0; i < qemu_plugin_num_vcpus(); i++) {
         vcpu = qemu_plugin_scoreboard_find(vcpus, i);
         if (vcpu->file) {
+            if (vcpu->count > 0) {
+                vcpu_flush_bbv(i, vcpu);
+            }
             fclose(vcpu->file);
         }
     }
@@ -69,21 +74,10 @@ static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index)
     vcpu->file = fopen(vcpu_filename, "w");
 }
 
-static void vcpu_interval_exec(unsigned int vcpu_index, void *udata)
+static void vcpu_flush_bbv(unsigned int vcpu_index, Vcpu *vcpu)
 {
-    Vcpu *vcpu = qemu_plugin_scoreboard_find(vcpus, vcpu_index);
     GHashTableIter iter;
     void *value;
-
-    if (vcpu->count < interval) {
-        return;
-    }
-
-    if (!vcpu->file) {
-        return;
-    }
-
-    vcpu->count -= interval;
 
     fputc('T', vcpu->file);
 
@@ -104,6 +98,23 @@ static void vcpu_interval_exec(unsigned int vcpu_index, void *udata)
 
     g_rw_lock_reader_unlock(&bbs_lock);
     fputc('\n', vcpu->file);
+}
+
+static void vcpu_interval_exec(unsigned int vcpu_index, void *udata)
+{
+    Vcpu *vcpu = qemu_plugin_scoreboard_find(vcpus, vcpu_index);
+
+    if (vcpu->count < interval) {
+        return;
+    }
+
+    if (!vcpu->file) {
+        return;
+    }
+
+    vcpu->count -= interval;
+
+    vcpu_flush_bbv(vcpu_index, vcpu);
 }
 
 static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)

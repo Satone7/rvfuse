@@ -40,9 +40,9 @@ void _start() {
 EOF
 fi
 
-echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
-cd "${WORKSPACE}"
-./tools/docker-llvm/riscv-clang -nostdlib -mno-relax -o demo.elf demo.c
+# echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
+# cd "${WORKSPACE}"
+# ./tools/docker-llvm/riscv-clang -nostdlib -mno-relax -o demo.elf demo.c
 if [ -f "${DEMO_ELF}" ]; then
     echo "[OK] Demo 编译成功: ${DEMO_ELF}"
 else
@@ -87,8 +87,8 @@ cd "${WORKSPACE}"
 rm -f ${BBV_OUT}*
 
 echo "执行命令:"
-echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=100,outfile=${BBV_OUT} ${DEMO_ELF}"
-${QEMU_BIN} -plugin ${PLUGIN_SO},interval=100,outfile=${BBV_OUT} ${DEMO_ELF}
+echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
+${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}
 
 if [ -f "${BBV_OUT}.0.bb" ]; then
     echo "[OK] 成功生成 BBV 输出文件: ${BBV_OUT}.0.bb"
