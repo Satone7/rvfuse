@@ -86,3 +86,10 @@ From `memory/ground-rules.md`:
 git checkout master
 git merge --no-ff <feature-branch>
 ```
+
+## Active Technologies
+- Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases) (002-docker-llvm-toolchain)
+- N/A (stateless compilation, artifacts on host filesystem) (002-docker-llvm-toolchain)
+
+## Recent Changes
+- 002-docker-llvm-toolchain: Added Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases)
