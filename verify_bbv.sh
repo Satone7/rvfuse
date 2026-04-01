@@ -58,7 +58,7 @@ cd "${QEMU_DIR}"
 
 if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ]; then
     echo "正在配置和编译 QEMU (riscv64-linux-user) ..."
-    ./configure --target-list=riscv64-linux-user --disable-werror
+    ./configure --target-list=riscv64-linux-user --disable-werror --enable-plugins
     
     echo "正在编译 QEMU 主程序 ..."
     make -j$(nproc)
