@@ -6,7 +6,7 @@ set -e
 # 此脚本用于一键验证 QEMU BBV (Basic Block Vector) 插件的编译和运行流程。
 # ==============================================================================
 
-WORKSPACE="."
+WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QEMU_DIR="${WORKSPACE}/third_party/qemu"
 DEMO_SRC="${WORKSPACE}/demo.c"
 DEMO_ELF="${WORKSPACE}/demo.elf"
@@ -41,7 +41,7 @@ EOF
 fi
 
 echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
-${WORKSPACE}/tools/docker-llvm/riscv-clang -o "${DEMO_ELF}" "${DEMO_SRC}"
+${WORKSPACE}/tools/docker-llvm/riscv-clang -nostdlib -o "${DEMO_ELF}" "${DEMO_SRC}"
 if [ -f "${DEMO_ELF}" ]; then
     echo "[OK] Demo 编译成功: ${DEMO_ELF}"
 else
