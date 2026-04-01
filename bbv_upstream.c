@@ -14,6 +14,7 @@ typedef struct Bb {
     uint64_t vaddr;
     struct qemu_plugin_scoreboard *count;
     unsigned int index;
+    uint64_t n_insns;
 } Bb;
 
 typedef struct Vcpu {
@@ -37,7 +38,8 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
     for (int i = 0; i < qemu_plugin_num_vcpus(); i++) {
         vcpu = qemu_plugin_scoreboard_find(vcpus, i);
         if (vcpu->file) {
-            if (vcpu->count > 0) {
+            uint64_t count = qemu_plugin_u64_get(count_u64(), i);
+            if (count > 0) {
                 vcpu_flush_bbv(i, vcpu);
             }
             fclose(vcpu->file);
@@ -102,9 +104,18 @@ static void vcpu_flush_bbv(unsigned int vcpu_index, Vcpu *vcpu)
 
 static void vcpu_interval_exec(unsigned int vcpu_index, void *udata)
 {
+    Bb *bb = (Bb *)udata;
     Vcpu *vcpu = qemu_plugin_scoreboard_find(vcpus, vcpu_index);
+    uint64_t count = qemu_plugin_u64_get(count_u64(), vcpu_index);
+    uint64_t bb_count = qemu_plugin_u64_get(bb_count_u64(bb), vcpu_index);
 
-    if (vcpu->count < interval) {
+    count += bb->n_insns;
+    qemu_plugin_u64_set(count_u64(), vcpu_index, count);
+
+    bb_count += bb->n_insns;
+    qemu_plugin_u64_set(bb_count_u64(bb), vcpu_index, bb_count);
+
+    if (count < interval) {
         return;
     }
 
@@ -112,7 +123,7 @@ static void vcpu_interval_exec(unsigned int vcpu_index, void *udata)
         return;
     }
 
-    vcpu->count -= interval;
+    qemu_plugin_u64_set(count_u64(), vcpu_index, count - interval);
 
     vcpu_flush_bbv(vcpu_index, vcpu);
 }
@@ -132,16 +143,11 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
         bb->index = g_hash_table_size(bbs) + 1;
         g_hash_table_replace(bbs, &bb->vaddr, bb);
     }
+    bb->n_insns = n_insns;
     g_rw_lock_writer_unlock(&bbs_lock);
 
-    qemu_plugin_register_vcpu_tb_exec_inline_per_vcpu(
-        tb, QEMU_PLUGIN_INLINE_ADD_U64, count_u64(), n_insns);
-
-    qemu_plugin_register_vcpu_tb_exec_inline_per_vcpu(
-        tb, QEMU_PLUGIN_INLINE_ADD_U64, bb_count_u64(bb), n_insns);
-
     qemu_plugin_register_vcpu_tb_exec_cb(
-        tb, vcpu_interval_exec, QEMU_PLUGIN_CB_NO_REGS, NULL);
+        tb, vcpu_interval_exec, QEMU_PLUGIN_CB_NO_REGS, bb);
 }
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
