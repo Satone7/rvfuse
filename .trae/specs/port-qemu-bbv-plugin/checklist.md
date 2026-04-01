@@ -1,0 +1,5 @@
+- [x] `third_party/qemu/contrib/plugins/bbv.c` 代码已成功适配 QEMU 8.2 API。
+- [x] `third_party/qemu/contrib/plugins/Makefile` 包含 `bbv` 的编译配置。
+- [x] QEMU 和 Plugins 编译成功，生成了 `qemu-riscv64` 和 `libbbv.so`。
+- [x] `demo.c` 创建成功并通过 `docker-llvm/riscv-clang` 成功编译为 RISC-V ELF 文件。
+- [x] 挂载 `libbbv.so` 运行 `demo.elf` 后，成功输出了 `.bb` 文件且内容非空、格式正确。
