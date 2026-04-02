@@ -14,7 +14,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <iostream>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -41,21 +43,28 @@ static constexpr int NUM_DETECTIONS = 8400;
 // Image preprocessing
 // ---------------------------------------------------------------------------
 
-// Preprocess an image: bilinear resize to INPUT_WIDTH x INPUT_HEIGHT,
-// convert HWC to CHW, and normalize pixel values to [0, 1].
+// Preprocess an image: load via stb_image, bilinear resize to
+// INPUT_WIDTH x INPUT_HEIGHT, convert HWC to CHW, and normalize
+// pixel values to [0, 1].
 //
 // Parameters:
-//   img_data  - raw pixel data from stb_image (HWC, uint8)
-//   src_w     - source image width
-//   src_h     - source image height
-//   src_channels - source image channels (must be 3)
+//   image_path - path to the image file
 //
 // Returns:
 //   Vector of float with size INPUT_CHANNELS * INPUT_HEIGHT * INPUT_WIDTH
 //   in CHW order, normalized to [0, 1].
-static std::vector<float> preprocess_image(const unsigned char* img_data,
-                                           int src_w, int src_h,
-                                           int src_channels) {
+static std::vector<float> preprocess_image(const char* image_path) {
+    int src_w = 0, src_h = 0, src_channels = 0;
+    unsigned char* img_data = stbi_load(image_path, &src_w, &src_h,
+                                        &src_channels, INPUT_CHANNELS);
+    if (!img_data) {
+        std::fprintf(stderr, "Error: failed to load image '%s'\n", image_path);
+        return {};
+    }
+
+    std::fprintf(stdout, "Loaded image: %dx%d (%d channels)\n",
+                 src_w, src_h, INPUT_CHANNELS);
+
     const int dst_w = INPUT_WIDTH;
     const int dst_h = INPUT_HEIGHT;
     const int channels = INPUT_CHANNELS;
@@ -111,6 +120,7 @@ static std::vector<float> preprocess_image(const unsigned char* img_data,
         }
     }
 
+    stbi_image_free(img_data);
     return output;
 }
 
@@ -218,7 +228,7 @@ static std::vector<Detection> apply_nms(const float* output_data,
         for (size_t j = i + 1; j < candidates.size(); ++j) {
             if (suppressed[j]) continue;
             float iou = compute_iou(candidates[i], candidates[j]);
-            if (iou > NMS_THRESHOLD) {
+            if (iou > NMS_THRESHOLD && candidates[i].class_id == candidates[j].class_id) {
                 suppressed[j] = true;
             }
         }
@@ -243,104 +253,102 @@ int main(int argc, char* argv[]) {
     // ------------------------------------------------------------------
     // 1. Load and preprocess image
     // ------------------------------------------------------------------
-    int img_w = 0, img_h = 0, img_channels = 0;
-    unsigned char* img_data = stbi_load(image_path, &img_w, &img_h,
-                                        &img_channels, INPUT_CHANNELS);
-    if (!img_data) {
-        std::fprintf(stderr, "Error: failed to load image '%s'\n", image_path);
+    std::vector<float> input_tensor = preprocess_image(image_path);
+    if (input_tensor.empty()) {
         return 1;
     }
 
-    std::fprintf(stdout, "Loaded image: %dx%d (%d channels)\n",
-                 img_w, img_h, INPUT_CHANNELS);
+    try {
+        // --------------------------------------------------------------
+        // 2. Initialize ONNX Runtime environment and load model
+        // --------------------------------------------------------------
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "yolo-inference");
 
-    std::vector<float> input_tensor = preprocess_image(
-        img_data, img_w, img_h, INPUT_CHANNELS);
-    stbi_image_free(img_data);
+        Ort::SessionOptions session_options;
+        session_options.SetIntraOpNumThreads(1);
+        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
-    // ------------------------------------------------------------------
-    // 2. Initialize ONNX Runtime environment and load model
-    // ------------------------------------------------------------------
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "yolo-inference");
+        Ort::Session session(env, model_path, session_options);
 
-    Ort::SessionOptions session_options;
-    session_options.SetIntraOpNumThreads(1);
-    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        // --------------------------------------------------------------
+        // 3. Prepare input tensor
+        // --------------------------------------------------------------
+        Ort::AllocatorWithDefaultOptions allocator;
 
-    Ort::Session session(env, model_path, session_options);
+        auto input_name_alloc = session.GetInputNameAllocated(0, allocator);
+        const char* input_name = input_name_alloc.get();
 
-    // ------------------------------------------------------------------
-    // 3. Prepare input tensor
-    // ------------------------------------------------------------------
-    // Query input node info
-    Ort::AllocatorWithDefaultOptions allocator;
+        auto input_type_info = session.GetInputTypeInfo(0);
+        auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
+        auto input_shape = input_tensor_info.GetShape();
 
-    auto input_name_alloc = session.GetInputNameAllocated(0, allocator);
-    const char* input_name = input_name_alloc.get();
+        std::vector<int64_t> input_dims = {1, INPUT_CHANNELS, INPUT_HEIGHT, INPUT_WIDTH};
+        size_t input_tensor_size = INPUT_CHANNELS * INPUT_HEIGHT * INPUT_WIDTH;
 
-    auto input_type_info = session.GetInputTypeInfo(0);
-    auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
-    auto input_shape = input_tensor_info.GetShape();
+        auto memory_info = Ort::MemoryInfo::CreateCpu(
+            OrtArenaAllocator, OrtMemTypeDefault);
 
-    std::vector<int64_t> input_dims = {1, INPUT_CHANNELS, INPUT_HEIGHT, INPUT_WIDTH};
-    size_t input_tensor_size = INPUT_CHANNELS * INPUT_HEIGHT * INPUT_WIDTH;
+        Ort::Value input_tensor_ort = Ort::Value::CreateTensor<float>(
+            memory_info, input_tensor.data(), input_tensor_size,
+            input_dims.data(), input_dims.size());
 
-    auto memory_info = Ort::MemoryInfo::CreateCpu(
-        OrtArenaAllocator, OrtMemTypeDefault);
+        // --------------------------------------------------------------
+        // 4. Run inference
+        // --------------------------------------------------------------
+        auto output_name_alloc = session.GetOutputNameAllocated(0, allocator);
+        const char* output_name = output_name_alloc.get();
 
-    Ort::Value input_tensor_ort = Ort::Value::CreateTensor<float>(
-        memory_info, input_tensor.data(), input_tensor_size,
-        input_dims.data(), input_dims.size());
+        const char* input_names[] = {input_name};
+        const char* output_names[] = {output_name};
 
-    // ------------------------------------------------------------------
-    // 4. Run inference
-    // ------------------------------------------------------------------
-    auto output_name_alloc = session.GetOutputNameAllocated(0, allocator);
-    const char* output_name = output_name_alloc.get();
+        std::fprintf(stdout, "Running inference...\n");
 
-    const char* input_names[] = {input_name};
-    const char* output_names[] = {output_name};
+        auto output_tensors = session.Run(
+            Ort::RunOptions{nullptr},
+            input_names, &input_tensor_ort, 1,
+            output_names, 1);
 
-    std::fprintf(stdout, "Running inference...\n");
+        // --------------------------------------------------------------
+        // 5. Post-process: parse output, apply NMS
+        // --------------------------------------------------------------
+        Ort::Value& output_tensor = output_tensors[0];
+        auto output_type_info = output_tensor.GetTensorTypeAndShapeInfo();
+        auto output_shape = output_type_info.GetShape();
 
-    auto output_tensors = session.Run(
-        Ort::RunOptions{nullptr},
-        input_names, &input_tensor_ort, 1,
-        output_names, 1);
+        // Expected shape: [1, 84, 8400]
+        std::fprintf(stdout, "Output shape: [%lld, %lld, %lld]\n",
+                     static_cast<long long>(output_shape[0]),
+                     static_cast<long long>(output_shape[1]),
+                     static_cast<long long>(output_shape[2]));
 
-    // ------------------------------------------------------------------
-    // 5. Post-process: parse output, apply NMS
-    // ------------------------------------------------------------------
-    Ort::Value& output_tensor = output_tensors[0];
-    auto output_type_info = output_tensor.GetTensorTypeAndShapeInfo();
-    auto output_shape = output_type_info.GetShape();
+        const float* output_data = output_tensor.GetTensorData<float>();
 
-    // Expected shape: [1, 84, 8400]
-    std::fprintf(stdout, "Output shape: [%lld, %lld, %lld]\n",
-                 static_cast<long long>(output_shape[0]),
-                 static_cast<long long>(output_shape[1]),
-                 static_cast<long long>(output_shape[2]));
+        int out_rows = static_cast<int>(output_shape[1]);
+        int out_cols = static_cast<int>(output_shape[2]);
 
-    const float* output_data = output_tensor.GetTensorData<float>();
+        std::vector<Detection> detections = apply_nms(output_data, out_rows, out_cols);
 
-    int out_rows = static_cast<int>(output_shape[1]);
-    int out_cols = static_cast<int>(output_shape[2]);
+        // --------------------------------------------------------------
+        // 6. Print results
+        // --------------------------------------------------------------
+        std::fprintf(stdout, "\nDetections: %zu\n", detections.size());
+        std::fprintf(stdout, "%-8s %-12s %-10s %-10s %-10s %-10s\n",
+                     "Class", "Confidence", "cx", "cy", "w", "h");
+        std::fprintf(stdout, "------  -----------  ----------  ----------  "
+                             "----------  ----------\n");
 
-    std::vector<Detection> detections = apply_nms(output_data, out_rows, out_cols);
+        for (const auto& det : detections) {
+            std::fprintf(stdout, "%-8d %-12.4f %-10.2f %-10.2f %-10.2f %-10.2f\n",
+                         det.class_id, det.confidence,
+                         det.x, det.y, det.w, det.h);
+        }
 
-    // ------------------------------------------------------------------
-    // 6. Print results
-    // ------------------------------------------------------------------
-    std::fprintf(stdout, "\nDetections: %zu\n", detections.size());
-    std::fprintf(stdout, "%-8s %-12s %-10s %-10s %-10s %-10s\n",
-                 "Class", "Confidence", "cx", "cy", "w", "h");
-    std::fprintf(stdout, "------  -----------  ----------  ----------  "
-                         "----------  ----------\n");
-
-    for (const auto& det : detections) {
-        std::fprintf(stdout, "%-8d %-12.4f %-10.2f %-10.2f %-10.2f %-10.2f\n",
-                     det.class_id, det.confidence,
-                     det.x, det.y, det.w, det.h);
+    } catch (const Ort::Exception& e) {
+        std::fprintf(stderr, "ONNX Runtime error: %s\n", e.what());
+        return 1;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "Error: %s\n", e.what());
+        return 1;
     }
 
     return 0;
