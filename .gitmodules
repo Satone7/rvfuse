@@ -1,3 +1,6 @@
 [submodule "third_party/llvm-project"]
 	path = third_party/llvm-project
 	url = https://github.com/XUANTIE-RV/llvm-project
+[submodule "third_party/qemu"]
+	path = third_party/qemu
+	url = https://github.com/Satone7/xuantie-qemu.git
