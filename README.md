@@ -31,8 +31,10 @@ RVFuse/
 | Dependency | Source | Status |
 |------------|--------|--------|
 | Xuantie QEMU | https://github.com/XUANTIE-RV/qemu | Mandatory |
-| Xuantie LLVM | https://github.com/XUANTIE-RV/llvm-project | Mandatory |
+| Xuantie LLVM | https://github.com/XUANTIE-RV/llvm-project | Mandatory (Alternative available) |
 | Xuantie newlib | https://github.com/XUANTIE-RV/newlib | Optional |
+
+> **Note on LLVM**: If your hardware cannot build the `llvm-project` submodule from source, you can use the [Docker LLVM Toolchain](docs/docker-llvm-guide.md) provided in `tools/docker-llvm/` as a lightweight alternative.
 
 ## Current Phase Scope
 
