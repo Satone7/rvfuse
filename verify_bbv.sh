@@ -6,6 +6,11 @@ set -e
 # 此脚本用于一键验证 QEMU BBV (Basic Block Vector) 插件的编译和运行流程。
 # ==============================================================================
 
+FORCE_REBUILD=false
+if [ "$1" = "--force-rebuild" ] || [ "$1" = "-f" ]; then
+    FORCE_REBUILD=true
+fi
+
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QEMU_DIR="${WORKSPACE}/third_party/qemu"
 DEMO_SRC="${WORKSPACE}/demo.c"
@@ -40,9 +45,9 @@ void _start() {
 EOF
 fi
 
-echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
-cd "${WORKSPACE}"
-./tools/docker-llvm/riscv-clang -nostdlib -mno-relax -o demo.elf demo.c
+# echo "使用 docker-llvm/riscv-clang 编译 demo.c ..."
+# cd "${WORKSPACE}"
+# ./tools/docker-llvm/riscv-clang -nostdlib -mno-relax -o demo.elf demo.c
 if [ -f "${DEMO_ELF}" ]; then
     echo "[OK] Demo 编译成功: ${DEMO_ELF}"
 else
@@ -56,7 +61,10 @@ echo "2. 编译 QEMU 及 BBV 插件"
 echo "========================================"
 cd "${QEMU_DIR}"
 
-if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ]; then
+if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ] || [ "${FORCE_REBUILD}" = true ]; then
+    if [ "${FORCE_REBUILD}" = true ]; then
+        echo "强制重新编译模式 (--force-rebuild)"
+    fi
     echo "正在配置和编译 QEMU (riscv64-linux-user) ..."
     ./configure --target-list=riscv64-linux-user --disable-werror --enable-plugins
     
@@ -67,7 +75,7 @@ if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ]; then
     make plugins
 else
     echo "QEMU 和插件已存在，跳过编译步骤以节省时间。"
-    echo "如果需要重新编译，请先删除 ${QEMU_BIN} 或 ${PLUGIN_SO}"
+    echo "如需重新编译，请使用 -f 或 --force-rebuild 参数。"
 fi
 
 if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ]; then
@@ -87,8 +95,8 @@ cd "${WORKSPACE}"
 rm -f ${BBV_OUT}*
 
 echo "执行命令:"
-echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=100,outfile=${BBV_OUT} ${DEMO_ELF}"
-${QEMU_BIN} -plugin ${PLUGIN_SO},interval=100,outfile=${BBV_OUT} ${DEMO_ELF}
+echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
+${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}
 
 if [ -f "${BBV_OUT}.0.bb" ]; then
     echo "[OK] 成功生成 BBV 输出文件: ${BBV_OUT}.0.bb"

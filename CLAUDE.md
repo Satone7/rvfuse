@@ -87,6 +87,10 @@ git checkout master
 git merge --no-ff <feature-branch>
 ```
 
+## Environment Variables
+
+- **`MY_GITHUB_TOKEN`**: GitHub personal access token. Required when using `gh` CLI or any tool that authenticates with GitHub. Set via `export MY_GITHUB_TOKEN=<token>` before running commands.
+
 ## Active Technologies
 - Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases) (002-docker-llvm-toolchain)
 - N/A (stateless compilation, artifacts on host filesystem) (002-docker-llvm-toolchain)

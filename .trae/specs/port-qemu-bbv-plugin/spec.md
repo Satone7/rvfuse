@@ -4,7 +4,8 @@
 当前项目的玄铁 QEMU (版本 8.2) 缺少官方最新 QEMU 中的 `bbv` 插件（用于生成 SimPoint 的基本块向量 Basic Block Vectors）。为了支持相关的性能分析和插桩工作，需要将官方的 `bbv.c` 适配并移植到当前项目的 QEMU 中，并通过实际的 Demo 验证其工作正常。
 
 ## What Changes
-- 将官方 `bbv.c` 源码拷贝至 `/workspace/third_party/qemu/contrib/plugins/bbv.c`。
+- 基于官方 `bbv.c` 源码适配移植（上游源码：https://raw.githubusercontent.com/qemu/qemu/refs/heads/master/contrib/plugins/bbv.c）。
+- 将适配后的 `bbv.c` 放置于 `third_party/qemu/contrib/plugins/bbv.c`。
 - 修改 `bbv.c` 以兼容当前 QEMU 8.2 的 Plugin API：
   - 移除对 QEMU 9.x 新增接口 `qemu_plugin_register_vcpu_tb_exec_cond_cb` 的调用。
   - 替换为 `qemu_plugin_register_vcpu_tb_exec_cb`。
