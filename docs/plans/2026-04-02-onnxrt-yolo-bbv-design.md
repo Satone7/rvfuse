@@ -234,3 +234,13 @@ python3 ./tools/analyze_bbv.py \
 | QEMU 模拟运行时间过长 | 用 YOLO11n (最小模型)，必要时缩小输入 |
 | BBV 输出数据量过大 | 调整 interval 参数，先用大值测试 |
 | DWARF 信息不完整 | 确保编译时 -g 选项，验证 addr2line 输出 |
+
+## 验证清单
+
+- [ ] Docker build completes without errors
+- [ ] `output/yolo_inference` is valid RISC-V ELF
+- [ ] `output/yolo11n.onnx` is valid ONNX model (~5.4MB)
+- [ ] `output/test_image.jpg` is valid image
+- [ ] BBV profiling produces valid .bbv file
+- [ ] `analyze_bbv.py` generates report with hot functions/blocks
+- [ ] addr2line resolves PC addresses to source locations
