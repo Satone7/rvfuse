@@ -39,3 +39,7 @@ dist/
 
 # Coverage (future)
 coverage/
+
+# ONNX Runtime + YOLO build artifacts
+output/*
+!output/.gitkeep
