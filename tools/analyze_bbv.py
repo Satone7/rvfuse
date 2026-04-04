@@ -1,121 +1,178 @@
 #!/usr/bin/env python3
-"""
-BBV 分析脚本：计算基本块执行次数并排序
-用法: python3 analyze_bbv.py <bb_file> <disas_file>
+"""Parse QEMU BBV output and generate hotspot reports.
+
+Maps basic block addresses to source locations using addr2line
+and prints the most frequently executed blocks.
 """
 
-import re
+import argparse
+import subprocess
 import sys
-from collections import defaultdict
+from pathlib import Path
 
 
-def parse_disas(disas_file):
-    """从 .disas 文件解析每个 BB 的指令数"""
-    bb_insns = {}
-    bb_vaddr = {}
+def parse_bbv(bbv_path):
+    """Parse BBV file into list of (address, count) tuples.
 
-    with open(disas_file, 'r') as f:
-        for line in f:
-            # 匹配: BB 3 (vaddr: 0x1113a, 3 insns):
-            m = re.match(r'BB (\d+) \(vaddr: (0x[0-9a-f]+), (\d+) insns\)', line)
-            if m:
-                bb_num = int(m.group(1))
-                bb_insns[bb_num] = int(m.group(3))
-                bb_vaddr[bb_num] = m.group(2)
+    Supports two formats:
+    - Native QEMU BBV: T:bb_id:insn_count (with companion .disas for addresses)
+    - Simple: address count (e.g. 0x10000 42)
+    """
+    bbv_file = Path(bbv_path)
+    blocks = []
 
-    return bb_insns, bb_vaddr
+    with open(bbv_file) as f:
+        first_line = f.readline().strip()
 
+    # Detect native QEMU BBV format (T:bb_id:insn_count)
+    if first_line.startswith("T:"):
+        disas_path = bbv_file.with_suffix(".disas")
+        if not disas_path.exists():
+            print(
+                f"Error: native BBV format detected but disas file not found: {disas_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-def parse_bb(bb_file):
-    """从 .bb 文件解析每个 BB 的累计指令执行数"""
-    bb_total_insns = defaultdict(int)
-    interval_count = 0
+        bb_addr_map = {}
+        with open(disas_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) >= 1:
+                    try:
+                        bb_id = int(parts[0])
+                    except ValueError:
+                        continue
+                    if len(parts) >= 2 and parts[1].startswith("0x"):
+                        bb_addr_map[bb_id] = int(parts[1], 16)
+                    elif len(parts) >= 2:
+                        try:
+                            bb_addr_map[bb_id] = int(parts[1], 16)
+                        except ValueError:
+                            pass
 
-    with open(bb_file, 'r') as f:
+        with open(bbv_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or not line.startswith("T:"):
+                    continue
+                parts = line.split(":")
+                if len(parts) < 3:
+                    continue
+                try:
+                    bb_id = int(parts[1])
+                    count = int(parts[2])
+                except ValueError:
+                    continue
+                addr = bb_addr_map.get(bb_id)
+                if addr is not None:
+                    blocks.append((addr, count))
+        return blocks
+
+    # Simple format: address count
+    with open(bbv_file) as f:
         for line in f:
             line = line.strip()
-            if not line:
+            if not line or line.startswith("#"):
                 continue
-            if line.startswith('T'):
-                interval_count += 1
-                # 格式: T:3:12 :7:10 :9:16 ...
-                # 移除开头的 'T'，然后按空格分割
-                content = line[1:].strip()
-                parts = content.split()
-                for part in parts:
-                    # 格式可能是 "3:12" 或 ":3:12" (首个元素)
-                    part = part.lstrip(':')
-                    if ':' in part:
-                        bb_num, insns = part.split(':')
-                        bb_total_insns[int(bb_num)] += int(insns)
-
-    return bb_total_insns, interval_count
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            addr = int(parts[0], 16) if parts[0].startswith("0x") else int(parts[0])
+            blocks.append((addr, int(parts[1])))
+    return blocks
 
 
-def analyze(bb_file, disas_file):
-    """分析并输出 BB 执行次数排序"""
-    bb_insns, bb_vaddr = parse_disas(disas_file)
-    bb_total_insns, interval_count = parse_bb(bb_file)
+def resolve_addresses(blocks, elf_path):
+    """Resolve addresses to source locations via addr2line."""
+    if not blocks:
+        return []
 
-    # 计算执行次数
-    results = []
-    for bb_num in sorted(bb_total_insns.keys()):
-        total_insns = bb_total_insns[bb_num]
-        insns_per_exec = bb_insns.get(bb_num, 1)
-        exec_count = total_insns // insns_per_exec
-        vaddr = bb_vaddr.get(bb_num, 'unknown')
-        results.append({
-            'bb': bb_num,
-            'vaddr': vaddr,
-            'exec_count': exec_count,
-            'total_insns': total_insns,
-            'insns_per_exec': insns_per_exec
-        })
+    addresses = [f"0x{a:x}" for a, _ in blocks]
+    batch_size = 500
+    all_resolved = []
 
-    # 按执行次数降序排序
-    results.sort(key=lambda x: -x['exec_count'])
+    for batch_start in range(0, len(addresses), batch_size):
+        batch_addrs = addresses[batch_start : batch_start + batch_size]
+        batch_blocks = blocks[batch_start : batch_start + batch_size]
+        cmd = ["addr2line", "-f", "-e", elf_path] + batch_addrs
 
-    # 输出结果
-    print("=" * 70)
-    print("基本块执行次数排序分析")
-    print("=" * 70)
-    print(f"输入文件: {bb_file}, {disas_file}")
-    print(f"时间间隔数: {interval_count}")
-    print(f"基本块总数: {len(results)}")
-    print("=" * 70)
-    print()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            print(f"Warning: addr2line failed: {exc}", file=sys.stderr)
+            all_resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
 
-    # 表头
-    print(f"{'排名':<6} {'BB#':<6} {'地址':<12} {'执行次数':<12} {'累计指令':<12} {'BB指令数':<10}")
-    print("-" * 70)
+        if result.returncode != 0:
+            print(f"Warning: addr2line exited with code {result.returncode}", file=sys.stderr)
+            all_resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
 
-    # 表格内容
-    for rank, r in enumerate(results, 1):
-        print(f"{rank:<6} {r['bb']:<6} {r['vaddr']:<12} {r['exec_count']:<12} {r['total_insns']:<12} {r['insns_per_exec']:<10}")
-
-    print()
-    print("=" * 70)
-    print("热点基本块 (执行次数 Top 5):")
-    print("=" * 70)
-    for rank, r in enumerate(results[:5], 1):
-        print(f"#{rank} BB {r['bb']} @ {r['vaddr']}")
-        print(f"   执行次数: {r['exec_count']}, 累计指令: {r['total_insns']}, BB大小: {r['insns_per_exec']} 条指令")
-        print()
-
-    return results
+        lines = result.stdout.strip().split("\n")
+        for i, (addr, count) in enumerate(batch_blocks):
+            if 2 * i + 1 < len(lines):
+                func = lines[2 * i].strip()
+                loc = lines[2 * i + 1].strip()
+                all_resolved.append((addr, count, f"{func} ({loc})"))
+            else:
+                all_resolved.append((addr, count, "??"))
+    return all_resolved
 
 
-if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print(f"用法: {sys.argv[0]} <bb_file> <disas_file>")
-        print(f"示例: {sys.argv[0]} bbv.out.0.bb bbv.out.disas")
+def generate_report(resolved, top_n=20):
+    """Generate a sorted hotspot report string."""
+    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
+    total = sum(c for _, c, _ in resolved)
+    show = min(top_n, len(sorted_blocks))
+
+    lines = [
+        "=" * 72,
+        "BBV Hotspot Report",
+        "=" * 72,
+        f"Total basic blocks: {len(resolved)}",
+        f"Total executions:   {total}",
+        f"Showing top {show} blocks",
+        "",
+        f"{'Rank':<6}{'Address':<18}{'Count':<14}{'% Total':<10}Location",
+        "-" * 72,
+    ]
+    for rank, (addr, count, location) in enumerate(sorted_blocks[:show], 1):
+        pct = (count / total * 100) if total else 0
+        lines.append(
+            f"{rank:<6}0x{addr:016x}  {count:<14}{pct:>6.2f}%    {location}"
+        )
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze QEMU BBV output and generate hotspot report"
+    )
+    parser.add_argument("--bbv", required=True, help="Path to .bbv file")
+    parser.add_argument("--elf", required=True, help="Path to RISC-V ELF binary")
+    parser.add_argument("--top", type=int, default=20, help="Top N blocks")
+    parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    args = parser.parse_args()
+
+    blocks = parse_bbv(args.bbv)
+    if not blocks:
+        print("Error: no basic blocks found in BBV file", file=sys.stderr)
         sys.exit(1)
+    print(f"Parsed {len(blocks)} basic blocks from {args.bbv}")
 
-    bb_file = sys.argv[1]
-    disas_file = sys.argv[2]
+    resolved = resolve_addresses(blocks, args.elf)
+    report = generate_report(resolved, args.top)
 
-    try:
-        analyze(bb_file, disas_file)
-    except FileNotFoundError as e:
-        print(f"错误: 文件不存在 - {e}")
-        sys.exit(1)
+    if args.output:
+        Path(args.output).write_text(report + "\n")
+        print(f"Report written to {args.output}")
+    else:
+        print(report)
+
+
+if __name__ == "__main__":
+    main()

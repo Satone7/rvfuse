@@ -40,6 +40,10 @@ dist/
 # Coverage (future)
 coverage/
 
+# ONNX Runtime + YOLO build artifacts
+output/*
+!output/.gitkeep
+
 # BBV plugin output files
 bbv.out*.bb
 bbv.out*.disas

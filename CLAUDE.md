@@ -12,6 +12,10 @@ RVFuse is a RISC-V instruction fusion research platform. The long-term goal is t
 
 **Current Phase**: Setup foundation (repository structure, dependency references, setup guidance). Research workflows are deferred to future features.
 
+## Active Technologies
+
+- C++17 (yolo_runner.cpp), Docker (RISC-V native build), Python 3 (analyze_bbv.py, prepare_model.sh), Git submodules (QEMU, ONNX Runtime source)
+
 ## Key Commands
 
 ```bash
@@ -26,6 +30,26 @@ git merge --no-ff <branch-name>
 
 # Update submodules to latest
 git submodule update --remote
+
+# Export YOLO11n ONNX model and download test image
+./prepare_model.sh
+
+# Build QEMU with BBV plugin support (first time only)
+./verify_bbv.sh
+
+# Docker build ONNX Runtime + YOLO runner for RISC-V
+./tools/docker-onnxrt/build.sh
+
+# Run BBV profiling on the YOLO binary
+# Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
+qemu-riscv64 -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
+  ./output/yolo_inference ./output/yolo11n.onnx ./output/test.jpg
+
+# Generate hotspot report from BBV data
+python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference
+
+# Run analyze_bbv.py tests
+cd tools && python3 -m pytest test_analyze_bbv.py -v
 ```
 
 ## Architecture Decisions (ADRs)
@@ -60,6 +84,12 @@ RVFuse/
 | Xuantie LLVM | https://github.com/XUANTIE-RV/llvm-project | Mandatory |
 | Xuantie newlib | https://github.com/XUANTIE-RV/newlib | Optional |
 
+## Code Style
+
+- C++: camelCase functions/variables, PascalCase for ONNX Runtime API types, single-responsibility functions under 50 lines
+- Python: snake_case, type hints on public functions, stdlib-only (no external deps for analyze_bbv.py)
+- Shell: `set -euo pipefail`, `SCRIPT_DIR` pattern for paths, no unquoted variables
+
 ## Development Workflow
 
 This project uses the Rainbow workflow for feature development:
@@ -91,9 +121,11 @@ git merge --no-ff <feature-branch>
 
 - **`MY_GITHUB_TOKEN`**: GitHub personal access token. Required when using `gh` CLI or any tool that authenticates with GitHub. Set via `export MY_GITHUB_TOKEN=<token>` before running commands.
 
-## Active Technologies
-- Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases) (002-docker-llvm-toolchain)
-- N/A (stateless compilation, artifacts on host filesystem) (002-docker-llvm-toolchain)
-
 ## Recent Changes
+
+- 001-riscv-fusion-setup: Added N/A (documentation-only phase) + Git (for submodule integration), Markdown rendering
 - 002-docker-llvm-toolchain: Added Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases)
+- ONNX Runtime + YOLO native build: Added Docker pipeline, YOLO runner (C++), BBV analysis tool (Python), model preparation and QEMU verification scripts
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->
