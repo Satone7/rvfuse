@@ -1,11 +1,4 @@
-# Stage 1: Build environment with toolchain packages
-FROM --platform=riscv64 riscv64/ubuntu:24.04 AS build-env
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        cmake g++ ninja-build python3 git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Stage 2: Build ONNX Runtime from source
+# Stage 1: Build ONNX Runtime from source
 FROM --platform=riscv64 riscv64/ubuntu:24.04 AS onnxrt-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,7 +22,7 @@ RUN --mount=type=cache,target=/onnxruntime/build \
         --cmake_extra_defines \
             onnxruntime_BUILD_UNIT_TESTS=OFF
 
-# Stage 3: Compile YOLO runner and link statically
+# Stage 2: Compile YOLO runner and link statically
 FROM --platform=riscv64 riscv64/ubuntu:24.04 AS runner-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,7 +40,7 @@ COPY tools/yolo_runner/ /runner/
 
 WORKDIR /runner
 
-RUN g++ -std=c++17 -O2 -g -static \
+RUN mkdir -p /out && g++ -std=c++17 -O2 -g -static \
         -I/onnxruntime/include \
         -I/runner \
         yolo_runner.cpp \

@@ -20,6 +20,7 @@ DOCKER_BUILDKIT=1 docker build \
 CONTAINER_ID=$(docker create rvfuse-yolo-builder)
 docker cp "${CONTAINER_ID}:/yolo_inference" "${OUTPUT_DIR}/yolo_inference"
 docker rm "${CONTAINER_ID}" > /dev/null
+docker rmi rvfuse-yolo-builder > /dev/null 2>&1 || true
 
 echo "=== Build complete ==="
 file "${OUTPUT_DIR}/yolo_inference"

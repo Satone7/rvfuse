@@ -7,7 +7,7 @@ OUTPUT_DIR="${SCRIPT_DIR}/output"
 check_or_install() {
     if ! python3 -c "import $1" 2>/dev/null; then
         echo "Installing $1..."
-        pip3 install "$1"
+        pip3 install --break-system-packages "$1"
     fi
 }
 
