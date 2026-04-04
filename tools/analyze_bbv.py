@@ -41,6 +41,10 @@ def resolve_addresses(blocks, elf_path):
         print(f"Warning: addr2line failed: {exc}", file=sys.stderr)
         return [(a, c, "??") for a, c in blocks]
 
+    if result.returncode != 0:
+        print(f"Warning: addr2line exited with code {result.returncode}", file=sys.stderr)
+        return [(a, c, "??") for a, c in blocks]
+
     lines = result.stdout.strip().split("\n")
     resolved = []
     for i, (addr, count) in enumerate(blocks):

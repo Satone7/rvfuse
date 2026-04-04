@@ -1,48 +1,115 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-QEMU_DIR="${SCRIPT_DIR}/third_party/qemu"
+# ==============================================================================
+# QEMU BBV Plugin Verification Script
+# ==============================================================================
 
-echo "=== Building QEMU with BBV plugin ==="
+FORCE_REBUILD=false
+if [ "${1:-}" = "--force-rebuild" ] || [ "${1:-}" = "-f" ]; then
+    FORCE_REBUILD=true
+fi
 
+WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QEMU_DIR="${WORKSPACE}/third_party/qemu"
+DEMO_SRC="${WORKSPACE}/demo.c"
+DEMO_ELF="${WORKSPACE}/demo.elf"
+BBV_OUT="${WORKSPACE}/bbv.out"
+QEMU_BIN="${QEMU_DIR}/build/qemu-riscv64"
+PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/libbbv.so"
+
+echo "========================================"
+echo "1. Verify Demo test program"
+echo "========================================"
+if [ ! -f "${DEMO_SRC}" ]; then
+    echo "demo.c not found, creating..."
+    cat << 'EOF' > "${DEMO_SRC}"
+void _start() {
+    int sum = 0;
+    for (int i = 0; i < 1000; i++) {
+        if (i % 2 == 0) {
+            sum += i;
+        } else {
+            sum -= i;
+        }
+    }
+
+    // exit syscall
+    asm volatile(
+        "li a7, 93\n\t" // sys_exit
+        "li a0, 0\n\t"  // status 0
+        "ecall\n\t"
+    );
+}
+EOF
+fi
+
+if [ -f "${DEMO_ELF}" ]; then
+    echo "[OK] Demo compiled: ${DEMO_ELF}"
+else
+    echo "[ERROR] Demo binary not found at ${DEMO_ELF}"
+    exit 1
+fi
+echo ""
+
+echo "========================================"
+echo "2. Build QEMU and BBV plugin"
+echo "========================================"
 if [ ! -d "${QEMU_DIR}/.git" ]; then
     echo "Initializing QEMU submodule..."
     git submodule update --init --depth 1 third_party/qemu
 fi
 
 cd "${QEMU_DIR}"
-mkdir -p build
-cd build
 
-echo "Configuring QEMU (riscv64-linux-user, plugins enabled)..."
-../configure \
-    --target-list=riscv64-linux-user \
-    --disable-werror \
-    --enable-plugins
+if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ] || [ "${FORCE_REBUILD}" = true ]; then
+    if [ "${FORCE_REBUILD}" = true ]; then
+        echo "Force rebuild mode (--force-rebuild)"
+    fi
+    echo "Configuring QEMU (riscv64-linux-user, plugins enabled)..."
+    mkdir -p build
+    cd build
+    ../configure --target-list=riscv64-linux-user --disable-werror --enable-plugins
 
-echo "Building QEMU..."
-make -j"$(nproc)"
+    echo "Building QEMU..."
+    make -j"$(nproc)"
 
-echo "Building BBV plugin..."
-make plugins
+    echo "Building BBV plugin..."
+    make plugins
+    cd "${QEMU_DIR}"
+else
+    echo "QEMU and plugin already built, skipping."
+    echo "Use -f or --force-rebuild to rebuild."
+fi
 
-BINARY="${PWD}/qemu-riscv64"
-PLUGIN="${PWD}/contrib/plugins/libbbv.so"
-
-if [ ! -f "${BINARY}" ]; then
-    echo "Error: qemu-riscv64 not found at ${BINARY}" >&2
+if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ]; then
+    echo "[OK] QEMU and BBV plugin built successfully."
+else
+    echo "[ERROR] QEMU or plugin build failed!"
     exit 1
 fi
-echo "QEMU binary: ${BINARY}"
-
-if [ ! -f "${PLUGIN}" ]; then
-    echo "Error: libbbv.so not found at ${PLUGIN}" >&2
-    exit 1
-fi
-echo "BBV plugin: ${PLUGIN}"
-
 echo ""
-echo "=== QEMU+BBV build complete ==="
-echo "To profile a binary:"
-echo "  ${BINARY} -plugin ${PLUGIN},interval=10000,outfile=output/prof.bbv -- ./output/yolo_inference ./output/yolo11n.onnx ./output/test.jpg"
+
+echo "========================================"
+echo "3. Run BBV plugin verification"
+echo "========================================"
+cd "${WORKSPACE}"
+
+# Clean old output files
+rm -f "${BBV_OUT}"*
+
+echo "Running:"
+echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
+${QEMU_BIN} -plugin "${PLUGIN_SO}",interval=10000,outfile="${BBV_OUT}" "${DEMO_ELF}"
+
+if [ -f "${BBV_OUT}.0.bb" ]; then
+    echo "[OK] BBV output generated: ${BBV_OUT}.0.bb"
+    echo "----------------------------------------"
+    echo "First 5 lines:"
+    head -n 5 "${BBV_OUT}.0.bb"
+    echo "----------------------------------------"
+    echo "Verification complete!"
+else
+    echo "[ERROR] BBV output not generated!"
+    exit 1
+fi
