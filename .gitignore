@@ -43,6 +43,7 @@ coverage/
 # ONNX Runtime + YOLO build artifacts
 output/*
 !output/.gitkeep
+*.pt
 
 # BBV plugin output files
 bbv.out*.bb
