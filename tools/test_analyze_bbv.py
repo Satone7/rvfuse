@@ -70,6 +70,40 @@ class TestParseBbv(unittest.TestCase):
         finally:
             Path(path).unlink()
 
+    def test_native_qemu_bbv_format(self):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".bb", delete=False
+        ) as f:
+            f.write("T:0:100\n")
+            f.write("T:1:50\n")
+            f.write("T:2:200\n")
+            bb_path = f.name
+
+        disas_path = Path(bb_path).with_suffix(".disas")
+        try:
+            disas_path.write_text("0 0x10000\n1 0x10050\n2 0x10200\n")
+            blocks = parse_bbv(bb_path)
+            self.assertEqual(len(blocks), 3)
+            self.assertEqual(blocks[0], (0x10000, 100))
+            self.assertEqual(blocks[1], (0x10050, 50))
+            self.assertEqual(blocks[2], (0x10200, 200))
+        finally:
+            Path(bb_path).unlink()
+            disas_path.unlink(missing_ok=True)
+
+    def test_native_qemu_bbv_missing_disas(self):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".bb", delete=False
+        ) as f:
+            f.write("T:0:100\n")
+            path = f.name
+
+        try:
+            with self.assertRaises(SystemExit):
+                parse_bbv(path)
+        finally:
+            Path(path).unlink()
+
 
 class TestResolveAddresses(unittest.TestCase):
     def test_empty_blocks(self):

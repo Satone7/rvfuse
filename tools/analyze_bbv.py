@@ -12,9 +12,68 @@ from pathlib import Path
 
 
 def parse_bbv(bbv_path):
-    """Parse BBV file into list of (address, count) tuples."""
+    """Parse BBV file into list of (address, count) tuples.
+
+    Supports two formats:
+    - Native QEMU BBV: T:bb_id:insn_count (with companion .disas for addresses)
+    - Simple: address count (e.g. 0x10000 42)
+    """
+    bbv_file = Path(bbv_path)
     blocks = []
-    with open(bbv_path) as f:
+
+    with open(bbv_file) as f:
+        first_line = f.readline().strip()
+
+    # Detect native QEMU BBV format (T:bb_id:insn_count)
+    if first_line.startswith("T:"):
+        disas_path = bbv_file.with_suffix(".disas")
+        if not disas_path.exists():
+            print(
+                f"Error: native BBV format detected but disas file not found: {disas_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        bb_addr_map = {}
+        with open(disas_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) >= 1:
+                    try:
+                        bb_id = int(parts[0])
+                    except ValueError:
+                        continue
+                    if len(parts) >= 2 and parts[1].startswith("0x"):
+                        bb_addr_map[bb_id] = int(parts[1], 16)
+                    elif len(parts) >= 2:
+                        try:
+                            bb_addr_map[bb_id] = int(parts[1], 16)
+                        except ValueError:
+                            pass
+
+        with open(bbv_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or not line.startswith("T:"):
+                    continue
+                parts = line.split(":")
+                if len(parts) < 3:
+                    continue
+                try:
+                    bb_id = int(parts[1])
+                    count = int(parts[2])
+                except ValueError:
+                    continue
+                addr = bb_addr_map.get(bb_id)
+                if addr is not None:
+                    blocks.append((addr, count))
+        return blocks
+
+    # Simple format: address count
+    with open(bbv_file) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -33,28 +92,35 @@ def resolve_addresses(blocks, elf_path):
         return []
 
     addresses = [f"0x{a:x}" for a, _ in blocks]
-    cmd = ["addr2line", "-f", "-e", elf_path] + addresses
+    batch_size = 500
+    all_resolved = []
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        print(f"Warning: addr2line failed: {exc}", file=sys.stderr)
-        return [(a, c, "??") for a, c in blocks]
+    for batch_start in range(0, len(addresses), batch_size):
+        batch_addrs = addresses[batch_start : batch_start + batch_size]
+        batch_blocks = blocks[batch_start : batch_start + batch_size]
+        cmd = ["addr2line", "-f", "-e", elf_path] + batch_addrs
 
-    if result.returncode != 0:
-        print(f"Warning: addr2line exited with code {result.returncode}", file=sys.stderr)
-        return [(a, c, "??") for a, c in blocks]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            print(f"Warning: addr2line failed: {exc}", file=sys.stderr)
+            all_resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
 
-    lines = result.stdout.strip().split("\n")
-    resolved = []
-    for i, (addr, count) in enumerate(blocks):
-        if 2 * i + 1 < len(lines):
-            func = lines[2 * i].strip()
-            loc = lines[2 * i + 1].strip()
-            resolved.append((addr, count, f"{func} ({loc})"))
-        else:
-            resolved.append((addr, count, "??"))
-    return resolved
+        if result.returncode != 0:
+            print(f"Warning: addr2line exited with code {result.returncode}", file=sys.stderr)
+            all_resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
+
+        lines = result.stdout.strip().split("\n")
+        for i, (addr, count) in enumerate(batch_blocks):
+            if 2 * i + 1 < len(lines):
+                func = lines[2 * i].strip()
+                loc = lines[2 * i + 1].strip()
+                all_resolved.append((addr, count, f"{func} ({loc})"))
+            else:
+                all_resolved.append((addr, count, "??"))
+    return all_resolved
 
 
 def generate_report(resolved, top_n=20):

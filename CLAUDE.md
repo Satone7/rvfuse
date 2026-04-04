@@ -41,11 +41,12 @@ git submodule update --remote
 ./tools/docker-onnxrt/build.sh
 
 # Run BBV profiling on the YOLO binary
+# Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
 qemu-riscv64 -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.onnx ./output/test.jpg
 
 # Generate hotspot report from BBV data
-python3 tools/analyze_bbv.py --bbv output/yolo.bbv --elf output/yolo_inference
+python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference
 
 # Run analyze_bbv.py tests
 cd tools && python3 -m pytest test_analyze_bbv.py -v
