@@ -101,7 +101,10 @@ def _extract_registers(operands: str) -> dict[str, str]:
         if match:
             offset_reg = match.group(2)
             regs["rs1"] = offset_reg
-            # First operand could be rd (for loads) or rs2 (for stores)
+            # Both rd and rs2 are set to the first operand because loads use rd
+            # and stores use rs2 for the first operand. RegisterFlow.resolve()
+            # selects only the positions each instruction's flow definition
+            # specifies, so the dual-assignment is safe.
             regs["rd"] = first
             regs["rs2"] = first
         return regs
@@ -115,7 +118,9 @@ def _extract_registers(operands: str) -> dict[str, str]:
         # Skip immediates (numbers, hex values)
         if re.match(r"^-?\d+$", token) or re.match(r"^0x[0-9a-fA-F]+$", token):
             continue
-        # Must be a register name (x0-x31, or ABI name)
+        # Only accept valid RISC-V register names (x0-x31 or ABI names)
+        if not re.match(r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|[sf]\d+)$", token):
+            continue
         regs[position_names[i]] = token
     return regs
 

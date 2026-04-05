@@ -86,6 +86,23 @@ class TestBuildDfg(unittest.TestCase):
         self.assertIn((0, 1, "a0"), edge_map)
         self.assertIn((0, 4, "a0"), edge_map)
 
+    def test_unknown_mnemonic_mid_block(self):
+        """Edges still form around an unknown mnemonic: [known, unknown, known]."""
+        bb = BasicBlock(bb_id=1, vaddr=0x1000, instructions=[
+            Instruction(0x1000, "addi", "a0,zero,1", ""),
+            Instruction(0x1004, "custom_op", "a0,a1", ""),
+            Instruction(0x1008, "sw", "a0,-20(s0)", ""),
+        ])
+        dfg = build_dfg(bb, _make_registry())
+        # custom_op is unknown, so no edges involve index 1.
+        # But a0 written at index 0 is read at index 2 (via sw's implicit
+        # dependency tracking). Since custom_op is skipped, the last-writer
+        # for a0 remains index 0.
+        a0_edges = [e for e in dfg.edges if e.register == "a0"]
+        self.assertEqual(len(a0_edges), 1)
+        self.assertEqual(a0_edges[0].src_index, 0)
+        self.assertEqual(a0_edges[0].dst_index, 2)
+
     def test_dfg_source_is_script(self):
         bb = BasicBlock(bb_id=1, vaddr=0x1000, instructions=[Instruction(0x1000, "nop", "", "")])
         dfg = build_dfg(bb, _make_registry())

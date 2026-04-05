@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 from pathlib import Path
 
@@ -17,7 +18,8 @@ def dfg_to_dot(dfg: DFG) -> str:
         addr = f"0x{node.instruction.address:x}"
         mnemonic = node.instruction.mnemonic
         operands = node.instruction.operands
-        label = f"{{{addr}: {mnemonic} {operands}}}"
+        safe_operands = html.escape(operands.replace("{", "(").replace("}", ")"), quote=False)
+        label = f"{{{addr}: {mnemonic} {safe_operands}}}"
         lines.append(f'    {node.index} [label="{label}"];')
 
     lines.append("")
