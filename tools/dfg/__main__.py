@@ -92,10 +92,12 @@ def _flush_bb_log(log_path: Path, text: str) -> None:
 
     If the file exceeds ``_DEBUG_LOG_MAX_BYTES`` after writing, it is
     rotated (renamed to ``debug.log.1``, ``debug.log.2``, etc.).
+    Rotation is performed after releasing the lock and closing the file.
     """
     if not text:
         return
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    need_rotation = False
     with open(log_path, "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
@@ -103,11 +105,12 @@ def _flush_bb_log(log_path: Path, text: str) -> None:
             if not text.endswith("\n"):
                 f.write("\n")
             f.flush()
-            # Rotate if over size limit.
             if f.tell() > _DEBUG_LOG_MAX_BYTES:
-                _rotate_log(log_path)
+                need_rotation = True
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+    if need_rotation:
+        _rotate_log(log_path)
 
 
 def _rotate_log(log_path: Path) -> None:
@@ -116,8 +119,8 @@ def _rotate_log(log_path: Path) -> None:
     while log_path.with_suffix(f".log.{n}").exists():
         n += 1
     for i in range(n, 0, -1):
-        src = log_path.with_suffix(f".log.{i}") if i > 1 else log_path
-        dst = log_path.with_suffix(f".log.{i + 1}")
+        src = log_path.with_suffix(f".log.{i - 1}") if i > 1 else log_path
+        dst = log_path.with_suffix(f".log.{i}")
         os.rename(src, dst)
 
 
@@ -136,21 +139,15 @@ def process_single_bb(
     the buffered text to the shared log file under a file lock.
     """
     log = logging.getLogger("dfg")
-    buf = _BbLogBuffer() if buffer_logs else None
 
-    if buf is not None:
-        buf.__enter__()
-
-    try:
-        result = _process_bb_impl(bb, registry, agent, output_dir, log)
-    finally:
-        if buf is not None:
-            buf.__exit__(None, None, None)
-
-    if buf is not None:
+    if buffer_logs:
+        buf = _BbLogBuffer()
+        with buf:
+            result = _process_bb_impl(bb, registry, agent, output_dir, log)
         result.debug_log = buf.text
-
-    return result
+        return result
+    else:
+        return _process_bb_impl(bb, registry, agent, output_dir, log)
 
 
 def _process_bb_impl(
@@ -359,6 +356,9 @@ def load_isa_registry(extensions: str) -> ISARegistry:
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point. Returns exit code."""
     args = build_arg_parser().parse_args(argv)
+
+    if args.jobs < 1:
+        build_arg_parser().error("--jobs must be >= 1")
 
     # -- validate input --------------------------------------------------------
     disas_path: Path = args.disas
