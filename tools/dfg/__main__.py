@@ -7,9 +7,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import importlib
+import io
 import logging
-import logging.handlers
+import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -33,6 +35,9 @@ _ISA_MODULES: dict[str, tuple[str, str]] = {
     "I": ("dfg.isadesc.rv64i", "build_registry"),
 }
 
+# Max debug log size before rotation (100 MB).
+_DEBUG_LOG_MAX_BYTES = 100_000_000
+
 
 @dataclass
 class ProcessResult:
@@ -43,6 +48,77 @@ class ProcessResult:
     node_count: int
     edge_count: int
     unsupported: list[str]
+    debug_log: str = ""  # buffered debug log text for this BB
+
+
+class _BbLogBuffer:
+    """Context manager that captures all DEBUG+ logs in-memory for one BB.
+
+    Usage::
+
+        with _BbLogBuffer() as buf:
+            ...  # processing
+        text = buf.text   # all log output as a string
+    """
+
+    def __init__(self) -> None:
+        self._buffer = io.StringIO()
+        self._handler: logging.StreamHandler | None = None
+
+    def __enter__(self) -> _BbLogBuffer:
+        self._handler = logging.StreamHandler(self._buffer)
+        self._handler.setLevel(logging.DEBUG)
+        self._handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s: %(message)s",
+                datefmt="%Y-%m-%dT%H:%M:%S",
+            )
+        )
+        logging.getLogger().addHandler(self._handler)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._handler is not None:
+            logging.getLogger().removeHandler(self._handler)
+            self._handler.close()
+
+    @property
+    def text(self) -> str:
+        return self._buffer.getvalue()
+
+
+def _flush_bb_log(log_path: Path, text: str) -> None:
+    """Append *text* to *log_path* under an exclusive file lock.
+
+    If the file exceeds ``_DEBUG_LOG_MAX_BYTES`` after writing, it is
+    rotated (renamed to ``debug.log.1``, ``debug.log.2``, etc.).
+    """
+    if not text:
+        return
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(text)
+            if not text.endswith("\n"):
+                f.write("\n")
+            f.flush()
+            # Rotate if over size limit.
+            if f.tell() > _DEBUG_LOG_MAX_BYTES:
+                _rotate_log(log_path)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _rotate_log(log_path: Path) -> None:
+    """Rotate log files: debug.log -> debug.log.1 -> debug.log.2 ..."""
+    n = 1
+    while log_path.with_suffix(f".log.{n}").exists():
+        n += 1
+    for i in range(n, 0, -1):
+        src = log_path.with_suffix(f".log.{i}") if i > 1 else log_path
+        dst = log_path.with_suffix(f".log.{i + 1}")
+        os.rename(src, dst)
 
 
 def process_single_bb(
@@ -50,9 +126,41 @@ def process_single_bb(
     registry: ISARegistry,
     agent: AgentDispatcher,
     output_dir: Path,
+    buffer_logs: bool = False,
 ) -> ProcessResult:
-    """Process a single basic block through the DFG pipeline."""
+    """Process a single basic block through the DFG pipeline.
+
+    When *buffer_logs* is True, all log output for this BB is captured
+    in memory and returned as ``ProcessResult.debug_log`` instead of
+    going to the file handler.  The caller is responsible for flushing
+    the buffered text to the shared log file under a file lock.
+    """
     log = logging.getLogger("dfg")
+    buf = _BbLogBuffer() if buffer_logs else None
+
+    if buf is not None:
+        buf.__enter__()
+
+    try:
+        result = _process_bb_impl(bb, registry, agent, output_dir, log)
+    finally:
+        if buf is not None:
+            buf.__exit__(None, None, None)
+
+    if buf is not None:
+        result.debug_log = buf.text
+
+    return result
+
+
+def _process_bb_impl(
+    bb,
+    registry: ISARegistry,
+    agent: AgentDispatcher,
+    output_dir: Path,
+    log: logging.Logger,
+) -> ProcessResult:
+    """Core BB processing logic."""
     log.debug("--- BB %d start %s ---", bb.bb_id, datetime.now().isoformat())
     log.debug("BB %d: %d instruction(s)", bb.bb_id, len(bb.instructions))
     for i, insn in enumerate(bb.instructions):
@@ -139,8 +247,18 @@ def _process_bb_worker(
     model: str | None,
     output_dir_str: str,
 ) -> ProcessResult:
-    """Top-level worker for ProcessPoolExecutor."""
+    """Top-level worker for ProcessPoolExecutor.
+
+    Buffers all logs in memory so they can be flushed atomically by
+    the main process under a file lock — prevents interleaving.
+    """
     from dfg.instruction import Instruction, BasicBlock
+
+    # Set up minimal logging in the worker process (no file handlers).
+    root = logging.getLogger()
+    if not root.handlers:
+        root.addHandler(logging.NullHandler())
+    root.setLevel(logging.DEBUG)
 
     bb = BasicBlock(
         bb_id=bb_id,
@@ -153,7 +271,7 @@ def _process_bb_worker(
     registry = load_isa_registry(isa_extensions)
     agent = AgentDispatcher(enabled=not no_agent, model=model)
     output_dir = Path(output_dir_str)
-    return process_single_bb(bb, registry, agent, output_dir)
+    return process_single_bb(bb, registry, agent, output_dir, buffer_logs=True)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -266,21 +384,11 @@ def main(argv: list[str] | None = None) -> int:
     console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     root_logger.addHandler(console_handler)
 
+    # In debug mode, per-BB logs are buffered in memory and flushed atomically
+    # under a file lock — no RotatingFileHandler needed.
+    debug_log_path: Path | None = None
     if args.debug:
-        log_file = output_dir / "debug.log"
-        file_handler = logging.handlers.RotatingFileHandler(
-            str(log_file),
-            maxBytes=100_000_000,
-            backupCount=0,
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s %(levelname)s %(name)s: %(message)s",
-                datefmt="%Y-%m-%dT%H:%M:%S",
-            )
-        )
-        root_logger.addHandler(file_handler)
+        debug_log_path = output_dir / "debug.log"
 
     # -- build ISA registry ----------------------------------------------------
     registry = load_isa_registry(args.isa)
@@ -330,13 +438,22 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 for future in as_completed(futures):
                     result = future.result()
+                    # Flush buffered debug log under file lock.
+                    if debug_log_path is not None:
+                        _flush_bb_log(debug_log_path, result.debug_log)
                     results.append(result)
                     progress.update(task, advance=1)
 
         results.sort(key=lambda r: r.bb_id)
     else:
         for bb in blocks:
-            results.append(process_single_bb(bb, registry, agent, output_dir))
+            result = process_single_bb(
+                bb, registry, agent, output_dir,
+                buffer_logs=(debug_log_path is not None),
+            )
+            if debug_log_path is not None:
+                _flush_bb_log(debug_log_path, result.debug_log)
+            results.append(result)
 
     # -- collect stats ---------------------------------------------------------
     unsupported_instructions: set[str] = set()
