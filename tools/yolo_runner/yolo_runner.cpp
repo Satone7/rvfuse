@@ -124,11 +124,9 @@ int main(int argc, char* argv[])
     Ort::Session session(env, modelPath, sessionOpts);
 
     auto inputName = session.GetInputNameAllocated(0, allocator);
-    auto outputNames = session.GetOutputNamesAllocated(allocator);
+    auto outputName = session.GetOutputNameAllocated(0, allocator);
     std::vector<const char*> outputNamePtrs;
-    for (auto& n : outputNames) {
-        outputNamePtrs.push_back(n.get());
-    }
+    outputNamePtrs.push_back(outputName.get());
 
     fprintf(stdout, "Preprocessing image...\n");
     std::vector<float> tensorData;
