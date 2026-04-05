@@ -71,6 +71,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=False,
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        default=None,
+        help="Claude model name passed to agent (e.g. claude-opus-4-6)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="Enable full-pipeline detailed logging to rotating files",
+    )
+    parser.add_argument(
+        "--jobs", "-j",
+        type=int,
+        default=1,
+        help="Number of parallel processes for BB handling (default: 1)",
+    )
     return parser
 
 
@@ -133,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     # -- agent -----------------------------------------------------------------
-    agent = AgentDispatcher(enabled=not args.no_agent)
+    agent = AgentDispatcher(enabled=not args.no_agent, model=args.model)
 
     # -- process each BB -------------------------------------------------------
     unsupported_instructions: set[str] = set()
