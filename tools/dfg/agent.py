@@ -72,8 +72,9 @@ class AgentDispatcher:
     generation.  All errors are handled gracefully -- the agent is advisory.
     """
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, model: str | None = None) -> None:
         self.enabled = enabled
+        self._model = model
 
     # -- public API ----------------------------------------------------------
 
@@ -142,9 +143,13 @@ class AgentDispatcher:
 
         Returns stdout on success, None on any failure.
         """
+        cmd: list[str] = ["claude"]
+        if self._model:
+            cmd.extend(["--model", self._model])
+        cmd.extend(["--print", prompt])
         try:
             result = subprocess.run(
-                ["claude", "--print", prompt],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=300,
