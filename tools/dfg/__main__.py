@@ -444,6 +444,10 @@ def main(argv: list[str] | None = None) -> int:
                     # Flush buffered debug log under file lock.
                     if debug_log_path is not None:
                         _flush_bb_log(debug_log_path, result.debug_log)
+                    logger.info(
+                        "BB %d: %d nodes, %d edges (source=%s)",
+                        result.bb_id, result.node_count, result.edge_count, result.source,
+                    )
                     results.append(result)
                     progress.update(task, advance=1)
 
