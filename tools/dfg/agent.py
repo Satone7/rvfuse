@@ -151,7 +151,8 @@ class AgentDispatcher:
             cmd.extend(["--model", self._model])
         cmd.extend(["--print", prompt])
 
-        log.debug("Agent cmd: %s", cmd)
+        display_cmd = cmd[:-1] + [f"<prompt ({len(prompt)} chars)>"]
+        log.debug("Agent cmd: %s", display_cmd)
         log.debug("Agent prompt: %s", prompt)
 
         try:
