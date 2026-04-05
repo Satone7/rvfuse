@@ -152,7 +152,7 @@ class AgentDispatcher:
         cmd.extend(["--print", prompt])
 
         log.debug("Agent cmd: %s", cmd)
-        log.debug("Agent prompt: %s", prompt[:500])
+        log.debug("Agent prompt: %s", prompt)
 
         try:
             result = subprocess.run(
@@ -170,6 +170,6 @@ class AgentDispatcher:
         if result.returncode != 0:
             return None
 
-        log.debug("Agent response (%d chars): %s", len(result.stdout), result.stdout[:500])
+        log.debug("Agent response (%d chars): %s", len(result.stdout), result.stdout)
 
         return result.stdout.strip() or None
