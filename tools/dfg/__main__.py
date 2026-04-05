@@ -121,7 +121,10 @@ def _rotate_log(log_path: Path) -> None:
     for i in range(n, 0, -1):
         src = log_path.with_suffix(f".log.{i - 1}") if i > 1 else log_path
         dst = log_path.with_suffix(f".log.{i}")
-        os.rename(src, dst)
+        try:
+            os.rename(src, dst)
+        except FileNotFoundError:
+            pass
 
 
 def process_single_bb(

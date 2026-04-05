@@ -109,8 +109,10 @@ def convert_dot_to_png(dot_dir: Path, png_dir: Path) -> int:
                 text=True,
             )
             converted += 1
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             logging.getLogger("dfg").warning(
-                "Failed to convert %s to PNG", dot_file.name,
+                "Failed to convert %s to PNG: %s",
+                dot_file.name,
+                (exc.stderr or "").strip()[:200],
             )
     return converted
