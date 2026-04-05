@@ -1,0 +1,99 @@
+BB 1 (vaddr: 0x111f4, 6 insns):
+  0x111f4: addi                    sp,sp,-32
+  0x111f6: sd                      ra,24(sp)
+  0x111f8: sd                      s0,16(sp)
+  0x111fa: addi                    s0,sp,32
+  0x111fc: auipc                   ra,0                    # 0x111fc
+  0x11200: jalr                    ra,ra,-164
+
+BB 2 (vaddr: 0x11158, 9 insns):
+  0x11158: addi                    sp,sp,-32
+  0x1115a: sd                      ra,24(sp)
+  0x1115c: sd                      s0,16(sp)
+  0x1115e: addi                    s0,sp,32
+  0x11160: mv                      a0,zero
+  0x11162: sw                      a0,-20(s0)
+  0x11166: sw                      a0,-24(s0)
+  0x1116a: sw                      a0,-28(s0)
+  0x1116e: j                       2                       # 0x11170
+
+BB 3 (vaddr: 0x11170, 3 insns):
+  0x11170: lw                      a1,-28(s0)
+  0x11174: addi                    a0,zero,9
+  0x11176: bgt                     a1,a0,70                # 0x111bc
+
+BB 4 (vaddr: 0x1117a, 1 insns):
+  0x1117a: j                       2                       # 0x1117c
+
+BB 5 (vaddr: 0x1117c, 6 insns):
+  0x1117c: lw                      a0,-28(s0)
+  0x11180: srliw                   a1,a0,31
+  0x11184: addw                    a1,a1,a0
+  0x11186: andi                    a1,a1,-2
+  0x11188: subw                    a0,a0,a1
+  0x1118a: bnez                    a0,20                   # 0x1119e
+
+BB 6 (vaddr: 0x1118c, 1 insns):
+  0x1118c: j                       2                       # 0x1118e
+
+BB 7 (vaddr: 0x1118e, 5 insns):
+  0x1118e: lw                      a1,-28(s0)
+  0x11192: lw                      a0,-24(s0)
+  0x11196: addw                    a0,a0,a1
+  0x11198: sw                      a0,-24(s0)
+  0x1119c: j                       18                      # 0x111ae
+
+BB 8 (vaddr: 0x111ae, 1 insns):
+  0x111ae: j                       2                       # 0x111b0
+
+BB 9 (vaddr: 0x111b0, 4 insns):
+  0x111b0: lw                      a0,-28(s0)
+  0x111b4: addiw                   a0,a0,1
+  0x111b6: sw                      a0,-28(s0)
+  0x111ba: j                       -74                     # 0x11170
+
+BB 10 (vaddr: 0x1119e, 5 insns):
+  0x1119e: lw                      a1,-28(s0)
+  0x111a2: lw                      a0,-24(s0)
+  0x111a6: subw                    a0,a0,a1
+  0x111a8: sw                      a0,-24(s0)
+  0x111ac: j                       2                       # 0x111ae
+
+BB 11 (vaddr: 0x111bc, 3 insns):
+  0x111bc: mv                      a0,zero
+  0x111be: sw                      a0,-32(s0)
+  0x111c2: j                       2                       # 0x111c4
+
+BB 12 (vaddr: 0x111c4, 3 insns):
+  0x111c4: lw                      a1,-32(s0)
+  0x111c8: addi                    a0,zero,4
+  0x111ca: bgt                     a1,a0,30                # 0x111e8
+
+BB 13 (vaddr: 0x111ce, 1 insns):
+  0x111ce: j                       2                       # 0x111d0
+
+BB 14 (vaddr: 0x111d0, 7 insns):
+  0x111d0: lw                      a0,-24(s0)
+  0x111d4: slliw                   a0,a0,1
+  0x111d8: sw                      a0,-24(s0)
+  0x111dc: lw                      a0,-32(s0)
+  0x111e0: addiw                   a0,a0,1
+  0x111e2: sw                      a0,-32(s0)
+  0x111e6: j                       -34                     # 0x111c4
+
+BB 15 (vaddr: 0x111e8, 5 insns):
+  0x111e8: lw                      a0,-24(s0)
+  0x111ec: ld                      ra,24(sp)
+  0x111ee: ld                      s0,16(sp)
+  0x111f0: addi                    sp,sp,32
+  0x111f2: ret                     
+
+BB 16 (vaddr: 0x11204, 7 insns):
+  0x11204: mv                      a0,zero
+  0x11206: sw                      a0,-20(s0)
+  0x1120a: addi                    a0,zero,93
+  0x1120e: sw                      a0,-24(s0)
+  0x11212: lw                      a7,-24(s0)
+  0x11216: lw                      a0,-20(s0)
+  0x1121a: ecall                   
+
