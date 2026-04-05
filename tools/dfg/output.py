@@ -18,7 +18,7 @@ def dfg_to_dot(dfg: DFG) -> str:
         addr = f"0x{node.instruction.address:x}"
         mnemonic = node.instruction.mnemonic
         operands = node.instruction.operands
-        safe_operands = html.escape(operands.replace("{", "(").replace("}", ")"), quote=False)
+        safe_operands = html.escape(operands.replace("{", "(").replace("}", ")"), quote=True)
         label = f"{{{addr}: {mnemonic} {safe_operands}}}"
         lines.append(f'    {node.index} [label="{label}"];')
 
