@@ -129,9 +129,35 @@ class TestDispatcherCheck(unittest.TestCase):
         d.check(_sample_dfg(_sample_bb()))
         # Verify the prompt passed to subprocess.run
         call_args = mock_run.call_args
-        prompt = call_args[0][0][2]  # run(["claude", "--print", prompt]), get prompt
+        prompt = call_args[0][0][-1]  # last element is always the prompt
         self.assertIn("dfg-check", prompt)
         self.assertIn("addi", prompt)
+
+    @patch("dfg.agent.subprocess.run")
+    def test_check_passes_model_to_cli(self, mock_run: MagicMock):
+        """When model is set, --model flag is included in subprocess call."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"verdict": "pass", "issues": []}),
+        )
+        d = AgentDispatcher(enabled=True, model="claude-opus-4-6")
+        d.check(_sample_dfg(_sample_bb()))
+        call_args = mock_run.call_args
+        cmd = call_args[0][0]
+        self.assertIn("--model", cmd)
+        self.assertIn("claude-opus-4-6", cmd)
+
+    @patch("dfg.agent.subprocess.run")
+    def test_check_omits_model_when_unset(self, mock_run: MagicMock):
+        """When model is None, --model flag is NOT in subprocess call."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"verdict": "pass", "issues": []}),
+        )
+        d = AgentDispatcher(enabled=True)
+        d.check(_sample_dfg(_sample_bb()))
+        cmd = mock_run.call_args[0][0]
+        self.assertNotIn("--model", cmd)
 
 
 # ---------------------------------------------------------------------------
