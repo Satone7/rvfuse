@@ -335,7 +335,7 @@ step3_init_deps() {
     local failed_deps=()
     for dep_path in "third_party/qemu" "third_party/llvm-project"; do
         local dep_marker="${PROJECT_ROOT}/${dep_path}/.git"
-        if [[ -d "$dep_marker" ]]; then
+        if [[ -e "$dep_marker" ]]; then
             log_info "  ${dep_path}: already initialized"
             continue
         fi
