@@ -496,6 +496,15 @@ step5_report() {
 # Main Execution Loop (T018, T023)
 # =============================================================================
 
+# Map step numbers to function suffix names
+declare -gA step_funcs=(
+    [1]="clone"
+    [2]="review_scope"
+    [3]="init_deps"
+    [4]="verify_setup"
+    [5]="report"
+)
+
 run_setup() {
     for step_num in $(seq 1 "$TOTAL_STEPS"); do
         local artifacts=()
@@ -525,15 +534,6 @@ run_setup() {
         fi
     done
 }
-
-# Map step numbers to function suffix names
-declare -gA step_funcs=(
-    [1]="clone"
-    [2]="review_scope"
-    [3]="init_deps"
-    [4]="verify_setup"
-    [5]="report"
-)
 
 # =============================================================================
 # Main Entry Point (T019)
