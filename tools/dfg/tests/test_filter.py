@@ -104,6 +104,12 @@ class TestSelectAddresses:
         addrs = select_addresses(p, top_n=20, coverage=None)
         assert addrs == set()
 
+    def test_neither_top_n_nor_coverage_raises(self, tmp_path):
+        p = tmp_path / "report.json"
+        p.write_text(_sample_report_json())
+        with pytest.raises(ValueError, match="Either top_n or coverage"):
+            select_addresses(p, top_n=None, coverage=None)
+
 
 class TestFilterIntegration:
     def test_matched_blocks_produced(self, tmp_path):
@@ -139,21 +145,21 @@ class TestMutualExclusion:
     """--report and --bb-filter are mutually exclusive."""
 
     def test_report_and_bb_filter_rejected(self):
-        from dfg.__main__ import build_arg_parser
+        from dfg.__main__ import parse_args
         with pytest.raises(SystemExit):
-            build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--bb-filter", "1"])
+            parse_args(["--disas", "x.disas", "--report", "r.json", "--bb-filter", "1"])
 
     def test_report_accepted_alone(self):
-        from dfg.__main__ import build_arg_parser
-        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json"])
+        from dfg.__main__ import parse_args
+        args = parse_args(["--disas", "x.disas", "--report", "r.json"])
         assert args.report == Path("r.json")
 
     def test_report_with_coverage(self):
-        from dfg.__main__ import build_arg_parser
-        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--coverage", "80"])
+        from dfg.__main__ import parse_args
+        args = parse_args(["--disas", "x.disas", "--report", "r.json", "--coverage", "80"])
         assert args.coverage == 80
 
     def test_report_with_top(self):
-        from dfg.__main__ import build_arg_parser
-        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--top", "5"])
+        from dfg.__main__ import parse_args
+        args = parse_args(["--disas", "x.disas", "--report", "r.json", "--top", "5"])
         assert args.top == 5

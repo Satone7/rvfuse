@@ -51,6 +51,9 @@ def select_addresses(
     Returns:
         Set of integer addresses for blocks that should be processed.
     """
+    if top_n is None and coverage is None:
+        raise ValueError("Either top_n or coverage must be specified")
+
     data = load_report(report_path)
     blocks = data["blocks"]
     if not blocks:

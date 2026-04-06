@@ -275,7 +275,7 @@ def _process_bb_worker(
     return process_single_bb(bb, registry, agent, output_dir, buffer_logs=True)
 
 
-def build_arg_parser(argv: list[str] | None = None):
+def parse_args(argv: list[str] | None = None):
     """Build the argument parser, parse *argv*, validate, and return namespace."""
     parser = argparse.ArgumentParser(
         prog="tools.dfg",
@@ -382,7 +382,7 @@ def load_isa_registry(extensions: str) -> ISARegistry:
 
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point. Returns exit code."""
-    args = build_arg_parser(argv)
+    args = parse_args(argv)
 
     if args.jobs < 1:
         print("ERROR: --jobs must be >= 1", file=sys.stderr)
