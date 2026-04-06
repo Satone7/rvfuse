@@ -47,7 +47,7 @@ qemu-riscv64 -L output/sysroot \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
 
 # Generate hotspot report from BBV data
-python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference
+python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference --sysroot output/sysroot
 
 # Run analyze_bbv.py tests
 cd tools && python3 -m pytest test_analyze_bbv.py -v

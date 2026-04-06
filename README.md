@@ -136,16 +136,15 @@ output/
 ### Step 5: Generate hotspot report
 
 ```bash
-python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference
+python3 tools/analyze_bbv.py \
+  --bbv output/yolo.bbv.0.bb \
+  --elf output/yolo_inference \
+  --sysroot output/sysroot
 ```
 
-This parses the BBV data, resolves addresses via `addr2line`, and prints the top hotspots ranked by execution count.
+This parses the BBV data, aggregates execution counts across profiling intervals, and resolves addresses via `addr2line`. Shared library addresses (e.g., `libonnxruntime.so`) are automatically matched against `.so` files in the sysroot.
 
-**Note:** Since the binary is dynamically linked, hot addresses may fall in `libonnxruntime.so` rather than the main binary. To resolve those symbols, pass the `.so` path to `addr2line` manually:
-
-```bash
-riscv64-linux-gnu-addr2line -f -e output/sysroot/lib/riscv64-linux-gnu/libonnxruntime.so.1.17.3 0x<hot_address>
-```
+**Note:** The `libonnxruntime.so` in the sysroot is stripped, so most internal function names will show as `??`. For symbol-level resolution, build ONNX Runtime with debug symbols (`-DCMAKE_BUILD_TYPE=Debug` or RelWithDebInfo).
 
 ### Typical hotspot findings
 

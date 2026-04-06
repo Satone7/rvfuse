@@ -74,19 +74,28 @@ class TestParseBbv(unittest.TestCase):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".bb", delete=False
         ) as f:
-            f.write("T:0:100\n")
-            f.write("T:1:50\n")
-            f.write("T:2:200\n")
+            # Multiple intervals that reference the same BBs
+            f.write("T:0:100 :1:50 :2:200\n")
+            f.write("T:0:30 :2:70\n")
             bb_path = f.name
 
         disas_path = Path(bb_path).with_suffix(".disas")
         try:
-            disas_path.write_text("0 0x10000\n1 0x10050\n2 0x10200\n")
+            disas_path.write_text(
+                "BB 0 (vaddr: 0x10000, 1 insns):\n"
+                "  0x10000: addi t0, t0, 1\n\n"
+                "BB 1 (vaddr: 0x10050, 1 insns):\n"
+                "  0x10050: addi t1, t1, 2\n\n"
+                "BB 2 (vaddr: 0x10200, 1 insns):\n"
+                "  0x10200: addi t2, t2, 3\n\n"
+            )
             blocks = parse_bbv(bb_path)
+            # Counts are aggregated: BB0=100+30, BB1=50, BB2=200+70
+            by_addr = dict(blocks)
+            self.assertEqual(by_addr[0x10000], 130)
+            self.assertEqual(by_addr[0x10050], 50)
+            self.assertEqual(by_addr[0x10200], 270)
             self.assertEqual(len(blocks), 3)
-            self.assertEqual(blocks[0], (0x10000, 100))
-            self.assertEqual(blocks[1], (0x10050, 50))
-            self.assertEqual(blocks[2], (0x10200, 200))
         finally:
             Path(bb_path).unlink()
             disas_path.unlink(missing_ok=True)
@@ -112,24 +121,35 @@ class TestResolveAddresses(unittest.TestCase):
 
     @patch("analyze_bbv.subprocess.run")
     def test_calls_addr2line_and_parses_output(self, mock_run):
-        mock_run.return_value = MagicMock(
-            stdout="main_func\n/app/main.c:10\n"
-                   "helper\n/app/util.c:25\n",
-            returncode=0,
-        )
-        blocks = [(0x1000, 42), (0x2000, 15)]
+        # First call: readelf to find .text range
+        # Second call: addr2line
+        mock_run.side_effect = [
+            MagicMock(
+                stdout="  [13] .text     PROGBITS 0000000000001000 001000 000500",
+                returncode=0,
+            ),
+            MagicMock(
+                stdout="main_func\n/app/main.c:10\n"
+                       "helper\n/app/util.c:25\n",
+                returncode=0,
+            ),
+        ]
+        blocks = [(0x1100, 42), (0x1200, 15)]
         resolved = resolve_addresses(blocks, "/fake/elf")
 
         self.assertEqual(len(resolved), 2)
-        self.assertEqual(resolved[0], (0x1000, 42, "main_func (/app/main.c:10)"))
-        self.assertEqual(resolved[1], (0x2000, 15, "helper (/app/util.c:25)"))
-        mock_run.assert_called_once()
+        self.assertEqual(resolved[0], (0x1100, 42, "main_func (/app/main.c:10)"))
+        self.assertEqual(resolved[1], (0x1200, 15, "helper (/app/util.c:25)"))
 
     @patch("analyze_bbv.subprocess.run")
     def test_fallback_on_addr2line_failure(self, mock_run):
         mock_run.side_effect = FileNotFoundError("not found")
         resolved = resolve_addresses([(0x1000, 42)], "/fake/elf")
-        self.assertEqual(resolved, [(0x1000, 42, "??")])
+        # When readelf fails, address can't be classified as main ELF,
+        # so it falls to the unknown-so path
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0][0], 0x1000)
+        self.assertEqual(resolved[0][1], 42)
 
 
 class TestGenerateReport(unittest.TestCase):
