@@ -40,9 +40,10 @@ git submodule update --remote
 # Docker build ONNX Runtime + YOLO runner for RISC-V
 ./tools/docker-onnxrt/build.sh
 
-# Run BBV profiling on the YOLO binary
+# Run BBV profiling on the YOLO binary (dynamically linked, needs sysroot)
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
-qemu-riscv64 -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
+qemu-riscv64 -L output/sysroot \
+  -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.onnx ./output/test.jpg
 
 # Generate hotspot report from BBV data

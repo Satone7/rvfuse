@@ -41,8 +41,31 @@ DOCKER_BUILDKIT=1 docker build \
 
 CONTAINER_ID=$(docker create rvfuse-yolo-builder)
 docker cp "${CONTAINER_ID}:/yolo_inference" "${OUTPUT_DIR}/yolo_inference"
+
+# Extract RISC-V sysroot for QEMU user-mode emulation (-L flag).
+SYSROOT="${OUTPUT_DIR}/sysroot"
+mkdir -p "${SYSROOT}/lib/riscv64-linux-gnu"
+# Dynamic linker
+docker cp "${CONTAINER_ID}:/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1" \
+    "${SYSROOT}/lib/riscv64-linux-gnu/" 2>/dev/null || true
+docker cp "${CONTAINER_ID}:/usr/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1" \
+    "${SYSROOT}/lib/riscv64-linux-gnu/" 2>/dev/null || true
+# Runtime libraries
+for lib in libc.so.6 libm.so.6 libstdc++.so.6 libstdc++.so.6.0.33 libgcc_s.so.1 libonnxruntime.so.1.17.3; do
+    docker cp "${CONTAINER_ID}:/usr/lib/riscv64-linux-gnu/${lib}" \
+        "${SYSROOT}/lib/riscv64-linux-gnu/" 2>/dev/null || true
+    docker cp "${CONTAINER_ID}:/lib/riscv64-linux-gnu/${lib}" \
+        "${SYSROOT}/lib/riscv64-linux-gnu/" 2>/dev/null || true
+done
+# Create ld-linux symlink at /lib/ld-linux-riscv64-lp64d.so.1 (QEMU default path)
+ln -sf riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1 "${SYSROOT}/lib/ld-linux-riscv64-lp64d.so.1"
+# Create soname symlinks
+ln -sf libonnxruntime.so.1.17.3 "${SYSROOT}/lib/riscv64-linux-gnu/libonnxruntime.so"
+
 docker rm "${CONTAINER_ID}" > /dev/null
 docker rmi rvfuse-yolo-builder > /dev/null 2>&1 || true
 
 echo "=== Build complete ==="
 file "${OUTPUT_DIR}/yolo_inference"
+echo "=== Sysroot ==="
+ls -la "${SYSROOT}/lib/riscv64-linux-gnu/"

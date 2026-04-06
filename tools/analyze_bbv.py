@@ -15,16 +15,18 @@ def parse_bbv(bbv_path):
     """Parse BBV file into list of (address, count) tuples.
 
     Supports two formats:
-    - Native QEMU BBV: T:bb_id:insn_count (with companion .disas for addresses)
+    - Native QEMU BBV: T:id1:count1 :id2:count2 ... (with companion .disas)
     - Simple: address count (e.g. 0x10000 42)
     """
+    import re
+
     bbv_file = Path(bbv_path)
     blocks = []
 
     with open(bbv_file) as f:
         first_line = f.readline().strip()
 
-    # Detect native QEMU BBV format (T:bb_id:insn_count)
+    # Detect native QEMU BBV format (T:id:count ...)
     if first_line.startswith("T:"):
         disas_path = bbv_file.with_suffix(".disas")
         if not disas_path.exists():
@@ -34,42 +36,38 @@ def parse_bbv(bbv_path):
             )
             sys.exit(1)
 
+        # Parse disas: "BB <id> (vaddr: <hex>, <N> insns):"
         bb_addr_map = {}
+        bb_re = re.compile(r"BB\s+(\d+)\s+\(vaddr:\s+(0x[0-9a-fA-F]+)")
         with open(disas_path) as f:
             for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(None, 1)
-                if len(parts) >= 1:
-                    try:
-                        bb_id = int(parts[0])
-                    except ValueError:
-                        continue
-                    if len(parts) >= 2 and parts[1].startswith("0x"):
-                        bb_addr_map[bb_id] = int(parts[1], 16)
-                    elif len(parts) >= 2:
-                        try:
-                            bb_addr_map[bb_id] = int(parts[1], 16)
-                        except ValueError:
-                            pass
+                m = bb_re.match(line.strip())
+                if m:
+                    bb_addr_map[int(m.group(1))] = int(m.group(2), 16)
 
+        # Parse BBV: each line is "T:id1:count1 :id2:count2 ..."
         with open(bbv_file) as f:
             for line in f:
                 line = line.strip()
                 if not line or not line.startswith("T:"):
                     continue
-                parts = line.split(":")
-                if len(parts) < 3:
-                    continue
-                try:
-                    bb_id = int(parts[1])
-                    count = int(parts[2])
-                except ValueError:
-                    continue
-                addr = bb_addr_map.get(bb_id)
-                if addr is not None:
-                    blocks.append((addr, count))
+                # Split into tokens: "T:1:5", ":2:10", ":3:20"
+                for token in line.split():
+                    # Remove leading ':'
+                    token = token.lstrip(":")
+                    if token.startswith("T:"):
+                        token = token[2:]
+                    parts = token.split(":")
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        bb_id = int(parts[0])
+                        count = int(parts[1])
+                    except ValueError:
+                        continue
+                    addr = bb_addr_map.get(bb_id)
+                    if addr is not None:
+                        blocks.append((addr, count))
         return blocks
 
     # Simple format: address count
