@@ -33,9 +33,9 @@ A contributor wants to selectively re-run one or more steps of the setup flow, f
 
 **Acceptance Scenarios**:
 
-1. **Given** a fully completed workspace, **When** the contributor invokes the script with a force option for Step 3, **Then** only Step 3 is re-executed and all other steps remain untouched
-2. **Given** the script is invoked, **When** the contributor chooses to force re-execute multiple specific steps, **Then** only the selected steps are re-executed in their original order
-3. **Given** the script is invoked, **When** the contributor chooses to force re-execute all steps, **Then** every step is executed from scratch regardless of existing artifacts
+1. **Given** a fully completed workspace, **When** the contributor invokes the script with `--force 3`, **Then** only Step 3 is re-executed and all other steps remain untouched
+2. **Given** the script is invoked, **When** the contributor passes `--force 2,4`, **Then** only Steps 2 and 4 are re-executed in their original order
+3. **Given** the script is invoked, **When** the contributor passes `--force-all`, **Then** every step is executed from scratch regardless of existing artifacts
 
 ---
 
@@ -70,8 +70,9 @@ A contributor reviews a persisted setup report that summarizes the outcome of ea
 - **FR-001**: The script MUST execute the full RVFuse setup flow corresponding to Steps 1-5 defined in the quickstart guide
 - **FR-002**: The script MUST check for the existence of each step's artifacts before executing that step
 - **FR-003**: The script MUST skip a step if all its artifacts are detected as present
-- **FR-004**: The script MUST provide a force option that allows the user to selectively re-execute one or more steps
-- **FR-005**: The script MUST provide a force-all option that re-executes every step from scratch
+- **FR-003a**: The script MUST perform full submodule clones by default and accept a `--shallow` flag to use `--depth 1` instead
+- **FR-004**: The script MUST accept a `--force` flag taking comma-separated step numbers (e.g., `--force 3`, `--force 2,4`) to selectively re-execute specified steps
+- **FR-005**: The script MUST accept a `--force-all` flag that re-executes every step from scratch
 - **FR-006**: The script MUST generate a setup completion report as a persistent file (Step 5)
 - **FR-007**: The report MUST include the execution status (pass/fail/skipped) for every step
 - **FR-008**: The report MUST include warnings and error messages encountered during execution
@@ -84,7 +85,7 @@ A contributor reviews a persisted setup report that summarizes the outcome of ea
 
 - **Setup Step**: One of the 5 defined stages in the quickstart flow (Clone, Review Scope, Initialize Dependencies, Verify Setup, Generate Report), each with identifiable artifacts
 - **Step Artifact**: A file or directory produced by a step that the script checks for existence (e.g., `third_party/qemu/`, `docs/architecture.md`)
-- **Force Target**: A user-selected step or set of steps designated for re-execution regardless of artifact existence
+- **Force Target**: A comma-separated list of step numbers passed via `--force` CLI flag, designating steps for re-execution regardless of artifact existence
 - **Setup Report**: A persistent file containing the aggregated results of all executed steps, saved to the project workspace
 
 ## Success Criteria *(mandatory)*
@@ -93,9 +94,16 @@ A contributor reviews a persisted setup report that summarizes the outcome of ea
 
 - **SC-001**: A contributor can execute the complete setup flow with a single command invocation
 - **SC-002**: The script correctly skips steps whose artifacts already exist in 100% of cases without false negatives
-- **SC-003**: A contributor can force re-execute any subset of steps using clearly documented options
+- **SC-003**: A contributor can force re-execute any subset of steps using CLI flags (`--force`, `--force-all`)
 - **SC-004**: The setup report file is generated within 5 seconds after the last step completes
 - **SC-005**: A contributor reading the report file can determine the setup state without running the script again
+
+## Clarifications
+
+### Session 2026-04-06
+
+- Q: How should the user specify which steps to force re-execute? → A: Non-interactive CLI flags (e.g., `--force 3`, `--force 2,4`, `--force-all`)
+- Q: Should submodules use shallow or full clone by default? → A: Full clone by default, with `--shallow` flag to opt into shallow clone
 
 ## Assumptions
 
