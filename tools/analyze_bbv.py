@@ -340,27 +340,40 @@ def _resolve_so_addresses(blocks, so_files):
     return resolved
 
 
-def generate_report(resolved, top_n=20):
-    """Generate a sorted hotspot report string."""
-    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
-    total = sum(c for _, c, _ in resolved)
-    show = min(top_n, len(sorted_blocks))
+def generate_report(entries, top_n=20):
+    """Generate a sorted hotspot report string from ReportEntry list.
+
+    Args:
+        entries: list[ReportEntry] from build_report_data (must be pre-sorted).
+        top_n: maximum number of entries to render in the text table.
+
+    Returns:
+        Formatted report string.
+    """
+    if not entries:
+        total_blocks = 0
+        total_executions = 0
+    else:
+        total_blocks = len(entries)
+        total_executions = sum(e.count for e in entries)
+
+    show = min(top_n, len(entries))
 
     lines = [
         "=" * 72,
         "BBV Hotspot Report",
         "=" * 72,
-        f"Total basic blocks: {len(resolved)}",
-        f"Total executions:   {total}",
+        f"Total basic blocks: {total_blocks}",
+        f"Total executions:   {total_executions}",
         f"Showing top {show} blocks",
         "",
         f"{'Rank':<6}{'Count':<14}{'% Total':<10}Location",
         "-" * 72,
     ]
-    for rank, (addr, count, location) in enumerate(sorted_blocks[:show], 1):
-        pct = (count / total * 100) if total else 0
+    for entry in entries[:show]:
         lines.append(
-            f"{rank:<6}{count:<14}{pct:>6.2f}%    0x{addr:x} {location}"
+            f"{entry.rank:<6}{entry.count:<14}{entry.pct:>6.2f}%    "
+            f"0x{entry.address:x} {entry.location}"
         )
     return "\n".join(lines)
 
@@ -386,7 +399,8 @@ def main():
     print(f"Parsed {len(blocks)} basic blocks from {args.bbv}")
 
     resolved = resolve_addresses(blocks, args.elf, args.sysroot)
-    report = generate_report(resolved, args.top)
+    entries = build_report_data(resolved)
+    report = generate_report(entries, args.top)
 
     if args.output:
         Path(args.output).write_text(report + "\n")

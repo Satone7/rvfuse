@@ -153,28 +153,33 @@ class TestResolveAddresses(unittest.TestCase):
 
 
 class TestGenerateReport(unittest.TestCase):
+    def _entries(self, resolved):
+        """Helper: convert raw resolved tuples to ReportEntry via build_report_data."""
+        from analyze_bbv import build_report_data
+        return build_report_data(resolved)
+
     def test_sorted_by_count_descending(self):
-        resolved = [
+        entries = self._entries([
             (0x1000, 10, "func_a (a.c:1)"),
             (0x2000, 100, "func_b (b.c:2)"),
             (0x3000, 50, "func_c (c.c:3)"),
-        ]
-        report = generate_report(resolved, top_n=3)
+        ])
+        report = generate_report(entries, top_n=3)
         self.assertLess(report.index("func_b"), report.index("func_c"))
         self.assertLess(report.index("func_c"), report.index("func_a"))
 
     def test_respects_top_n(self):
-        resolved = [(i, 100 - i, f"func_{i}") for i in range(10)]
-        report = generate_report(resolved, top_n=3)
+        entries = self._entries([(i, 100 - i, f"func_{i}") for i in range(10)])
+        report = generate_report(entries, top_n=3)
         self.assertIn("func_0", report)
         self.assertNotIn("func_3", report)
 
     def test_percentage_calculation(self):
-        resolved = [
+        entries = self._entries([
             (0x1000, 75, "func_a (a.c:1)"),
             (0x2000, 25, "func_b (b.c:2)"),
-        ]
-        report = generate_report(resolved, top_n=2)
+        ])
+        report = generate_report(entries, top_n=2)
         self.assertIn("75.00%", report)
         self.assertIn("25.00%", report)
 
