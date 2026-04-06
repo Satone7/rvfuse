@@ -1,0 +1,19 @@
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+# Default target triple for RISC-V 64-bit
+TARGET_ARGS=("--target=riscv64-unknown-elf")
+
+if [[ "$1" == "--version" ]]; then
+    echo "Docker LLVM Toolchain (based on LLVM 13)"
+    run_in_docker clang++ --version | grep -i version
+    exit $?
+fi
+
+if [[ "$1" == "--help" ]]; then
+    run_in_docker clang++ --help
+    exit $?
+fi
+
+run_in_docker clang++ "${TARGET_ARGS[@]}" "$@"

@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+"""Parse QEMU BBV output and generate hotspot reports.
+
+Maps basic block addresses to source locations using addr2line
+and prints the most frequently executed blocks.
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+
+def parse_bbv(bbv_path):
+    """Parse BBV file into list of (address, count) tuples.
+
+    Supports two formats:
+    - Native QEMU BBV: T:id1:count1 :id2:count2 ... (with companion .disas)
+    - Simple: address count (e.g. 0x10000 42)
+    """
+    import re
+
+    bbv_file = Path(bbv_path)
+
+    with open(bbv_file) as f:
+        first_line = f.readline().strip()
+
+    # Detect native QEMU BBV format (T:id:count ...)
+    if first_line.startswith("T:"):
+        disas_path = bbv_file.with_suffix(".disas")
+        # QEMU BBV names .bb as <base>.<pid>.bb but .disas as <base>.disas
+        if not disas_path.exists():
+            m = re.match(r"(.+)\.\d+\.bb$", bbv_file.name)
+            if m:
+                candidate = bbv_file.parent / (m.group(1) + ".disas")
+                if candidate.exists():
+                    disas_path = candidate
+        if not disas_path.exists():
+            print(
+                f"Error: native BBV format detected but disas file not found: {disas_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Parse disas: "BB <id> (vaddr: <hex>, <N> insns):"
+        bb_addr_map = {}
+        bb_re = re.compile(r"BB\s+(\d+)\s+\(vaddr:\s+(0x[0-9a-fA-F]+)")
+        with open(disas_path) as f:
+            for line in f:
+                m = bb_re.match(line.strip())
+                if m:
+                    bb_addr_map[int(m.group(1))] = int(m.group(2), 16)
+
+        # Parse BBV: each line is "T:id1:count1 :id2:count2 ..."
+        # Aggregate counts across all intervals per address
+        addr_counts = {}
+        with open(bbv_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or not line.startswith("T:"):
+                    continue
+                for token in line.split():
+                    token = token.lstrip(":")
+                    if token.startswith("T:"):
+                        token = token[2:]
+                    parts = token.split(":")
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        bb_id = int(parts[0])
+                        count = int(parts[1])
+                    except ValueError:
+                        continue
+                    addr = bb_addr_map.get(bb_id)
+                    if addr is not None:
+                        addr_counts[addr] = addr_counts.get(addr, 0) + count
+        return list(addr_counts.items())
+
+    # Simple format: address count
+    blocks = []
+    with open(bbv_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            addr = int(parts[0], 16) if parts[0].startswith("0x") else int(parts[0])
+            blocks.append((addr, int(parts[1])))
+    return blocks
+
+
+def resolve_addresses(blocks, elf_path, sysroot=None):
+    """Resolve addresses to source locations via addr2line.
+
+    For shared library addresses (addresses not in the main ELF .text),
+    attempts to match against .so files in sysroot.
+    """
+    if not blocks:
+        return []
+
+    # Collect .so files from sysroot
+    so_files = _collect_so_files(sysroot)
+
+    # Determine main ELF .text range via readelf
+    main_ranges = _get_elf_text_range(elf_path)
+
+    # Separate main binary vs shared library addresses
+    main_blocks = []
+    so_blocks = []
+    for addr, count in blocks:
+        if any(lo <= addr < hi for lo, hi in main_ranges):
+            main_blocks.append((addr, count))
+        else:
+            so_blocks.append((addr, count))
+
+    resolved = []
+
+    # Resolve main binary addresses
+    if main_blocks:
+        resolved.extend(_batch_resolve(main_blocks, elf_path))
+
+    # Resolve shared library addresses
+    if so_blocks:
+        resolved.extend(_resolve_so_addresses(so_blocks, so_files))
+
+    return resolved
+
+
+def _collect_so_files(sysroot):
+    """Recursively find unique .so files in sysroot, sorted by size descending."""
+    if not sysroot:
+        return []
+    sysroot_path = Path(sysroot)
+    if not sysroot_path.is_dir():
+        return []
+    all_so = sorted(sysroot_path.rglob("*.so*"), key=lambda p: p.stat().st_size, reverse=True)
+    seen_inodes = set()
+    unique = []
+    for sf in all_so:
+        try:
+            st = sf.stat()
+            key = (st.st_dev, st.st_ino)
+            if key not in seen_inodes:
+                seen_inodes.add(key)
+                unique.append(sf)
+        except OSError:
+            continue
+    return unique
+
+
+def _get_elf_text_range(elf_path):
+    """Get .text section address ranges from ELF via readelf."""
+    ranges = []
+    try:
+        result = subprocess.run(
+            ["readelf", "-S", elf_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        for line in result.stdout.splitlines():
+            if ".text" in line:
+                parts = line.split()
+                for i, p in enumerate(parts):
+                    if p == ".text" and i + 3 < len(parts):
+                        try:
+                            addr_start = int(parts[i + 2], 16)
+                            addr_size = int(parts[i + 3], 16)
+                            ranges.append((addr_start, addr_start + addr_size))
+                        except ValueError:
+                            pass
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ranges
+
+
+def _batch_resolve(blocks, elf_path):
+    """Resolve a batch of addresses against a single ELF via addr2line."""
+    if not blocks:
+        return []
+
+    addresses = [f"0x{a:x}" for a, _ in blocks]
+    batch_size = 500
+    resolved = []
+
+    for batch_start in range(0, len(addresses), batch_size):
+        batch_addrs = addresses[batch_start : batch_start + batch_size]
+        batch_blocks = blocks[batch_start : batch_start + batch_size]
+        cmd = ["addr2line", "-f", "-e", elf_path] + batch_addrs
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            print(f"Warning: addr2line failed: {exc}", file=sys.stderr)
+            resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
+
+        if result.returncode != 0:
+            resolved.extend([(a, c, "??") for a, c in batch_blocks])
+            continue
+
+        lines = result.stdout.strip().split("\n")
+        for i, (addr, count) in enumerate(batch_blocks):
+            if 2 * i + 1 < len(lines):
+                func = lines[2 * i].strip()
+                loc = lines[2 * i + 1].strip()
+                resolved.append((addr, count, f"{func} ({loc})"))
+            else:
+                resolved.append((addr, count, "??"))
+    return resolved
+
+
+def _get_so_loads(so_files):
+    """Parse executable LOAD segments from .so files via readelf."""
+    so_loads = []
+    for so_path in so_files:
+        try:
+            result = subprocess.run(
+                ["readelf", "-l", str(so_path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            lines = result.stdout.splitlines()
+            for i, line in enumerate(lines):
+                if "LOAD" not in line:
+                    continue
+                parts1 = line.split()
+                parts2 = lines[i + 1].split() if i + 1 < len(lines) else []
+                if len(parts1) < 3 or len(parts2) < 3:
+                    continue
+                try:
+                    vaddr = int(parts1[2], 16)
+                    memsz = int(parts2[1], 16)
+                    # Flags may be split: ["R", "E", "0x1000"] or joined: ["RWE", "0x1000"]
+                    flag_fields = parts2[2:]
+                    is_exec = any("E" in f for f in flag_fields)
+                    if is_exec:
+                        so_loads.append((so_path, vaddr, memsz))
+                        break
+                except (ValueError, IndexError):
+                    continue
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+    return so_loads
+
+
+def _resolve_so_addresses(blocks, so_files):
+    """Resolve shared library addresses by matching against .so LOAD segments.
+
+    For each .so, tries to find a page-aligned runtime base address that
+    covers the most unresolved blocks. Removes matched blocks and continues
+    with the next .so.
+    """
+    so_loads = _get_so_loads(so_files)
+    if not so_loads:
+        return [(a, c, f"<unknown-so>@0x{a:x}") for a, c in blocks]
+
+    remaining = list(blocks)
+    resolved = []
+
+    # Try largest .so first
+    so_loads.sort(key=lambda x: x[2], reverse=True)
+
+    for so_path, load_vaddr, load_size in so_loads:
+        if not remaining:
+            break
+
+        best_base = None
+        best_matches = []
+
+        # Sample addresses to find the best runtime base
+        sample = remaining[:: max(1, len(remaining) // 50)]
+        for addr, _ in sample:
+            for page_off in range(0, 0x10000, 0x1000):
+                cb = ((addr - load_vaddr) - page_off) & ~0xFFF
+                if cb <= 0:
+                    continue
+                matches = [
+                    (a, c) for a, c in remaining
+                    if load_vaddr <= a - cb < load_vaddr + load_size
+                ]
+                if len(matches) > len(best_matches):
+                    best_base = cb
+                    best_matches = matches
+
+        if not best_matches:
+            continue
+
+        # Resolve matched addresses via addr2line on the .so
+        file_blocks = [(a - best_base, c, a) for a, c in best_matches]
+        so_resolved = _batch_resolve(
+            [(fv, c) for fv, c, _ in file_blocks], str(so_path)
+        )
+        so_name = so_path.name
+        matched_addrs = set(a for a, _ in best_matches)
+        for (_, count, orig_addr), (_, _, loc) in zip(file_blocks, so_resolved):
+            if loc != "??":
+                resolved.append((orig_addr, count, f"[{so_name}] {loc}"))
+            else:
+                resolved.append((orig_addr, count, f"[{so_name}] 0x{orig_addr:x}"))
+
+        remaining = [(a, c) for a, c in remaining if a not in matched_addrs]
+
+    resolved.extend([(a, c, f"<unknown-so>@0x{a:x}") for a, c in remaining])
+    return resolved
+
+
+def generate_report(resolved, top_n=20):
+    """Generate a sorted hotspot report string."""
+    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
+    total = sum(c for _, c, _ in resolved)
+    show = min(top_n, len(sorted_blocks))
+
+    lines = [
+        "=" * 72,
+        "BBV Hotspot Report",
+        "=" * 72,
+        f"Total basic blocks: {len(resolved)}",
+        f"Total executions:   {total}",
+        f"Showing top {show} blocks",
+        "",
+        f"{'Rank':<6}{'Count':<14}{'% Total':<10}Location",
+        "-" * 72,
+    ]
+    for rank, (addr, count, location) in enumerate(sorted_blocks[:show], 1):
+        pct = (count / total * 100) if total else 0
+        lines.append(
+            f"{rank:<6}{count:<14}{pct:>6.2f}%    0x{addr:x} {location}"
+        )
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze QEMU BBV output and generate hotspot report"
+    )
+    parser.add_argument("--bbv", required=True, help="Path to .bbv file")
+    parser.add_argument("--elf", required=True, help="Path to RISC-V ELF binary")
+    parser.add_argument(
+        "--sysroot", default=None,
+        help="Sysroot directory with shared libraries for resolving .so addresses",
+    )
+    parser.add_argument("--top", type=int, default=20, help="Top N blocks")
+    parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    args = parser.parse_args()
+
+    blocks = parse_bbv(args.bbv)
+    if not blocks:
+        print("Error: no basic blocks found in BBV file", file=sys.stderr)
+        sys.exit(1)
+    print(f"Parsed {len(blocks)} basic blocks from {args.bbv}")
+
+    resolved = resolve_addresses(blocks, args.elf, args.sysroot)
+    report = generate_report(resolved, args.top)
+
+    if args.output:
+        Path(args.output).write_text(report + "\n")
+        print(f"Report written to {args.output}")
+    else:
+        print(report)
+
+
+if __name__ == "__main__":
+    main()
