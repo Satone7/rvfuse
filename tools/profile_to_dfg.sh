@@ -127,7 +127,8 @@ if [[ -n "$OUTPUT_DIR" ]]; then
     echo "  Output:    $OUTPUT_DIR"
 fi
 
-cd "$PROJECT_ROOT" && python3 -m tools.dfg "${DFG_ARGS[@]}"
+cd "$PROJECT_ROOT"
+python3 -m tools.dfg "${DFG_ARGS[@]}"
 
 echo ""
 echo "=== Done ==="
