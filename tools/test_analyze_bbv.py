@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for analyze_bbv.py"""
 
+import json as json_module
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from analyze_bbv import build_report_data, generate_report, parse_bbv, ReportEntry, resolve_addresses
+from analyze_bbv import build_report_data, generate_report, generate_report_json, parse_bbv, ReportEntry, resolve_addresses
 
 
 class TestParseBbv(unittest.TestCase):
@@ -241,6 +242,71 @@ class TestBuildReportData(unittest.TestCase):
         entries = build_report_data(resolved)
         self.assertAlmostEqual(entries[0].pct, 0.0, places=2)
         self.assertAlmostEqual(entries[0].cumulative_pct, 0.0, places=2)
+
+
+class TestGenerateReportJson(unittest.TestCase):
+    def _entries(self, resolved):
+        return build_report_data(resolved)
+
+    def test_json_structure(self):
+        entries = self._entries([
+            (0x1000, 100, "func_a (a.c:1)"),
+            (0x2000, 50, "func_b (b.c:2)"),
+        ])
+        data = json_module.loads(generate_report_json(entries))
+        self.assertEqual(data["total_blocks"], 2)
+        self.assertEqual(data["total_executions"], 150)
+        self.assertEqual(len(data["blocks"]), 2)
+
+    def test_block_fields(self):
+        entries = self._entries([
+            (0x111f4, 12345, "conv2d (src/conv.c:100)"),
+        ])
+        data = json_module.loads(generate_report_json(entries))
+        block = data["blocks"][0]
+        self.assertEqual(block["rank"], 1)
+        self.assertEqual(block["address"], "0x111f4")
+        self.assertEqual(block["count"], 12345)
+        self.assertAlmostEqual(block["pct"], 100.0, places=2)
+        self.assertAlmostEqual(block["cumulative_pct"], 100.0, places=2)
+        self.assertEqual(block["location"], "conv2d (src/conv.c:100)")
+
+    def test_empty_input(self):
+        data = json_module.loads(generate_report_json([]))
+        self.assertEqual(data["total_blocks"], 0)
+        self.assertEqual(data["total_executions"], 0)
+        self.assertEqual(data["blocks"], [])
+
+
+class TestJsonOutputCli(unittest.TestCase):
+    def test_json_output_writes_file(self):
+        import subprocess
+        bbv_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".bbv", delete=False
+            ) as f:
+                f.write("0x10000 42\n0x10050 15\n")
+                bbv_path = f.name
+            json_path = bbv_path + ".json"
+            result = subprocess.run(
+                ["python3", "analyze_bbv.py",
+                 "--bbv", bbv_path,
+                 "--elf", "/fake/elf",
+                 "--json-output", json_path,
+                 "--sysroot", ""],
+                capture_output=True, text=True,
+                cwd=str(Path(__file__).parent),
+            )
+            # May fail on addr2line, but JSON should still be written
+            with open(json_path) as f:
+                data = json_module.load(f)
+            self.assertIn("total_blocks", data)
+            self.assertIn("blocks", data)
+        finally:
+            for p in (bbv_path, json_path):
+                if p:
+                    Path(p).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

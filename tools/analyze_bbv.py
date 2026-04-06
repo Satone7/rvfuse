@@ -6,6 +6,7 @@ and prints the most frequently executed blocks.
 """
 
 import argparse
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -378,6 +379,34 @@ def generate_report(entries, top_n=20):
     return "\n".join(lines)
 
 
+def generate_report_json(entries):
+    """Output all entries as JSON for DFG tool consumption.
+
+    Args:
+        entries: list[ReportEntry] from build_report_data (full untruncated list).
+
+    Returns:
+        JSON string with total_blocks, total_executions, and blocks array.
+    """
+    total_executions = sum(e.count for e in entries)
+    data = {
+        "total_blocks": len(entries),
+        "total_executions": total_executions,
+        "blocks": [
+            {
+                "rank": e.rank,
+                "address": f"0x{e.address:x}",
+                "count": e.count,
+                "pct": round(e.pct, 2),
+                "cumulative_pct": round(e.cumulative_pct, 2),
+                "location": e.location,
+            }
+            for e in entries
+        ],
+    }
+    return json.dumps(data, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Analyze QEMU BBV output and generate hotspot report"
@@ -389,6 +418,10 @@ def main():
         help="Sysroot directory with shared libraries for resolving .so addresses",
     )
     parser.add_argument("--top", type=int, default=20, help="Top N blocks")
+    parser.add_argument(
+        "--json-output",
+        help="Write JSON report to this file (all blocks, not truncated)",
+    )
     parser.add_argument("-o", "--output", help="Output file (default: stdout)")
     args = parser.parse_args()
 
@@ -407,6 +440,13 @@ def main():
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # JSON report
+    if args.json_output:
+        json_report = generate_report_json(entries)
+        Path(args.json_output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_output).write_text(json_report + "\n")
+        print(f"JSON report written to {args.json_output}")
 
 
 if __name__ == "__main__":
