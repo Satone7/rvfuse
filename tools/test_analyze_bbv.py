@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for analyze_bbv.py"""
 
+import json as json_module
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from analyze_bbv import generate_report, parse_bbv, resolve_addresses
+from analyze_bbv import build_report_data, generate_report, generate_report_json, parse_bbv, ReportEntry, resolve_addresses
 
 
 class TestParseBbv(unittest.TestCase):
@@ -153,28 +154,33 @@ class TestResolveAddresses(unittest.TestCase):
 
 
 class TestGenerateReport(unittest.TestCase):
+    def _entries(self, resolved):
+        """Helper: convert raw resolved tuples to ReportEntry via build_report_data."""
+        from analyze_bbv import build_report_data
+        return build_report_data(resolved)
+
     def test_sorted_by_count_descending(self):
-        resolved = [
+        entries = self._entries([
             (0x1000, 10, "func_a (a.c:1)"),
             (0x2000, 100, "func_b (b.c:2)"),
             (0x3000, 50, "func_c (c.c:3)"),
-        ]
-        report = generate_report(resolved, top_n=3)
+        ])
+        report = generate_report(entries, top_n=3)
         self.assertLess(report.index("func_b"), report.index("func_c"))
         self.assertLess(report.index("func_c"), report.index("func_a"))
 
     def test_respects_top_n(self):
-        resolved = [(i, 100 - i, f"func_{i}") for i in range(10)]
-        report = generate_report(resolved, top_n=3)
+        entries = self._entries([(i, 100 - i, f"func_{i}") for i in range(10)])
+        report = generate_report(entries, top_n=3)
         self.assertIn("func_0", report)
         self.assertNotIn("func_3", report)
 
     def test_percentage_calculation(self):
-        resolved = [
+        entries = self._entries([
             (0x1000, 75, "func_a (a.c:1)"),
             (0x2000, 25, "func_b (b.c:2)"),
-        ]
-        report = generate_report(resolved, top_n=2)
+        ])
+        report = generate_report(entries, top_n=2)
         self.assertIn("75.00%", report)
         self.assertIn("25.00%", report)
 
@@ -182,6 +188,125 @@ class TestGenerateReport(unittest.TestCase):
         report = generate_report([])
         self.assertIn("Total basic blocks: 0", report)
         self.assertIn("Total executions:   0", report)
+
+
+class TestBuildReportData(unittest.TestCase):
+    def test_sorts_by_count_descending(self):
+        resolved = [
+            (0x1000, 10, "func_a (a.c:1)"),
+            (0x2000, 100, "func_b (b.c:2)"),
+            (0x3000, 50, "func_c (c.c:3)"),
+        ]
+        entries = build_report_data(resolved)
+        addresses = [e.address for e in entries]
+        self.assertEqual(addresses, [0x2000, 0x3000, 0x1000])
+
+    def test_pct_calculation(self):
+        resolved = [
+            (0x1000, 75, "func_a (a.c:1)"),
+            (0x2000, 25, "func_b (b.c:2)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].pct, 75.0, places=2)
+        self.assertAlmostEqual(entries[1].pct, 25.0, places=2)
+
+    def test_cumulative_pct(self):
+        resolved = [
+            (0x1000, 60, "func_a (a.c:1)"),
+            (0x2000, 30, "func_b (b.c:2)"),
+            (0x3000, 10, "func_c (c.c:3)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].cumulative_pct, 60.0, places=2)
+        self.assertAlmostEqual(entries[1].cumulative_pct, 90.0, places=2)
+        self.assertAlmostEqual(entries[2].cumulative_pct, 100.0, places=2)
+
+    def test_rank_assignment(self):
+        resolved = [
+            (0x2000, 100, "func_b (b.c:2)"),
+            (0x1000, 50, "func_a (a.c:1)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertEqual(entries[0].rank, 1)
+        self.assertEqual(entries[1].rank, 2)
+
+    def test_empty_input(self):
+        entries = build_report_data([])
+        self.assertEqual(entries, [])
+
+    def test_zero_total_uses_zero_pct(self):
+        resolved = [
+            (0x1000, 0, "func_a (a.c:1)"),
+            (0x2000, 0, "func_b (b.c:2)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].pct, 0.0, places=2)
+        self.assertAlmostEqual(entries[0].cumulative_pct, 0.0, places=2)
+
+
+class TestGenerateReportJson(unittest.TestCase):
+    def _entries(self, resolved):
+        return build_report_data(resolved)
+
+    def test_json_structure(self):
+        entries = self._entries([
+            (0x1000, 100, "func_a (a.c:1)"),
+            (0x2000, 50, "func_b (b.c:2)"),
+        ])
+        data = json_module.loads(generate_report_json(entries))
+        self.assertEqual(data["total_blocks"], 2)
+        self.assertEqual(data["total_executions"], 150)
+        self.assertEqual(len(data["blocks"]), 2)
+
+    def test_block_fields(self):
+        entries = self._entries([
+            (0x111f4, 12345, "conv2d (src/conv.c:100)"),
+        ])
+        data = json_module.loads(generate_report_json(entries))
+        block = data["blocks"][0]
+        self.assertEqual(block["rank"], 1)
+        self.assertEqual(block["address"], "0x111f4")
+        self.assertEqual(block["count"], 12345)
+        self.assertAlmostEqual(block["pct"], 100.0, places=2)
+        self.assertAlmostEqual(block["cumulative_pct"], 100.0, places=2)
+        self.assertEqual(block["location"], "conv2d (src/conv.c:100)")
+
+    def test_empty_input(self):
+        data = json_module.loads(generate_report_json([]))
+        self.assertEqual(data["total_blocks"], 0)
+        self.assertEqual(data["total_executions"], 0)
+        self.assertEqual(data["blocks"], [])
+
+
+class TestJsonOutputCli(unittest.TestCase):
+    def test_json_output_writes_file(self):
+        import subprocess
+        bbv_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".bbv", delete=False
+            ) as f:
+                f.write("0x10000 42\n0x10050 15\n")
+                bbv_path = f.name
+            json_path = bbv_path + ".json"
+            result = subprocess.run(
+                ["python3", "analyze_bbv.py",
+                 "--bbv", bbv_path,
+                 "--elf", "/fake/elf",
+                 "--json-output", json_path,
+                 "--sysroot", ""],
+                capture_output=True, text=True,
+                cwd=str(Path(__file__).parent),
+            )
+            # May fail on addr2line, but JSON should still be written
+            with open(json_path) as f:
+                data = json_module.load(f)
+            self.assertIn("total_blocks", data)
+            self.assertIn("blocks", data)
+        finally:
+            for p in (bbv_path, json_path):
+                if p:
+                    Path(p).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
