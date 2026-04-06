@@ -127,7 +127,7 @@ Single bash script at repository root. Tests in `tests/setup/`.
 **Purpose**: Final quality, documentation, and validation
 
 - [x] T032 [P] Add `setup-report.txt` to `.gitignore`
-- [ ] T033 Run `shellcheck setup.sh` and fix all warnings
+- [x] T033 Run `shellcheck setup.sh` and fix all warnings
 - [x] T034 [P] Add `chmod +x setup.sh` and verify invocation from quickstart.md matches actual script behavior
 
 ---

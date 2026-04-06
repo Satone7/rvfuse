@@ -13,8 +13,11 @@ readonly MIN_GIT_VERSION_MAJOR=2
 readonly MIN_GIT_VERSION_MINOR=30
 readonly TOTAL_STEPS=5
 
-# Submodule URLs (ADR-004: traceable sources)
+# Submodule URLs — documented here per ADR-004 (traceable sources);
+# actual URLs come from .gitmodules at submodule-update time.
+# shellcheck disable=SC2034
 readonly QEMU_URL="https://github.com/XUANTIE-RV/qemu"
+# shellcheck disable=SC2034
 readonly LLVM_URL="https://github.com/XUANTIE-RV/llvm-project"
 
 # --- Global state ---
@@ -239,6 +242,7 @@ check_artifacts() {
 
 record_step_started() {
     local step_num="$1"
+    # shellcheck disable=SC2034  # consumed by data model; future report enhancement
     STEP_STARTED[$step_num]="$(date -Iseconds)"
     log_info "=== Step ${step_num}: ${STEP_NAMES[$step_num]} ==="
 }
@@ -249,6 +253,7 @@ record_step_result() {
     local message="${3:-}"
     STEP_STATUS[$step_num]="$status"
     STEP_MESSAGE[$step_num]="$message"
+    # shellcheck disable=SC2034  # consumed by data model; future report enhancement
     STEP_FINISHED[$step_num]="$(date -Iseconds)"
 
     case "$status" in

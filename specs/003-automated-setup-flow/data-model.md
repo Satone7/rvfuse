@@ -79,6 +79,6 @@ Aggregated results for the entire setup flow, persisted as a plain-text file.
 ## Validation Rules
 
 - Step numbers must be in range 1-5; invalid `--force` values produce an error and halt
-- Artifact paths are relative to project root; absolute paths are rejected
+- Artifact paths are relative to project root (prefixed with `PROJECT_ROOT` at runtime)
 - Report file is overwritten on each run (no accumulation across runs)
 - Empty artifact checks (no artifacts defined) always cause the step to execute

@@ -61,7 +61,7 @@ tests/
     └── test_full_flow.sh    # Integration test: full flow
 ```
 
-**Structure Decision**: Single `setup.sh` file with internal functions (no library splitting). The script is small enough (<300 lines estimated) that splitting into multiple files adds complexity without benefit. All functions live within `setup.sh`, organized by step number. Tests are colocated in `tests/setup/`.
+**Structure Decision**: Single `setup.sh` file with internal functions (no library splitting). The script is ~570 lines, organized by step number with clear section headers. Splitting into multiple files would add complexity without benefit at this scale. Tests are colocated in `tests/setup/`.
 
 ## Design
 
@@ -138,9 +138,8 @@ Overall: PASS
 
 Failure example:
 ```
-Step 3: Initialize Dependencies [FAIL]
-  Error: git submodule update failed for third_party/qemu
-  Hint: Check network connectivity and retry with --force 3
+Step 3: Initialize Dependencies         [FAIL]  failed to initialize: third_party/qemu
+  Hint: Check network connectivity and GitHub status
 
 Overall: FAIL
 ```

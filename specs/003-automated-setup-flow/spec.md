@@ -58,7 +58,7 @@ A contributor reviews a persisted setup report that summarizes the outcome of ea
 ### Edge Cases
 
 - What happens when the script is run from a directory that is not the project root? The script MUST detect this and exit with an error message directing the user to the correct directory.
-- What happens when Step 3 (dependency initialization) fails due to a network error? The script MUST report the failure, not mark the step as complete, and not proceed to Step 5 until the user re-runs with force on Step 3.
+- What happens when Step 3 (dependency initialization) fails due to a network error? The script MUST report the failure, not mark the step as complete, and continue to remaining steps (including Step 5 report generation) to collect as much diagnostic information as possible.
 - What happens when the user forces re-execution of Step 1 on an existing clone? The script MUST warn that Step 1 (clone) only applies in the context of first-time repository setup and skip it or provide clear guidance.
 - What happens when git is not installed or below version 2.30? The script MUST check prerequisites before starting and exit with a clear error if they are not met.
 - What happens when disk space is insufficient for submodule clones? The script SHOULD check available disk space before Step 3 and warn if below the recommended ~20GB.
@@ -76,7 +76,7 @@ A contributor reviews a persisted setup report that summarizes the outcome of ea
 - **FR-006**: The script MUST generate a setup completion report as a persistent file (Step 5)
 - **FR-007**: The report MUST include the execution status (pass/fail/skipped) for every step
 - **FR-008**: The report MUST include warnings and error messages encountered during execution
-- **FR-009**: The script MUST check prerequisites (git version, disk space, network access) before beginning execution
+- **FR-009**: The script MUST check prerequisites (git version, disk space) before beginning execution
 - **FR-010**: The script MUST exit with a non-zero status code if any mandatory step fails
 - **FR-011**: The script MUST display progress information to the user during execution, indicating which step is currently running
 - **FR-012**: The script MUST validate that it is running from the project root directory
