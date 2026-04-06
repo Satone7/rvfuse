@@ -26,6 +26,7 @@ from dfg.agent import AgentDispatcher
 from dfg.dfg import build_dfg
 from dfg.instruction import ISARegistry
 from dfg.output import convert_dot_to_png, write_dfg_files, write_summary
+from dfg.filter import select_addresses
 from dfg.parser import parse_disas
 
 logger = logging.getLogger("dfg")
@@ -274,8 +275,8 @@ def _process_bb_worker(
     return process_single_bb(bb, registry, agent, output_dir, buffer_logs=True)
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
-    """Build and return the argument parser."""
+def build_arg_parser(argv: list[str] | None = None):
+    """Build the argument parser, parse *argv*, validate, and return namespace."""
     parser = argparse.ArgumentParser(
         prog="tools.dfg",
         description="Generate Data Flow Graphs (DFG) from .disas basic-block files.",
@@ -310,6 +311,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Only process specified BB ID (debugging)",
     )
     parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Path to analyze_bbv JSON hotspot report for selective BB filtering",
+    )
+    parser.add_argument(
+        "--coverage",
+        type=int,
+        default=None,
+        help="Coverage threshold %% (e.g. 80 = include BBs up to 80%% cumulative execution)",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=20,
+        help="Number of top-ranked BBs to include when using --report (default: 20)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         default=False,
@@ -333,7 +352,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of parallel processes for BB handling (default: 1)",
     )
-    return parser
+    parsed = parser.parse_args(argv) if argv is not None else parser.parse_args()
+    if parsed.report is not None and parsed.bb_filter is not None:
+        parser.error("--report and --bb-filter are mutually exclusive")
+    if parsed.coverage is not None and parsed.report is None:
+        parser.error("--coverage requires --report")
+    return parsed
 
 
 def load_isa_registry(extensions: str) -> ISARegistry:
@@ -358,10 +382,11 @@ def load_isa_registry(extensions: str) -> ISARegistry:
 
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point. Returns exit code."""
-    args = build_arg_parser().parse_args(argv)
+    args = build_arg_parser(argv)
 
     if args.jobs < 1:
-        build_arg_parser().error("--jobs must be >= 1")
+        print("ERROR: --jobs must be >= 1", file=sys.stderr)
+        return 1
 
     # -- validate input --------------------------------------------------------
     disas_path: Path = args.disas
@@ -403,8 +428,50 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     logger.info("Parsed %d basic block(s) from %s", len(blocks), disas_path)
 
-    # -- bb filter -------------------------------------------------------------
-    if args.bb_filter is not None:
+    # -- report-driven filtering -----------------------------------------------
+    blocks_from_report = 0
+    blocks_matched = 0
+    blocks_skipped_not_in_disas = 0
+
+    if args.report is not None:
+        try:
+            selected_addrs = select_addresses(
+                args.report,
+                top_n=args.top,
+                coverage=args.coverage,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error("Failed to load report: %s", exc)
+            return 1
+        blocks_from_report = len(selected_addrs)
+        if not selected_addrs:
+            logger.error("Report contains no blocks to process")
+            return 1
+        blocks_skipped_not_in_disas = blocks_from_report - len(
+            {bb.vaddr for bb in blocks if bb.vaddr in selected_addrs}
+        )
+        blocks = [bb for bb in blocks if bb.vaddr in selected_addrs]
+        blocks_matched = len(blocks)
+        if not blocks:
+            logger.error(
+                "None of the %d addresses from the report matched BBs in %s",
+                blocks_from_report, disas_path,
+            )
+            return 1
+        if blocks_skipped_not_in_disas > 0:
+            logger.warning(
+                "%d address(es) from report not found in .disas — skipped",
+                blocks_skipped_not_in_disas,
+            )
+        filter_mode = "coverage" if args.coverage is not None else "top"
+        filter_value = args.coverage if args.coverage is not None else args.top
+        logger.info(
+            "Report filter (%s=%s): %d/%d BBs matched",
+            filter_mode, filter_value, blocks_matched, blocks_from_report,
+        )
+
+    # -- bb filter (debugging, single BB) --------------------------------------
+    elif args.bb_filter is not None:
         blocks = [bb for bb in blocks if bb.bb_id == args.bb_filter]
         if not blocks:
             logger.error("No basic block with ID %d found", args.bb_filter)
@@ -488,6 +555,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # -- write summary ---------------------------------------------------------
     stats = {
+        "filter_mode": ("coverage" if args.report and args.coverage is not None
+                        else "top" if args.report is not None
+                        else "none"),
+        "filter_value": args.coverage if args.report and args.coverage is not None
+                         else args.top if args.report is not None
+                         else None,
+        "blocks_from_report": blocks_from_report if args.report else 0,
+        "blocks_matched": blocks_matched if args.report else 0,
+        "blocks_skipped_not_in_disas": blocks_skipped_not_in_disas if args.report else 0,
         "total_blocks": len(blocks),
         "script_generated": script_generated,
         "agent_generated": agent_generated,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -132,3 +133,27 @@ class TestFilterIntegration:
         blocks = parse_disas(_sample_disas())
         filtered = [bb for bb in blocks if bb.vaddr in addrs]
         assert len(filtered) == 0
+
+
+class TestMutualExclusion:
+    """--report and --bb-filter are mutually exclusive."""
+
+    def test_report_and_bb_filter_rejected(self):
+        from dfg.__main__ import build_arg_parser
+        with pytest.raises(SystemExit):
+            build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--bb-filter", "1"])
+
+    def test_report_accepted_alone(self):
+        from dfg.__main__ import build_arg_parser
+        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json"])
+        assert args.report == Path("r.json")
+
+    def test_report_with_coverage(self):
+        from dfg.__main__ import build_arg_parser
+        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--coverage", "80"])
+        assert args.coverage == 80
+
+    def test_report_with_top(self):
+        from dfg.__main__ import build_arg_parser
+        args = build_arg_parser(["--disas", "x.disas", "--report", "r.json", "--top", "5"])
+        assert args.top == 5
