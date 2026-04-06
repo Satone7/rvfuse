@@ -118,10 +118,6 @@ git checkout master
 git merge --no-ff <feature-branch>
 ```
 
-## Environment Variables
-
-- **`MY_GITHUB_TOKEN`**: GitHub personal access token. Required when using `gh` CLI or any tool that authenticates with GitHub. Set via `export MY_GITHUB_TOKEN=<token>` before running commands.
-
 ## Recent Changes
 
 - 001-riscv-fusion-setup: Added N/A (documentation-only phase) + Git (for submodule integration), Markdown rendering
