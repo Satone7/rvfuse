@@ -278,7 +278,7 @@ step1_clone() {
     record_step_started "$step"
 
     if [[ -e "${PROJECT_ROOT}/.git" ]]; then
-        record_step_result "$step" "SKIPPED" "already cloned"
+        record_step_result "$step" "SKIPPED" "already cloned — only applies to first-time setup"
         return 0
     fi
 
@@ -481,7 +481,7 @@ step5_report() {
 
         echo ""
         echo "Overall: ${overall}"
-    } > "$report_path"
+    } > "$report_path" || true  # || true prevents set -e from exiting before file check
 
     if [[ ! -f "$report_path" ]]; then
         record_step_result "$step" "FAIL" "could not write ${REPORT_FILE}"

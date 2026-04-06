@@ -54,11 +54,11 @@ setup.sh                # Main entry point
 setup-report.txt        # Generated report (not committed)
 tests/
 └── setup/
-    ├── test_prereqs.sh      # Prerequisite checking tests
-    ├── test_artifacts.sh    # Artifact detection tests
-    ├── test_steps.sh        # Individual step execution tests
-    ├── test_report.sh       # Report generation tests
-    └── test_full_flow.sh    # Integration test: full flow
+    ├── test_args.sh        # CLI argument parsing tests
+    ├── test_prereqs.sh     # Prerequisite checking tests
+    ├── test_artifacts.sh   # Artifact detection tests
+    ├── test_force.sh       # Force re-execution tests
+    └── test_report.sh      # Report generation tests
 ```
 
 **Structure Decision**: Single `setup.sh` file with internal functions (no library splitting). The script is ~570 lines, organized by step number with clear section headers. Splitting into multiple files would add complexity without benefit at this scale. Tests are colocated in `tests/setup/`.
@@ -125,7 +125,7 @@ Options:
 ```
 RVFuse Setup Report
 Generated: 2026-04-06T14:30:00+08:00
-Options: --shallow
+Options: shallow
 
 Step 1: Clone Repository        [SKIPPED] (already cloned)
 Step 2: Review Project Scope    [PASS]

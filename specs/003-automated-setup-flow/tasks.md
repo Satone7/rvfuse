@@ -70,7 +70,7 @@ Single bash script at repository root. Tests in `tests/setup/`.
 
 ### Integration Test for User Story 1
 
-- [x] T020 [US1] Write integration test for full setup flow (mocked submodule commands) verifying all steps execute and report is generated in `tests/setup/test_full_flow.sh`
+- [x] T020 [US1] Write integration tests for full setup flow (mocked submodule commands) verifying all steps execute and report is generated — covered across `test_force.sh` and `test_report.sh`
 
 **Checkpoint**: User Story 1 complete — `./setup.sh` runs the full flow with artifact-based skip logic and generates `setup-report.txt`.
 
@@ -115,7 +115,7 @@ Single bash script at repository root. Tests in `tests/setup/`.
 ### Implementation for User Story 3
 
 - [x] T029 [US3] Enhance `step5_report()` report format: add "Generated:" timestamp, "Options:" line reflecting CLI flags used, and detailed per-step messages (e.g., "(7/7 checks)", "(already cloned)") in `setup.sh`
-- [x] T030 [US3] Enhance `step5_report()` failure format: include indented "Error:" and "Hint:" lines under failed steps in `setup.sh`
+- [x] T030 [US3] Enhance `step5_report()` failure format: include indented "Hint:" lines under failed steps in `setup.sh`
 - [x] T031 [US3] Ensure Step 4 sub-check details are included in report (e.g., which verification checks passed/failed) in `setup.sh`
 
 **Checkpoint**: All user stories complete — setup script fully functional with rich, reviewable reports.
