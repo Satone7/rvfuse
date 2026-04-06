@@ -37,7 +37,7 @@ setup() {
     STEP_STARTED=([1]="" [2]="" [3]="" [4]="" [5]="")
     STEP_FINISHED=([1]="" [2]="" [3]="" [4]="" [5]="")
     STEP_WARNINGS=()
-    REPORT_FILE="${SANDBOX}/setup-report.txt"
+    REPORT_FILE="setup-report.txt"
 }
 
 teardown() {
