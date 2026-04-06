@@ -7,7 +7,7 @@ set -euo pipefail
 
 # --- Script-level constants ---
 
-readonly REPORT_FILE="setup-report.txt"
+REPORT_FILE="setup-report.txt"
 readonly MIN_DISK_GB=20
 readonly MIN_GIT_VERSION_MAJOR=2
 readonly MIN_GIT_VERSION_MINOR=30
@@ -215,19 +215,22 @@ check_prerequisites() {
 check_artifacts() {
     local -a artifacts=("$@")
     local all_exist=0
+    local missing=()
 
     for artifact in "${artifacts[@]}"; do
         local full_path="${PROJECT_ROOT}/${artifact}"
         if [[ ! -e "$full_path" ]]; then
             all_exist=1
-            break
-        fi
-        # For file-type paths, check non-empty
-        if [[ -f "$full_path" && ! -s "$full_path" ]]; then
+            missing+=("$artifact")
+        elif [[ -f "$full_path" && ! -s "$full_path" ]]; then
             all_exist=1
-            break
+            missing+=("$artifact (empty)")
         fi
     done
+
+    if (( ${#missing[@]} > 0 )); then
+        log_info "Missing artifacts: ${missing[*]}"
+    fi
 
     return "$all_exist"
 }
