@@ -13,6 +13,8 @@ RVFuse is a RISC-V instruction fusion research platform. The long-term goal is t
 **Current Phase**: Setup foundation (repository structure, dependency references, setup guidance). Research workflows are deferred to future features.
 
 ## Active Technologies
+- Bash 4.0+ (available on all modern Linux x86_64) + Git 2.30+, standard Unix utilities (ls, cat, grep, df, date) (003-automated-setup-flow)
+- File system — report persisted as `setup-report.txt` (003-automated-setup-flow)
 
 - C++17 (yolo_runner.cpp), Docker (RISC-V native build), Python 3 (analyze_bbv.py, prepare_model.sh), Git submodules (QEMU, ONNX Runtime source)
 
@@ -119,6 +121,7 @@ git merge --no-ff <feature-branch>
 ```
 
 ## Recent Changes
+- 003-automated-setup-flow: Added Bash 4.0+ (available on all modern Linux x86_64) + Git 2.30+, standard Unix utilities (ls, cat, grep, df, date)
 
 - 001-riscv-fusion-setup: Added N/A (documentation-only phase) + Git (for submodule integration), Markdown rendering
 - 002-docker-llvm-toolchain: Added Bash (wrapper scripts), Dockerfile (image definition) + Docker, LLVM 13.0.0 (pre-built or from official releases)
