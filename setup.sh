@@ -384,8 +384,146 @@ step_artifacts_exist() {
 }
 
 # =============================================================================
-# Placeholder — step functions and run_setup() will be added by Tasks 3-8
+# Force Cleanup Functions
 # =============================================================================
+
+cleanup_step() {
+    local step_num="$1"
+    case "$step_num" in
+        0)
+            log_info "Cleaning Step 0 artifacts (submodules)..."
+            for dep_path in third_party/qemu third_party/llvm-project; do
+                if [[ -d "${PROJECT_ROOT}/${dep_path}" ]]; then
+                    git submodule deinit -f "$dep_path" 2>/dev/null || true
+                    rm -rf "${PROJECT_ROOT}/${dep_path}"
+                fi
+            done
+            ;;
+        1)
+            log_info "Cleaning Step 1 artifacts (model files)..."
+            rm -f "${PROJECT_ROOT}/output/yolo11n.onnx"
+            rm -f "${PROJECT_ROOT}/output/yolo11n.ort"
+            rm -f "${PROJECT_ROOT}/output/test.jpg"
+            ;;
+        2)
+            log_info "Cleaning Step 2 artifacts (QEMU build)..."
+            rm -rf "${PROJECT_ROOT}/third_party/qemu/build"
+            ;;
+        3)
+            log_info "Cleaning Step 3 artifacts (Docker build)..."
+            rm -f "${PROJECT_ROOT}/output/yolo_inference"
+            rm -rf "${PROJECT_ROOT}/output/sysroot"
+            ;;
+        4)
+            log_info "Cleaning Step 4 artifacts (BBV output)..."
+            rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+            ;;
+        5)
+            log_info "Cleaning Step 5 artifacts (hotspot report)..."
+            rm -f "${PROJECT_ROOT}/output/hotspot.json"
+            ;;
+        6)
+            log_info "Cleaning Step 6 artifacts (DFG output)..."
+            rm -rf "${PROJECT_ROOT}/dfg"
+            ;;
+        7)
+            # No cleanup for report step
+            ;;
+    esac
+}
+
+# =============================================================================
+# Step 0: Init Submodules
+# =============================================================================
+
+step0_init_submodules() {
+    local step=0
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    local clone_args=("--init")
+    if (( SHALLOW_CLONE == 1 )); then
+        clone_args+=("--depth" "1")
+    fi
+
+    local failed_deps=()
+    for dep_path in "third_party/qemu" "third_party/llvm-project"; do
+        local dep_marker="${PROJECT_ROOT}/${dep_path}/.git"
+        if [[ -e "$dep_marker" ]]; then
+            log_info "  ${dep_path}: already initialized"
+            continue
+        fi
+        log_info "  Initializing ${dep_path}..."
+        if ! git submodule update "${clone_args[@]}" "$dep_path" 2>&1; then
+            failed_deps+=("$dep_path")
+            log_error "  Failed to initialize ${dep_path}"
+        else
+            log_info "  ${dep_path}: initialized"
+        fi
+    done
+
+    if (( ${#failed_deps[@]} > 0 )); then
+        record_step_result "$step" "FAIL" "failed to initialize: ${failed_deps[*]}"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "all submodules initialized"
+    return 0
+}
+
+# =============================================================================
+# Step 1: Prepare Model
+# =============================================================================
+
+step1_prepare_model() {
+    local step=1
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/prepare_model.sh" 2>&1; then
+        record_step_result "$step" "FAIL" "prepare_model.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "yolo11n.ort + test.jpg ready"
+    return 0
+}
+
+# =============================================================================
+# run_setup() — Main Execution Loop
+# =============================================================================
+
+run_setup() {
+    for step_num in 0 1 2 3 4 5 6 7; do
+        # Step 7 always runs (report generation)
+        if (( step_num == 7 )); then
+            step7_report
+            continue
+        fi
+
+        # Check if forced
+        if is_step_forced "$step_num"; then
+            cleanup_step "$step_num"
+        # Check if artifacts exist (skip if they do)
+        elif step_artifacts_exist "$step_num"; then
+            STEP_STATUS[$step_num]="SKIPPED"
+            STEP_MESSAGE[$step_num]="artifacts exist"
+            log_info "=== Step ${step_num}: ${STEP_NAMES[$step_num]} ==="
+            log_info "Step ${step_num}: SKIPPED (artifacts exist)"
+            continue
+        fi
+
+        # Run the step
+        case "$step_num" in
+            0) step0_init_submodules ;;
+            1) step1_prepare_model ;;
+            # Steps 2-6: added by Tasks 4-7
+            2) log_info "=== Step 2: ${STEP_NAMES[2]} ===" ; record_step_result 2 "FAIL" "not yet implemented" ;;
+            3) log_info "=== Step 3: ${STEP_NAMES[3]} ===" ; record_step_result 3 "FAIL" "not yet implemented" ;;
+            4) log_info "=== Step 4: ${STEP_NAMES[4]} ===" ; record_step_result 4 "FAIL" "not yet implemented" ;;
+            5) log_info "=== Step 5: ${STEP_NAMES[5]} ===" ; record_step_result 5 "FAIL" "not yet implemented" ;;
+            6) log_info "=== Step 6: ${STEP_NAMES[6]} ===" ; record_step_result 6 "FAIL" "not yet implemented" ;;
+        esac || true
+    done
+}
 
 main() {
     parse_args "$@"
