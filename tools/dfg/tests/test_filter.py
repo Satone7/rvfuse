@@ -163,3 +163,8 @@ class TestMutualExclusion:
         from dfg.__main__ import parse_args
         args = parse_args(["--disas", "x.disas", "--report", "r.json", "--top", "5"])
         assert args.top == 5
+
+    def test_coverage_without_report_rejected(self):
+        from dfg.__main__ import parse_args
+        with pytest.raises(SystemExit):
+            parse_args(["--disas", "x.disas", "--coverage", "80"])

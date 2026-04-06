@@ -432,6 +432,8 @@ def main(argv: list[str] | None = None) -> int:
     blocks_from_report = 0
     blocks_matched = 0
     blocks_skipped_not_in_disas = 0
+    filter_mode = "none"
+    filter_value = None
 
     if args.report is not None:
         try:
@@ -555,15 +557,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # -- write summary ---------------------------------------------------------
     stats = {
-        "filter_mode": ("coverage" if args.report and args.coverage is not None
-                        else "top" if args.report is not None
-                        else "none"),
-        "filter_value": args.coverage if args.report and args.coverage is not None
-                         else args.top if args.report is not None
-                         else None,
-        "blocks_from_report": blocks_from_report if args.report else 0,
-        "blocks_matched": blocks_matched if args.report else 0,
-        "blocks_skipped_not_in_disas": blocks_skipped_not_in_disas if args.report else 0,
+        "filter_mode": filter_mode,
+        "filter_value": filter_value,
+        "blocks_from_report": blocks_from_report,
+        "blocks_matched": blocks_matched,
+        "blocks_skipped_not_in_disas": blocks_skipped_not_in_disas,
         "total_blocks": len(blocks),
         "script_generated": script_generated,
         "agent_generated": agent_generated,

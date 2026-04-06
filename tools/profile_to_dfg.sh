@@ -50,6 +50,10 @@ if [[ -z "$ELF" ]]; then
     echo "Error: --elf is required" >&2
     exit 1
 fi
+if [[ ! -f "$ELF" ]]; then
+    echo "Error: ELF file not found: $ELF" >&2
+    exit 1
+fi
 if [[ ! -f "$BBV" ]]; then
     echo "Error: BBV file not found: $BBV" >&2
     exit 1
