@@ -243,7 +243,7 @@ check_prerequisites() {
     fi
 
     local git_version
-    git_version="$(git --version 2>/dev/null | grep -oP '\d+\.\d+' || true)"
+    git_version="$(git --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' || true)"
     local git_major git_minor
     git_major="${git_version%%.*}"
     git_minor="${git_version#*.}"
@@ -763,7 +763,6 @@ run_setup() {
         case "$step_num" in
             0) step0_init_submodules ;;
             1) step1_prepare_model ;;
-            # Steps 2-6: added by Tasks 4-7
             2) step2_build_qemu ;;
             3) step3_docker_build ;;
             4) step4_bbv_profiling ;;
