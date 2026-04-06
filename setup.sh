@@ -684,6 +684,58 @@ step6_dfg_generation() {
 }
 
 # =============================================================================
+# Step 7: Generate Report
+# =============================================================================
+
+step7_report() {
+    local step=7
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    local report_path="${PROJECT_ROOT}/${REPORT_FILE}"
+    local overall="PASS"
+
+    {
+        echo "RVFuse Setup Report"
+        echo "Generated: $(date -Iseconds)"
+        echo "Options: ${SCRIPT_OPTIONS}"
+        echo ""
+
+        for i in 0 1 2 3 4 5 6 7; do
+            local status="${STEP_STATUS[$i]:-UNKNOWN}"
+            local message="${STEP_MESSAGE[$i]:-}"
+            local step_line="Step ${i}: ${STEP_NAMES[$i]}"
+
+            # Pad step line to 36 chars for alignment
+            local padded
+            padded="$(printf '%-36s' "$step_line")"
+
+            if [[ "$status" == "SKIPPED" ]]; then
+                echo "${padded}[SKIPPED] (${message})"
+            elif [[ "$status" == "PASS" ]]; then
+                echo "${padded}[PASS]   ${message}"
+            elif [[ "$status" == "FAIL" ]]; then
+                echo "${padded}[FAIL]   ${message}"
+                overall="FAIL"
+            else
+                echo "${padded}[${status}]"
+                overall="FAIL"
+            fi
+        done
+
+        echo ""
+        echo "Overall: ${overall}"
+    } > "$report_path" || true  # || true prevents set -e from exiting before file check
+
+    if [[ ! -f "$report_path" ]]; then
+        record_step_result "$step" "FAIL" "could not write ${REPORT_FILE}"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "report written to ${REPORT_FILE}"
+    return 0
+}
+
+# =============================================================================
 # run_setup() — Main Execution Loop
 # =============================================================================
 
