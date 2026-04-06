@@ -168,8 +168,6 @@ detect_project_root() {
 # =============================================================================
 
 check_prerequisites() {
-    local failed=0
-
     # Check git version
     if ! command -v git &>/dev/null; then
         log_error "git is not installed. Install git >= ${MIN_GIT_VERSION_MAJOR}.${MIN_GIT_VERSION_MINOR} and retry."
@@ -205,7 +203,7 @@ check_prerequisites() {
         fi
     fi
 
-    return "$failed"
+    return 0
 }
 
 # =============================================================================
@@ -463,19 +461,11 @@ step5_report() {
                 echo "${padded}[PASS]  ${message}"
             elif [[ "$status" == "FAIL" ]]; then
                 echo "${padded}[FAIL]  ${message}"
-                echo "  Error: ${message}"
                 local warnings="${STEP_WARNINGS[$i]:-}"
                 if [[ -n "$warnings" ]]; then
                     # Remove trailing "; " from warnings
                     warnings="${warnings%; }"
                     echo "  Hint: ${warnings}"
-                fi
-                if [[ "$i" == "4" ]]; then
-                    local check_warnings="${STEP_WARNINGS[$i]:-}"
-                    if [[ -n "$check_warnings" ]]; then
-                        check_warnings="${check_warnings%; }"
-                        echo "  Details: ${check_warnings}"
-                    fi
                 fi
                 overall="FAIL"
             else

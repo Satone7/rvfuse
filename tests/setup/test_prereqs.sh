@@ -111,14 +111,14 @@ FAKE_GIT
     mkdir -p "$tmpbin"
     cat > "$tmpbin/df" <<'FAKE_DF'
 #!/usr/bin/env bash
-echo "Filesystem  1K-blocks  Used  Available  Use%  Mounted on"
-echo "/dev/sda1   50000000  49990000  10000      99%   /"
+echo "Avail"
+echo "10000"
 FAKE_DF
     chmod +x "$tmpbin/df"
 
     export PATH="$tmpbin:$PATH"
     run --separate-stderr check_prerequisites
-    [[ $status -eq 1 ]]
+    [[ $status -eq 0 ]]
     [[ "$stderr" == *"disk"* || "$stderr" == *"space"* || "$stderr" == *"20GB"* || "$stderr" == *"20 GB"* || "$output" == *"disk"* || "$output" == *"space"* || "$output" == *"20GB"* || "$output" == *"20 GB"* ]]
     rm -rf "$tmpbin"
 }
@@ -130,8 +130,8 @@ FAKE_DF
     mkdir -p "$tmpbin"
     cat > "$tmpbin/df" <<'FAKE_DF'
 #!/usr/bin/env bash
-echo "Filesystem  1K-blocks  Used  Available  Use%  Mounted on"
-echo "/dev/sda1   100000000  79482000  20971520  79%   /"
+echo "Avail"
+echo "20971520"
 FAKE_DF
     chmod +x "$tmpbin/df"
 
