@@ -6,9 +6,21 @@ and prints the most frequently executed blocks.
 """
 
 import argparse
+import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass
+class ReportEntry:
+    rank: int
+    address: int
+    count: int
+    pct: float
+    cumulative_pct: float
+    location: str
 
 
 def parse_bbv(bbv_path):
@@ -126,6 +138,31 @@ def resolve_addresses(blocks, elf_path, sysroot=None):
         resolved.extend(_resolve_so_addresses(so_blocks, so_files))
 
     return resolved
+
+
+def build_report_data(resolved):
+    """Sort resolved blocks by count descending, compute pct and cumulative_pct.
+
+    Returns full untruncated list of ReportEntry objects.
+    """
+    if not resolved:
+        return []
+    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
+    total = sum(c for _, c, _ in resolved)
+    entries = []
+    cumulative = 0.0
+    for rank, (addr, count, location) in enumerate(sorted_blocks, 1):
+        pct = (count / total * 100) if total else 0.0
+        cumulative += pct
+        entries.append(ReportEntry(
+            rank=rank,
+            address=addr,
+            count=count,
+            pct=pct,
+            cumulative_pct=cumulative,
+            location=location,
+        ))
+    return entries
 
 
 def _collect_so_files(sysroot):
@@ -304,29 +341,70 @@ def _resolve_so_addresses(blocks, so_files):
     return resolved
 
 
-def generate_report(resolved, top_n=20):
-    """Generate a sorted hotspot report string."""
-    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
-    total = sum(c for _, c, _ in resolved)
-    show = min(top_n, len(sorted_blocks))
+def generate_report(entries, top_n=20):
+    """Generate a sorted hotspot report string from ReportEntry list.
+
+    Args:
+        entries: list[ReportEntry] from build_report_data (must be pre-sorted).
+        top_n: maximum number of entries to render in the text table.
+
+    Returns:
+        Formatted report string.
+    """
+    if not entries:
+        total_blocks = 0
+        total_executions = 0
+    else:
+        total_blocks = len(entries)
+        total_executions = sum(e.count for e in entries)
+
+    show = min(top_n, len(entries))
 
     lines = [
         "=" * 72,
         "BBV Hotspot Report",
         "=" * 72,
-        f"Total basic blocks: {len(resolved)}",
-        f"Total executions:   {total}",
+        f"Total basic blocks: {total_blocks}",
+        f"Total executions:   {total_executions}",
         f"Showing top {show} blocks",
         "",
         f"{'Rank':<6}{'Count':<14}{'% Total':<10}Location",
         "-" * 72,
     ]
-    for rank, (addr, count, location) in enumerate(sorted_blocks[:show], 1):
-        pct = (count / total * 100) if total else 0
+    for entry in entries[:show]:
         lines.append(
-            f"{rank:<6}{count:<14}{pct:>6.2f}%    0x{addr:x} {location}"
+            f"{entry.rank:<6}{entry.count:<14}{entry.pct:>6.2f}%    "
+            f"0x{entry.address:x} {entry.location}"
         )
     return "\n".join(lines)
+
+
+def generate_report_json(entries):
+    """Output all entries as JSON for DFG tool consumption.
+
+    Args:
+        entries: list[ReportEntry] from build_report_data (full untruncated list).
+
+    Returns:
+        JSON string with total_blocks, total_executions, and blocks array.
+    """
+    total_executions = sum(e.count for e in entries)
+    data = {
+        "total_blocks": len(entries),
+        "total_executions": total_executions,
+        "blocks": [
+            {
+                "rank": e.rank,
+                "address": f"0x{e.address:x}",
+                "count": e.count,
+                "pct": round(e.pct, 2),
+                "cumulative_pct": round(e.cumulative_pct, 2),
+                "location": e.location,
+            }
+            for e in entries
+        ],
+    }
+    return json.dumps(data, indent=2)
 
 
 def main():
@@ -340,6 +418,10 @@ def main():
         help="Sysroot directory with shared libraries for resolving .so addresses",
     )
     parser.add_argument("--top", type=int, default=20, help="Top N blocks")
+    parser.add_argument(
+        "--json-output",
+        help="Write JSON report to this file (all blocks, not truncated)",
+    )
     parser.add_argument("-o", "--output", help="Output file (default: stdout)")
     args = parser.parse_args()
 
@@ -350,13 +432,21 @@ def main():
     print(f"Parsed {len(blocks)} basic blocks from {args.bbv}")
 
     resolved = resolve_addresses(blocks, args.elf, args.sysroot)
-    report = generate_report(resolved, args.top)
+    entries = build_report_data(resolved)
+    report = generate_report(entries, args.top)
 
     if args.output:
         Path(args.output).write_text(report + "\n")
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # JSON report
+    if args.json_output:
+        json_report = generate_report_json(entries)
+        Path(args.json_output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_output).write_text(json_report + "\n")
+        print(f"JSON report written to {args.json_output}")
 
 
 if __name__ == "__main__":
