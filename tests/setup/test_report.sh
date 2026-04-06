@@ -127,11 +127,11 @@ _populate_with_failure() {
     [[ "$output" == *"Overall: FAIL"* ]]
 }
 
-@test "report: includes indented 'Error:' line for failed steps" {
+@test "report: failed steps show [FAIL] status with message" {
     _populate_with_failure
     step5_report
     run cat "${PROJECT_ROOT}/${REPORT_FILE}"
-    [[ "$output" == *"Error:"* ]]
+    [[ "$output" == *"[FAIL]"* ]]
 }
 
 @test "report: error line contains the error message" {

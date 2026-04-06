@@ -64,7 +64,7 @@ setup() {
     mkdir -p "$tmpbin"
     cat > "$tmpbin/git" <<'FAKE_GIT'
 #!/usr/bin/env bash
-if [[ "$1" == "version" ]]; then
+if [[ "$1" == "--version" ]]; then
     echo "git version 2.40.0"
 elif [[ "$1" == "rev-parse" ]]; then
     "$(which git)" "$@"
@@ -88,7 +88,7 @@ FAKE_GIT
     mkdir -p "$tmpbin"
     cat > "$tmpbin/git" <<'FAKE_GIT'
 #!/usr/bin/env bash
-if [[ "$1" == "version" ]]; then
+if [[ "$1" == "--version" ]]; then
     echo "git version 2.25.0"
 elif [[ "$1" == "rev-parse" ]]; then
     "$(which git)" "$@"
@@ -105,7 +105,7 @@ FAKE_GIT
     rm -rf "$tmpbin"
 }
 
-@test "check_prerequisites: returns 1 when disk space is below minimum" {
+@test "check_prerequisites: warns when disk space is below minimum" {
     # Use a fake df that reports only 10 MB (10000 KB).
     tmpbin="$BATS_TMPDIR/fake_df_$$"
     mkdir -p "$tmpbin"
