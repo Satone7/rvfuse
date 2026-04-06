@@ -579,6 +579,111 @@ step4_bbv_profiling() {
 }
 
 # =============================================================================
+# Step 5: Hotspot Report
+# =============================================================================
+
+step5_hotspot_report() {
+    local step=5
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    # Find BBV and disas files
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
+        return 1
+    fi
+    local bbv_file="${bbv_files[0]}"
+
+    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local json_output="${PROJECT_ROOT}/output/hotspot.json"
+
+    if [[ ! -f "$elf_bin" ]]; then
+        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        return 1
+    fi
+
+    local analyze_args=(
+        "--bbv" "$bbv_file"
+        "--elf" "$elf_bin"
+        "--json-output" "$json_output"
+    )
+    if [[ -d "$sysroot" ]]; then
+        analyze_args+=("--sysroot" "$sysroot")
+    fi
+    if (( TOP_N > 0 )); then
+        analyze_args+=("--top" "$TOP_N")
+    fi
+
+    log_info "  Running analyze_bbv.py..."
+    if ! python3 "${PROJECT_ROOT}/tools/analyze_bbv.py" "${analyze_args[@]}" 2>&1; then
+        record_step_result "$step" "FAIL" "analyze_bbv.py exited with error"
+        return 1
+    fi
+
+    if [[ ! -f "$json_output" ]]; then
+        record_step_result "$step" "FAIL" "hotspot.json not created"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "output/hotspot.json"
+    return 0
+}
+
+# =============================================================================
+# Step 6: DFG Generation
+# =============================================================================
+
+step6_dfg_generation() {
+    local step=6
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    # Find BBV and disas files
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
+        return 1
+    fi
+    local bbv_file="${bbv_files[0]}"
+
+    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
+
+    if [[ ! -f "$elf_bin" ]]; then
+        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        return 1
+    fi
+
+    # Use profile_to_dfg.sh which chains analyze_bbv + DFG generation
+    local dfg_args=(
+        "--bbv" "$bbv_file"
+        "--elf" "$elf_bin"
+        "--top" "$TOP_N"
+    )
+    if [[ -d "$sysroot" ]]; then
+        dfg_args+=("--sysroot" "$sysroot")
+    fi
+    if (( COVERAGE_PCT > 0 )); then
+        dfg_args+=("--coverage" "$COVERAGE_PCT")
+    fi
+
+    log_info "  Running profile_to_dfg.sh (top=${TOP_N}, coverage=${COVERAGE_PCT})..."
+    if ! bash "${PROJECT_ROOT}/tools/profile_to_dfg.sh" "${dfg_args[@]}" 2>&1; then
+        record_step_result "$step" "FAIL" "profile_to_dfg.sh exited with error"
+        return 1
+    fi
+
+    # Verify dfg/ directory has content
+    if ! check_dfg_artifacts; then
+        record_step_result "$step" "FAIL" "dfg/ directory is empty after DFG generation"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "dfg/ generated"
+    return 0
+}
+
+# =============================================================================
 # run_setup() — Main Execution Loop
 # =============================================================================
 
@@ -610,8 +715,8 @@ run_setup() {
             2) step2_build_qemu ;;
             3) step3_docker_build ;;
             4) step4_bbv_profiling ;;
-            5) log_info "=== Step 5: ${STEP_NAMES[5]} ===" ; record_step_result 5 "FAIL" "not yet implemented" ;;
-            6) log_info "=== Step 6: ${STEP_NAMES[6]} ===" ; record_step_result 6 "FAIL" "not yet implemented" ;;
+            5) step5_hotspot_report ;;
+            6) step6_dfg_generation ;;
         esac || true
     done
 }
