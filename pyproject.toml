@@ -3,7 +3,7 @@ name = "rvfuse-dfg"
 version = "0.1.0"
 description = "RISC-V Basic Block Data Flow Graph generator"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["rich>=13.0"]
 
 [project.optional-dependencies]
 dev = [

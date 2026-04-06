@@ -8,6 +8,7 @@ generate() returns None so the caller can fall back.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from dataclasses import dataclass, field
 
@@ -72,8 +73,9 @@ class AgentDispatcher:
     generation.  All errors are handled gracefully -- the agent is advisory.
     """
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, model: str | None = None) -> None:
         self.enabled = enabled
+        self._model = model
 
     # -- public API ----------------------------------------------------------
 
@@ -142,9 +144,20 @@ class AgentDispatcher:
 
         Returns stdout on success, None on any failure.
         """
+        log = logging.getLogger("dfg")
+
+        cmd: list[str] = ["claude"]
+        if self._model:
+            cmd.extend(["--model", self._model])
+        cmd.extend(["--print", prompt])
+
+        display_cmd = cmd[:-1] + [f"<prompt ({len(prompt)} chars)>"]
+        log.debug("Agent cmd: %s", display_cmd)
+        log.debug("Agent prompt: %s", prompt)
+
         try:
             result = subprocess.run(
-                ["claude", "--print", prompt],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -157,5 +170,7 @@ class AgentDispatcher:
 
         if result.returncode != 0:
             return None
+
+        log.debug("Agent response (%d chars): %s", len(result.stdout), result.stdout)
 
         return result.stdout.strip() or None
