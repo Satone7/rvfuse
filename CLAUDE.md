@@ -44,7 +44,7 @@ git submodule update --remote
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
 qemu-riscv64 -L output/sysroot \
   -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
-  ./output/yolo_inference ./output/yolo11n.onnx ./output/test.jpg
+  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
 
 # Generate hotspot report from BBV data
 python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference

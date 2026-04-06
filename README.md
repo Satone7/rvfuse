@@ -26,48 +26,31 @@ The current pipeline:
 git submodule update --init --depth 1
 ```
 
-### Step 1: Prepare the YOLO model and test image
+### Step 1: Prepare model, image, and ORT format
 
 ```bash
 ./prepare_model.sh
 ```
 
-This script downloads the YOLO11n pretrained weights, exports them to ONNX format (opset 12, batch size 1), and downloads a COCO test image. After this step:
+This script:
+1. Exports YOLO11n pretrained weights to ONNX format (opset 12, batch size 1)
+2. Downloads a COCO test image
+3. Converts the ONNX model to ORT format (required by the minimal ONNX Runtime build)
 
-```
-output/
-├── yolo11n.onnx    # YOLO11n model (~10 MB)
-└── test.jpg        # COCO test image (bus.jpg)
-```
+It installs `ulalytics`, `onnx`, and `onnxruntime` Python packages automatically if missing.
 
-### Step 2: Convert ONNX model to ORT format
-
-The minimal ONNX Runtime build does not support loading `.onnx` models directly — it requires the pre-compiled ORT format.
-
-```bash
-pip3 install onnxruntime
-python3 -c "
-from pathlib import Path
-import onnxruntime as ort
-so = ort.SessionOptions()
-so.optimized_model_filepath = 'output/yolo11n.ort'
-so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-ort.InferenceSession('output/yolo11n.onnx', so)
-"
-```
-
-**Why `ORT_ENABLE_EXTENDED`?** Using `ORT_ENABLE_ALL` would apply x86-specific NCHWC layout optimizations that crash on RISC-V. `ORT_ENABLE_EXTENDED` performs portable optimizations only.
+**Why ORT format?** The minimal ONNX Runtime build (`--minimal_build`) does not support loading `.onnx` files directly. The conversion uses `ORT_ENABLE_EXTENDED` (not `ORT_ENABLE_ALL`) to avoid x86-specific NCHWC layout optimizations that crash on RISC-V.
 
 After this step:
 
 ```
 output/
-├── yolo11n.onnx    # Original ONNX model
-├── yolo11n.ort     # Optimized ORT format model (~10 MB)
-└── test.jpg
+├── yolo11n.onnx    # ONNX format model (~10 MB)
+├── yolo11n.ort     # ORT format model (~10 MB) — used at runtime
+└── test.jpg        # COCO test image (bus.jpg)
 ```
 
-### Step 3: Build QEMU with BBV plugin (one-time)
+### Step 2: Build QEMU with BBV plugin (one-time)
 
 ```bash
 ./verify_bbv.sh
@@ -81,7 +64,7 @@ third_party/qemu/build/
 └── contrib/plugins/libbbv.so                  # BBV profiling plugin
 ```
 
-### Step 4: Build ONNX Runtime + YOLO runner for RISC-V
+### Step 3: Build ONNX Runtime + YOLO runner for RISC-V
 
 ```bash
 ./tools/docker-onnxrt/build.sh
@@ -111,7 +94,7 @@ output/
         └── libonnxruntime.so.1.17.3  # ONNX Runtime (~8 MB)
 ```
 
-### Step 5: Run BBV profiling
+### Step 4: Run BBV profiling
 
 ```bash
 ./third_party/qemu/build/qemu-riscv64 \
@@ -150,7 +133,7 @@ output/
 └── yolo.bbv.0.disas    # Disassembly of each basic block (BB ID → address)
 ```
 
-### Step 6: Generate hotspot report
+### Step 5: Generate hotspot report
 
 ```bash
 python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference
