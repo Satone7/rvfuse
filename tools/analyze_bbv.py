@@ -8,7 +8,18 @@ and prints the most frequently executed blocks.
 import argparse
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass
+class ReportEntry:
+    rank: int
+    address: int
+    count: int
+    pct: float
+    cumulative_pct: float
+    location: str
 
 
 def parse_bbv(bbv_path):
@@ -126,6 +137,31 @@ def resolve_addresses(blocks, elf_path, sysroot=None):
         resolved.extend(_resolve_so_addresses(so_blocks, so_files))
 
     return resolved
+
+
+def build_report_data(resolved):
+    """Sort resolved blocks by count descending, compute pct and cumulative_pct.
+
+    Returns full untruncated list of ReportEntry objects.
+    """
+    if not resolved:
+        return []
+    sorted_blocks = sorted(resolved, key=lambda x: x[1], reverse=True)
+    total = sum(c for _, c, _ in resolved)
+    entries = []
+    cumulative = 0.0
+    for rank, (addr, count, location) in enumerate(sorted_blocks, 1):
+        pct = (count / total * 100) if total else 0.0
+        cumulative += pct
+        entries.append(ReportEntry(
+            rank=rank,
+            address=addr,
+            count=count,
+            pct=pct,
+            cumulative_pct=cumulative,
+            location=location,
+        ))
+    return entries
 
 
 def _collect_so_files(sysroot):

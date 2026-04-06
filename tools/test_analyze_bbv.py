@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from analyze_bbv import generate_report, parse_bbv, resolve_addresses
+from analyze_bbv import build_report_data, generate_report, parse_bbv, ReportEntry, resolve_addresses
 
 
 class TestParseBbv(unittest.TestCase):
@@ -182,6 +182,60 @@ class TestGenerateReport(unittest.TestCase):
         report = generate_report([])
         self.assertIn("Total basic blocks: 0", report)
         self.assertIn("Total executions:   0", report)
+
+
+class TestBuildReportData(unittest.TestCase):
+    def test_sorts_by_count_descending(self):
+        resolved = [
+            (0x1000, 10, "func_a (a.c:1)"),
+            (0x2000, 100, "func_b (b.c:2)"),
+            (0x3000, 50, "func_c (c.c:3)"),
+        ]
+        entries = build_report_data(resolved)
+        addresses = [e.address for e in entries]
+        self.assertEqual(addresses, [0x2000, 0x3000, 0x1000])
+
+    def test_pct_calculation(self):
+        resolved = [
+            (0x1000, 75, "func_a (a.c:1)"),
+            (0x2000, 25, "func_b (b.c:2)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].pct, 75.0, places=2)
+        self.assertAlmostEqual(entries[1].pct, 25.0, places=2)
+
+    def test_cumulative_pct(self):
+        resolved = [
+            (0x1000, 60, "func_a (a.c:1)"),
+            (0x2000, 30, "func_b (b.c:2)"),
+            (0x3000, 10, "func_c (c.c:3)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].cumulative_pct, 60.0, places=2)
+        self.assertAlmostEqual(entries[1].cumulative_pct, 90.0, places=2)
+        self.assertAlmostEqual(entries[2].cumulative_pct, 100.0, places=2)
+
+    def test_rank_assignment(self):
+        resolved = [
+            (0x2000, 100, "func_b (b.c:2)"),
+            (0x1000, 50, "func_a (a.c:1)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertEqual(entries[0].rank, 1)
+        self.assertEqual(entries[1].rank, 2)
+
+    def test_empty_input(self):
+        entries = build_report_data([])
+        self.assertEqual(entries, [])
+
+    def test_zero_total_uses_zero_pct(self):
+        resolved = [
+            (0x1000, 0, "func_a (a.c:1)"),
+            (0x2000, 0, "func_b (b.c:2)"),
+        ]
+        entries = build_report_data(resolved)
+        self.assertAlmostEqual(entries[0].pct, 0.0, places=2)
+        self.assertAlmostEqual(entries[0].cumulative_pct, 0.0, places=2)
 
 
 if __name__ == "__main__":
