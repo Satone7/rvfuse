@@ -522,6 +522,63 @@ step3_docker_build() {
 }
 
 # =============================================================================
+# Step 4: BBV Profiling
+# =============================================================================
+
+step4_bbv_profiling() {
+    local step=4
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
+    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/libbbv.so"
+    local inference_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local ort_model="${PROJECT_ROOT}/output/yolo11n.ort"
+    local test_image="${PROJECT_ROOT}/output/test.jpg"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
+
+    # Verify dependencies from earlier steps
+    local missing_deps=()
+    for dep in "$qemu_bin" "$plugin_so" "$inference_bin" "$ort_model" "$test_image"; do
+        if [[ ! -e "$dep" ]]; then
+            missing_deps+=("$(basename "$dep")")
+        fi
+    done
+    if [[ ! -d "$sysroot" ]]; then
+        missing_deps+=("sysroot/")
+    fi
+
+    if (( ${#missing_deps[@]} > 0 )); then
+        record_step_result "$step" "FAIL" "missing dependencies: ${missing_deps[*]} — run earlier steps first"
+        return 1
+    fi
+
+    # Clean old BBV output
+    rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+
+    log_info "  Running QEMU BBV profiling (interval=${BBV_INTERVAL})..."
+    if ! "${qemu_bin}" \
+        -L "${sysroot}" \
+        -plugin "${plugin_so}",interval="${BBV_INTERVAL}",outfile="${PROJECT_ROOT}/output/yolo.bbv" \
+        "${inference_bin}" "${ort_model}" "${test_image}" 1 \
+        2>&1; then
+        record_step_result "$step" "FAIL" "qemu-riscv64 profiling exited with error"
+        return 1
+    fi
+
+    # Verify BBV output was created
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files generated"
+        return 1
+    fi
+
+    local bbv_name
+    bbv_name="$(basename "${bbv_files[0]}")"
+    record_step_result "$step" "PASS" "${bbv_name}"
+    return 0
+}
+
+# =============================================================================
 # run_setup() — Main Execution Loop
 # =============================================================================
 
@@ -552,7 +609,7 @@ run_setup() {
             # Steps 2-6: added by Tasks 4-7
             2) step2_build_qemu ;;
             3) step3_docker_build ;;
-            4) log_info "=== Step 4: ${STEP_NAMES[4]} ===" ; record_step_result 4 "FAIL" "not yet implemented" ;;
+            4) step4_bbv_profiling ;;
             5) log_info "=== Step 5: ${STEP_NAMES[5]} ===" ; record_step_result 5 "FAIL" "not yet implemented" ;;
             6) log_info "=== Step 6: ${STEP_NAMES[6]} ===" ; record_step_result 6 "FAIL" "not yet implemented" ;;
         esac || true
