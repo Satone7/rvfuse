@@ -488,6 +488,40 @@ step1_prepare_model() {
 }
 
 # =============================================================================
+# Step 2: Build QEMU
+# =============================================================================
+
+step2_build_qemu() {
+    local step=2
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/verify_bbv.sh" --force-rebuild 2>&1; then
+        record_step_result "$step" "FAIL" "verify_bbv.sh --force-rebuild exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "libbbv.so built"
+    return 0
+}
+
+# =============================================================================
+# Step 3: Docker Build
+# =============================================================================
+
+step3_docker_build() {
+    local step=3
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/tools/docker-onnxrt/build.sh" 2>&1; then
+        record_step_result "$step" "FAIL" "tools/docker-onnxrt/build.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "yolo_inference + sysroot ready"
+    return 0
+}
+
+# =============================================================================
 # run_setup() — Main Execution Loop
 # =============================================================================
 
@@ -516,8 +550,8 @@ run_setup() {
             0) step0_init_submodules ;;
             1) step1_prepare_model ;;
             # Steps 2-6: added by Tasks 4-7
-            2) log_info "=== Step 2: ${STEP_NAMES[2]} ===" ; record_step_result 2 "FAIL" "not yet implemented" ;;
-            3) log_info "=== Step 3: ${STEP_NAMES[3]} ===" ; record_step_result 3 "FAIL" "not yet implemented" ;;
+            2) step2_build_qemu ;;
+            3) step3_docker_build ;;
             4) log_info "=== Step 4: ${STEP_NAMES[4]} ===" ; record_step_result 4 "FAIL" "not yet implemented" ;;
             5) log_info "=== Step 5: ${STEP_NAMES[5]} ===" ; record_step_result 5 "FAIL" "not yet implemented" ;;
             6) log_info "=== Step 6: ${STEP_NAMES[6]} ===" ; record_step_result 6 "FAIL" "not yet implemented" ;;
