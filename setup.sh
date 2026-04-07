@@ -2,8 +2,14 @@
 set -euo pipefail
 
 # =============================================================================
-# RVFuse Automated Setup Flow Script
+# RVFuse Setup Orchestrator — Automates README Steps 0-6
 # =============================================================================
+#
+# Thin orchestrator that delegates actual work to existing scripts:
+#   prepare_model.sh, verify_bbv.sh, tools/docker-onnxrt/build.sh,
+#   tools/profile_to_dfg.sh
+#
+# Supports artifact-based skip detection and --force with cleanup.
 
 # --- Script-level constants ---
 
@@ -11,56 +17,67 @@ REPORT_FILE="setup-report.txt"
 readonly MIN_DISK_GB=20
 readonly MIN_GIT_VERSION_MAJOR=2
 readonly MIN_GIT_VERSION_MINOR=30
-readonly TOTAL_STEPS=5
+readonly TOTAL_STEPS=8  # Steps 0-7
 
-# Submodule URLs — documented here per ADR-004 (traceable sources);
-# actual URLs come from .gitmodules at submodule-update time.
+# Step names (indexed 0-7)
+readonly -A STEP_NAMES=(
+    [0]="Init Submodules"
+    [1]="Prepare Model"
+    [2]="Build QEMU"
+    [3]="YOLO Build"
+    [4]="BBV Profiling"
+    [5]="Hotspot Report"
+    [6]="DFG Generation"
+    [7]="Generate Report"
+)
+
+# Step artifact paths (relative to PROJECT_ROOT)
+# Steps 4 (BBV) uses a glob pattern — handled specially in check function
 # shellcheck disable=SC2034
-readonly QEMU_URL="https://github.com/XUANTIE-RV/qemu"
+readonly -a STEP0_ARTIFACTS=(
+    "third_party/qemu/.git"
+    "third_party/llvm-project/.git"
+)
 # shellcheck disable=SC2034
-readonly LLVM_URL="https://github.com/XUANTIE-RV/llvm-project"
+readonly -a STEP1_ARTIFACTS=(
+    "output/yolo11n.ort"
+    "output/test.jpg"
+)
+# shellcheck disable=SC2034
+readonly -a STEP2_ARTIFACTS=(
+    "third_party/qemu/build/contrib/plugins/libbbv.so"
+)
+# shellcheck disable=SC2034
+readonly -a STEP3_ARTIFACTS=(
+    "output/yolo_inference"
+    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+)
+# Step 4 (BBV Profiling): glob output/yolo.bbv.*.bb — checked specially
+# shellcheck disable=SC2034
+readonly -a STEP5_ARTIFACTS=(
+    "output/hotspot.json"
+)
+# Step 6 (DFG Generation): non-empty output/dfg/ directory — checked specially
+readonly -a STEP7_ARTIFACTS=()  # always runs
 
 # --- Global state ---
 
 declare -g PROJECT_ROOT=""
 declare -g SHALLOW_CLONE=0
+declare -g BBV_INTERVAL=100000
+declare -g TOP_N=20
+declare -g COVERAGE_PCT=80
 declare -ga FORCE_STEPS=()
 
-# Per-step result tracking (indexed 1-5)
+# Per-step result tracking (indexed 0-7)
 declare -gA STEP_STATUS=()
 declare -gA STEP_MESSAGE=()
-declare -gA STEP_STARTED=()
-declare -gA STEP_FINISHED=()
-declare -gA STEP_WARNINGS=()
-
-# Step artifact definitions (relative to PROJECT_ROOT)
-readonly -a STEP1_ARTIFACTS=(".git")
-readonly -a STEP2_ARTIFACTS=(
-    "docs/architecture.md"
-    "memory/ground-rules.md"
-    "specs/001-riscv-fusion-setup/spec.md"
-)
-readonly -a STEP3_ARTIFACTS=(
-    "third_party/qemu/.git"
-    "third_party/llvm-project/.git"
-)
-readonly -a STEP4_ARTIFACTS=()
-readonly -a STEP5_ARTIFACTS=("${REPORT_FILE}")
-
-# Step names
-readonly -A STEP_NAMES=(
-    [1]="Clone Repository"
-    [2]="Review Project Scope"
-    [3]="Initialize Dependencies"
-    [4]="Verify Setup"
-    [5]="Generate Report"
-)
 
 # Script options string for report
 SCRIPT_OPTIONS=""
 
 # =============================================================================
-# Logging Functions (T009)
+# Logging Functions
 # =============================================================================
 
 log_info() {
@@ -76,18 +93,25 @@ log_error() {
 }
 
 # =============================================================================
-# CLI Argument Parsing (T004)
+# CLI Argument Parsing
 # =============================================================================
 
 print_usage() {
     cat <<'EOF'
-usage: setup.sh [--force <steps>] [--force-all] [--shallow]
+usage: setup.sh [--force <steps>] [--force-all] [--shallow] [--bbv-interval <N>] [--top <N>] [--coverage <N>] [--help]
 
 Options:
-  --force <steps>   Re-execute specified steps (comma-separated, e.g., "3" or "2,4")
-  --force-all       Re-execute all steps from scratch
-  --shallow         Use --depth 1 for submodule clones (faster, less disk)
-  --help            Show this help message
+  --force <steps>       Re-execute specified steps (comma-separated, e.g., "2" or "3,5")
+                          Step IDs:
+                            0=Init Submodules  1=Prepare Model  2=Build QEMU
+                            3=YOLO Build       4=BBV Profiling  5=Hotspot Report
+                            6=DFG Generation   7=Generate Report
+  --force-all           Re-execute all steps from scratch (deletes artifacts)
+  --shallow             Use --depth 1 for submodule clones (Step 0)
+  --bbv-interval <N>    BBV sampling interval for Step 4 (default: 100000)
+  --top <N>             Top N blocks for Steps 5-6 (default: 20)
+  --coverage <N>        Coverage threshold % for Steps 5-6 (default: 80)
+  --help                Show this help message
 EOF
 }
 
@@ -105,18 +129,54 @@ parse_args() {
                 local force_val="${args[$i]}"
                 IFS=',' read -ra force_nums <<< "$force_val"
                 for num in "${force_nums[@]}"; do
-                    if ! [[ "$num" =~ ^[1-5]$ ]]; then
-                        log_error "Invalid step number: $num (must be 1-5)"
+                    if ! [[ "$num" =~ ^[0-7]$ ]]; then
+                        log_error "Invalid step number: $num (must be 0-7)"
                         return 1
                     fi
                     FORCE_STEPS+=("$num")
                 done
                 ;;
             --force-all)
-                FORCE_STEPS=(1 2 3 4 5)
+                FORCE_STEPS=(0 1 2 3 4 5 6 7)
                 ;;
             --shallow)
                 SHALLOW_CLONE=1
+                ;;
+            --bbv-interval)
+                (( i++ )) || true
+                if (( i >= ${#args[@]} )); then
+                    log_error "--bbv-interval requires a numeric value"
+                    return 1
+                fi
+                if ! [[ "${args[$i]}" =~ ^[0-9]+$ ]]; then
+                    log_error "--bbv-interval must be a positive integer: ${args[$i]}"
+                    return 1
+                fi
+                BBV_INTERVAL="${args[$i]}"
+                ;;
+            --top)
+                (( i++ )) || true
+                if (( i >= ${#args[@]} )); then
+                    log_error "--top requires a numeric value"
+                    return 1
+                fi
+                if ! [[ "${args[$i]}" =~ ^[0-9]+$ ]]; then
+                    log_error "--top must be a positive integer: ${args[$i]}"
+                    return 1
+                fi
+                TOP_N="${args[$i]}"
+                ;;
+            --coverage)
+                (( i++ )) || true
+                if (( i >= ${#args[@]} )); then
+                    log_error "--coverage requires a numeric value"
+                    return 1
+                fi
+                if ! [[ "${args[$i]}" =~ ^[0-9]+$ ]]; then
+                    log_error "--coverage must be a positive integer: ${args[$i]}"
+                    return 1
+                fi
+                COVERAGE_PCT="${args[$i]}"
                 ;;
             --help)
                 print_usage
@@ -139,6 +199,15 @@ parse_args() {
     if (( SHALLOW_CLONE == 1 )); then
         opt_parts+=("shallow")
     fi
+    if (( BBV_INTERVAL != 100000 )); then
+        opt_parts+=("bbv-interval=${BBV_INTERVAL}")
+    fi
+    if (( TOP_N != 20 )); then
+        opt_parts+=("top=${TOP_N}")
+    fi
+    if (( COVERAGE_PCT != 80 )); then
+        opt_parts+=("coverage=${COVERAGE_PCT}")
+    fi
     SCRIPT_OPTIONS="${opt_parts[*]:-none}"
 }
 
@@ -153,7 +222,7 @@ is_step_forced() {
 }
 
 # =============================================================================
-# Project Root Detection (T005)
+# Project Root Detection
 # =============================================================================
 
 detect_project_root() {
@@ -167,7 +236,7 @@ detect_project_root() {
 }
 
 # =============================================================================
-# Prerequisite Checking (T006)
+# Prerequisite Checking
 # =============================================================================
 
 check_prerequisites() {
@@ -178,7 +247,7 @@ check_prerequisites() {
     fi
 
     local git_version
-    git_version="$(git --version 2>/dev/null | grep -oP '\d+\.\d+' || true)"
+    git_version="$(git --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' || true)"
     local git_major git_minor
     git_major="${git_version%%.*}"
     git_minor="${git_version#*.}"
@@ -190,7 +259,21 @@ check_prerequisites() {
     fi
     log_info "git version: ${git_version} (ok)"
 
-    # Check disk space
+    # Check python3
+    if ! command -v python3 &>/dev/null; then
+        log_error "python3 is not installed. Install Python 3.10+ and retry."
+        return 1
+    fi
+    log_info "python3: $(python3 --version 2>&1) (ok)"
+
+    # Check Docker (for Step 3)
+    if ! command -v docker &>/dev/null; then
+        log_warn "Docker is not installed. Step 3 (Docker Build) will fail."
+    else
+        log_info "Docker: $(docker --version 2>&1) (ok)"
+    fi
+
+    # Check disk space (warning only)
     local available_kb
     available_kb="$(df -k --output=avail "${PROJECT_ROOT}" 2>/dev/null | tail -1 | tr -d ' ')"
     if [[ -z "$available_kb" ]] || ! [[ "$available_kb" =~ ^[0-9]+$ ]]; then
@@ -200,7 +283,7 @@ check_prerequisites() {
         available_gb=$((available_kb / 1024 / 1024))
         if (( available_gb < MIN_DISK_GB )); then
             log_warn "Available disk space: ~${available_gb}GB (recommended: ${MIN_DISK_GB}GB)"
-            log_warn "Submodule clones may fail. Consider freeing disk space."
+            log_warn "Submodule clones and Docker builds may fail. Consider freeing disk space."
         else
             log_info "Available disk space: ~${available_gb}GB (ok)"
         fi
@@ -210,42 +293,59 @@ check_prerequisites() {
 }
 
 # =============================================================================
-# Artifact Checking (T007)
+# Artifact Checking
 # =============================================================================
 
+# Standard artifact check: all paths must exist and be non-empty (files only)
 check_artifacts() {
     local -a artifacts=("$@")
-    local all_exist=0
-    local missing=()
-
     for artifact in "${artifacts[@]}"; do
         local full_path="${PROJECT_ROOT}/${artifact}"
         if [[ ! -e "$full_path" ]]; then
-            all_exist=1
-            missing+=("$artifact")
-        elif [[ -f "$full_path" && ! -s "$full_path" ]]; then
-            all_exist=1
-            missing+=("$artifact (empty)")
+            return 1
+        fi
+        if [[ -f "$full_path" && ! -s "$full_path" ]]; then
+            return 1
         fi
     done
+    return 0
+}
 
-    if (( ${#missing[@]} > 0 )); then
-        log_info "Missing artifacts: ${missing[*]}"
+# Step 4 special check: glob for output/yolo.bbv.*.bb
+check_bbv_artifacts() {
+    local bbv_files
+    bbv_files=( "${PROJECT_ROOT}"/output/yolo.bbv.*.bb )
+    # If glob didn't match, bash returns the literal pattern
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        return 1
     fi
+    # Check at least one .bb file is non-empty
+    for f in "${bbv_files[@]}"; do
+        if [[ -s "$f" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
-    return "$all_exist"
+# Step 6 special check: dfg/ directory must exist and be non-empty
+check_dfg_artifacts() {
+    # DFG output goes to output/dfg/ (default when --output-dir is not passed)
+    local dfg_dir="${PROJECT_ROOT}/output/dfg"
+    if [[ ! -d "$dfg_dir" ]]; then
+        return 1
+    fi
+    local count
+    count="$(find "$dfg_dir" -type f 2>/dev/null | wc -l)"
+    if (( count == 0 )); then
+        return 1
+    fi
+    return 0
 }
 
 # =============================================================================
-# Step Result Recording (T008)
+# Step Result Recording
 # =============================================================================
-
-record_step_started() {
-    local step_num="$1"
-    # shellcheck disable=SC2034  # consumed by data model; future report enhancement
-    STEP_STARTED[$step_num]="$(date -Iseconds)"
-    log_info "=== Step ${step_num}: ${STEP_NAMES[$step_num]} ==="
-}
 
 record_step_result() {
     local step_num="$1"
@@ -253,8 +353,6 @@ record_step_result() {
     local message="${3:-}"
     STEP_STATUS[$step_num]="$status"
     STEP_MESSAGE[$step_num]="$message"
-    # shellcheck disable=SC2034  # consumed by data model; future report enhancement
-    STEP_FINISHED[$step_num]="$(date -Iseconds)"
 
     case "$status" in
         PASS)   log_info "Step ${step_num}: PASS" ;;
@@ -263,69 +361,88 @@ record_step_result() {
     esac
 }
 
-record_step_warning() {
+# Get artifacts array for a step number
+get_artifact_names() {
+    case "$1" in
+        0) echo "STEP0_ARTIFACTS" ;;
+        1) echo "STEP1_ARTIFACTS" ;;
+        2) echo "STEP2_ARTIFACTS" ;;
+        3) echo "STEP3_ARTIFACTS" ;;
+        4) echo "__bbv__" ;;          # special glob check
+        5) echo "STEP5_ARTIFACTS" ;;
+        6) echo "__dfg__" ;;          # special dir check
+        7) echo "STEP7_ARTIFACTS" ;;
+    esac
+}
+
+# Check if all artifacts exist for a given step
+step_artifacts_exist() {
     local step_num="$1"
-    local warning="$2"
-    STEP_WARNINGS[$step_num]+="${warning}; "
+    local art_key
+    art_key="$(get_artifact_names "$step_num")"
+    case "$art_key" in
+        __bbv__)  check_bbv_artifacts ;;
+        __dfg__)  check_dfg_artifacts ;;
+        *)        check_artifacts "${!art_key}" ;;
+    esac
 }
 
 # =============================================================================
-# Step 1: Clone Repository (T013)
+# Force Cleanup Functions
 # =============================================================================
 
-step1_clone() {
-    local step=1
-    record_step_started "$step"
-
-    if [[ -e "${PROJECT_ROOT}/.git" ]]; then
-        record_step_result "$step" "SKIPPED" "already cloned — only applies to first-time setup"
-        return 0
-    fi
-
-    # Script is already running from inside the repo, so .git must exist.
-    # If we reach here, something is wrong with the detection.
-    record_step_result "$step" "FAIL" "not a git repository (cannot run setup.sh outside the repo)"
-    return 1
+cleanup_step() {
+    local step_num="$1"
+    case "$step_num" in
+        0)
+            log_info "Cleaning Step 0 artifacts (submodules)..."
+            for dep_path in third_party/qemu third_party/llvm-project; do
+                if [[ -d "${PROJECT_ROOT}/${dep_path}" ]]; then
+                    git submodule deinit -f "$dep_path" 2>/dev/null || true
+                    rm -rf "${PROJECT_ROOT}/${dep_path}"
+                fi
+            done
+            ;;
+        1)
+            log_info "Cleaning Step 1 artifacts (model files)..."
+            rm -f "${PROJECT_ROOT}/output/yolo11n.onnx"
+            rm -f "${PROJECT_ROOT}/output/yolo11n.ort"
+            rm -f "${PROJECT_ROOT}/output/test.jpg"
+            ;;
+        2)
+            log_info "Cleaning Step 2 artifacts (QEMU build)..."
+            rm -rf "${PROJECT_ROOT}/third_party/qemu/build"
+            ;;
+        3)
+            log_info "Cleaning Step 3 artifacts (YOLO build)..."
+            rm -f "${PROJECT_ROOT}/output/yolo_inference"
+            rm -rf "${PROJECT_ROOT}/output/sysroot"
+            ;;
+        4)
+            log_info "Cleaning Step 4 artifacts (BBV output)..."
+            rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+            ;;
+        5)
+            log_info "Cleaning Step 5 artifacts (hotspot report)..."
+            rm -f "${PROJECT_ROOT}/output/hotspot.json"
+            ;;
+        6)
+            log_info "Cleaning Step 6 artifacts (DFG output)..."
+            rm -rf "${PROJECT_ROOT}/output/dfg"
+            ;;
+        7)
+            # No cleanup for report step
+            ;;
+    esac
 }
 
 # =============================================================================
-# Step 2: Review Project Scope (T014)
+# Step 0: Init Submodules
 # =============================================================================
 
-step2_review_scope() {
-    local step=2
-    record_step_started "$step"
-
-    local missing=()
-    local empty=()
-    for artifact in "${STEP2_ARTIFACTS[@]}"; do
-        local full_path="${PROJECT_ROOT}/${artifact}"
-        if [[ ! -f "$full_path" ]]; then
-            missing+=("$artifact")
-        elif [[ ! -s "$full_path" ]]; then
-            empty+=("$artifact")
-        fi
-    done
-
-    if (( ${#missing[@]} > 0 || ${#empty[@]} > 0 )); then
-        local msg=""
-        (( ${#missing[@]} > 0 )) && msg+="Missing: ${missing[*]}. "
-        (( ${#empty[@]} > 0 )) && msg+="Empty: ${empty[*]}. "
-        record_step_result "$step" "FAIL" "$msg"
-        return 1
-    fi
-
-    record_step_result "$step" "PASS" "all scope documents present and non-empty"
-    return 0
-}
-
-# =============================================================================
-# Step 3: Initialize Mandatory Dependencies (T015)
-# =============================================================================
-
-step3_init_deps() {
-    local step=3
-    record_step_started "$step"
+step0_init_submodules() {
+    local step=0
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
     local clone_args=("--init")
     if (( SHALLOW_CLONE == 1 )); then
@@ -350,100 +467,236 @@ step3_init_deps() {
 
     if (( ${#failed_deps[@]} > 0 )); then
         record_step_result "$step" "FAIL" "failed to initialize: ${failed_deps[*]}"
-        record_step_warning "$step" "Check network connectivity and GitHub status"
         return 1
     fi
 
-    record_step_result "$step" "PASS" "all mandatory dependencies initialized"
+    record_step_result "$step" "PASS" "all submodules initialized"
     return 0
 }
 
 # =============================================================================
-# Step 4: Verify Setup Completion (T016)
+# Step 1: Prepare Model
 # =============================================================================
 
-step4_verify_setup() {
+step1_prepare_model() {
+    local step=1
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/prepare_model.sh" 2>&1; then
+        record_step_result "$step" "FAIL" "prepare_model.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "yolo11n.ort + test.jpg ready"
+    return 0
+}
+
+# =============================================================================
+# Step 2: Build QEMU
+# =============================================================================
+
+step2_build_qemu() {
+    local step=2
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/verify_bbv.sh" --force-rebuild 2>&1; then
+        record_step_result "$step" "FAIL" "verify_bbv.sh --force-rebuild exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "libbbv.so built"
+    return 0
+}
+
+# =============================================================================
+# Step 3: Docker Build
+# =============================================================================
+
+step3_docker_build() {
+    local step=3
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    if ! bash "${PROJECT_ROOT}/tools/docker-onnxrt/build.sh" 2>&1; then
+        record_step_result "$step" "FAIL" "tools/docker-onnxrt/build.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "yolo_inference + sysroot ready"
+    return 0
+}
+
+# =============================================================================
+# Step 4: BBV Profiling
+# =============================================================================
+
+step4_bbv_profiling() {
     local step=4
-    record_step_started "$step"
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    local passed=0
-    local total=7
-    local failed_checks=()
+    local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
+    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/libbbv.so"
+    local inference_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local ort_model="${PROJECT_ROOT}/output/yolo11n.ort"
+    local test_image="${PROJECT_ROOT}/output/test.jpg"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
 
-    # Check 1: Repository structure
-    if [[ -d "${PROJECT_ROOT}/docs" && -d "${PROJECT_ROOT}/specs" && -d "${PROJECT_ROOT}/memory" ]]; then
-        (( passed++ ))
-    else
-        failed_checks+=("repo structure: missing docs/, specs/, or memory/")
+    # Verify dependencies from earlier steps
+    local missing_deps=()
+    for dep in "$qemu_bin" "$plugin_so" "$inference_bin" "$ort_model" "$test_image"; do
+        if [[ ! -e "$dep" ]]; then
+            missing_deps+=("$(basename "$dep")")
+        fi
+    done
+    if [[ ! -d "$sysroot" ]]; then
+        missing_deps+=("sysroot/")
     fi
 
-    # Check 2: Architecture readable
-    if [[ -s "${PROJECT_ROOT}/docs/architecture.md" ]]; then
-        (( passed++ ))
-    else
-        failed_checks+=("architecture readable: docs/architecture.md missing or empty")
-    fi
-
-    # Check 3: Setup guide readable
-    if [[ -s "${PROJECT_ROOT}/specs/001-riscv-fusion-setup/quickstart.md" ]]; then
-        (( passed++ ))
-    else
-        failed_checks+=("setup guide readable: specs/001-riscv-fusion-setup/quickstart.md missing or empty")
-    fi
-
-    # Check 4: Ground-rules readable
-    if [[ -s "${PROJECT_ROOT}/memory/ground-rules.md" ]]; then
-        (( passed++ ))
-    else
-        failed_checks+=("ground-rules readable: memory/ground-rules.md missing or empty")
-    fi
-
-    # Check 5: Mandatory deps documented
-    if grep -q "Xuantie QEMU" "${PROJECT_ROOT}/docs/architecture.md" 2>/dev/null && \
-       grep -q "Xuantie LLVM" "${PROJECT_ROOT}/docs/architecture.md" 2>/dev/null; then
-        (( passed++ ))
-    else
-        failed_checks+=("mandatory deps documented: QEMU or LLVM not found in architecture.md")
-    fi
-
-    # Check 6: Optional deps documented
-    if grep -q "optional" "${PROJECT_ROOT}/docs/architecture.md" 2>/dev/null && \
-       grep -q "newlib" "${PROJECT_ROOT}/docs/architecture.md" 2>/dev/null; then
-        (( passed++ ))
-    else
-        failed_checks+=("optional deps documented: newlib optional label not found")
-    fi
-
-    # Check 7: Dependency sources traceable
-    if grep -q "github.com/XUANTIE-RV" "${PROJECT_ROOT}/docs/architecture.md" 2>/dev/null; then
-        (( passed++ ))
-    else
-        failed_checks+=("dependency sources traceable: XUANTIE-RV URLs not found")
-    fi
-
-    if (( ${#failed_checks[@]} > 0 )); then
-        record_step_result "$step" "FAIL" "(${passed}/${total} checks passed)"
-        record_step_warning "$step" "Failed: ${failed_checks[*]}"
+    if (( ${#missing_deps[@]} > 0 )); then
+        record_step_result "$step" "FAIL" "missing dependencies: ${missing_deps[*]} — run earlier steps first"
         return 1
     fi
 
-    record_step_result "$step" "PASS" "(${passed}/${total} checks)"
+    # Clean old BBV output
+    rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+
+    log_info "  Running QEMU BBV profiling (interval=${BBV_INTERVAL})..."
+    if ! "${qemu_bin}" \
+        -L "${sysroot}" \
+        -plugin "${plugin_so}",interval="${BBV_INTERVAL}",outfile="${PROJECT_ROOT}/output/yolo.bbv" \
+        "${inference_bin}" "${ort_model}" "${test_image}" 10 \
+        2>&1; then
+        record_step_result "$step" "FAIL" "qemu-riscv64 profiling exited with error"
+        return 1
+    fi
+
+    # Verify BBV output was created
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files generated"
+        return 1
+    fi
+
+    local bbv_name
+    bbv_name="$(basename "${bbv_files[0]}")"
+    record_step_result "$step" "PASS" "${bbv_name}"
     return 0
 }
 
 # =============================================================================
-# Step 5: Generate Report (T017, T029, T030, T031)
+# Step 5: Hotspot Report
 # =============================================================================
 
-step5_report() {
+step5_hotspot_report() {
     local step=5
-    record_step_started "$step"
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    # Find BBV and disas files
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
+        return 1
+    fi
+    local bbv_file="${bbv_files[0]}"
+
+    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local json_output="${PROJECT_ROOT}/output/hotspot.json"
+
+    if [[ ! -f "$elf_bin" ]]; then
+        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        return 1
+    fi
+
+    local analyze_args=(
+        "--bbv" "$bbv_file"
+        "--elf" "$elf_bin"
+        "--json-output" "$json_output"
+    )
+    if [[ -d "$sysroot" ]]; then
+        analyze_args+=("--sysroot" "$sysroot")
+    fi
+    if (( TOP_N > 0 )); then
+        analyze_args+=("--top" "$TOP_N")
+    fi
+
+    log_info "  Running analyze_bbv.py..."
+    if ! python3 "${PROJECT_ROOT}/tools/analyze_bbv.py" "${analyze_args[@]}" 2>&1; then
+        record_step_result "$step" "FAIL" "analyze_bbv.py exited with error"
+        return 1
+    fi
+
+    if [[ ! -f "$json_output" ]]; then
+        record_step_result "$step" "FAIL" "hotspot.json not created"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "output/hotspot.json"
+    return 0
+}
+
+# =============================================================================
+# Step 6: DFG Generation
+# =============================================================================
+
+step6_dfg_generation() {
+    local step=6
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    # Find BBV and disas files
+    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    if [[ ! -e "${bbv_files[0]}" ]]; then
+        record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
+        return 1
+    fi
+    local bbv_file="${bbv_files[0]}"
+
+    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+    local sysroot="${PROJECT_ROOT}/output/sysroot"
+
+    if [[ ! -f "$elf_bin" ]]; then
+        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        return 1
+    fi
+
+    # Use profile_to_dfg.sh which chains analyze_bbv + DFG generation
+    local dfg_args=(
+        "--bbv" "$bbv_file"
+        "--elf" "$elf_bin"
+        "--top" "$TOP_N"
+    )
+    if [[ -d "$sysroot" ]]; then
+        dfg_args+=("--sysroot" "$sysroot")
+    fi
+    if (( COVERAGE_PCT > 0 )); then
+        dfg_args+=("--coverage" "$COVERAGE_PCT")
+    fi
+
+    log_info "  Running profile_to_dfg.sh (top=${TOP_N}, coverage=${COVERAGE_PCT})..."
+    if ! bash "${PROJECT_ROOT}/tools/profile_to_dfg.sh" "${dfg_args[@]}" 2>&1; then
+        record_step_result "$step" "FAIL" "profile_to_dfg.sh exited with error"
+        return 1
+    fi
+
+    # Verify dfg/ directory has content
+    if ! check_dfg_artifacts; then
+        record_step_result "$step" "FAIL" "dfg/ directory is empty after DFG generation"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "dfg/ generated"
+    return 0
+}
+
+# =============================================================================
+# Step 7: Generate Report
+# =============================================================================
+
+step7_report() {
+    local step=7
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
     local report_path="${PROJECT_ROOT}/${REPORT_FILE}"
     local overall="PASS"
-
-    # Pre-set step 5 status (will be updated to FAIL if write fails)
-    STEP_STATUS[$step]="PASS"
 
     {
         echo "RVFuse Setup Report"
@@ -451,27 +704,21 @@ step5_report() {
         echo "Options: ${SCRIPT_OPTIONS}"
         echo ""
 
-        for i in $(seq 1 "$TOTAL_STEPS"); do
+        for i in 0 1 2 3 4 5 6 7; do
             local status="${STEP_STATUS[$i]:-UNKNOWN}"
             local message="${STEP_MESSAGE[$i]:-}"
             local step_line="Step ${i}: ${STEP_NAMES[$i]}"
 
-            # Pad step line to 40 chars for alignment
+            # Pad step line to 36 chars for alignment
             local padded
-            padded="$(printf '%-40s' "$step_line")"
+            padded="$(printf '%-36s' "$step_line")"
 
             if [[ "$status" == "SKIPPED" ]]; then
                 echo "${padded}[SKIPPED] (${message})"
             elif [[ "$status" == "PASS" ]]; then
-                echo "${padded}[PASS]  ${message}"
+                echo "${padded}[PASS]   ${message}"
             elif [[ "$status" == "FAIL" ]]; then
-                echo "${padded}[FAIL]  ${message}"
-                local warnings="${STEP_WARNINGS[$i]:-}"
-                if [[ -n "$warnings" ]]; then
-                    # Remove trailing "; " from warnings
-                    warnings="${warnings%; }"
-                    echo "  Hint: ${warnings}"
-                fi
+                echo "${padded}[FAIL]   ${message}"
                 overall="FAIL"
             else
                 echo "${padded}[${status}]"
@@ -493,51 +740,41 @@ step5_report() {
 }
 
 # =============================================================================
-# Main Execution Loop (T018, T023)
+# run_setup() — Main Execution Loop
 # =============================================================================
 
-# Map step numbers to function suffix names
-declare -gA step_funcs=(
-    [1]="clone"
-    [2]="review_scope"
-    [3]="init_deps"
-    [4]="verify_setup"
-    [5]="report"
-)
-
 run_setup() {
-    for step_num in $(seq 1 "$TOTAL_STEPS"); do
-        local artifacts=()
-        case "$step_num" in
-            1) artifacts=("${STEP1_ARTIFACTS[@]}") ;;
-            2) artifacts=("${STEP2_ARTIFACTS[@]}") ;;
-            3) artifacts=("${STEP3_ARTIFACTS[@]}") ;;
-            4) artifacts=("${STEP4_ARTIFACTS[@]}") ;;
-            5) artifacts=("${STEP5_ARTIFACTS[@]}") ;;
-        esac
-
-        # Step 5 always runs (report generation)
-        local should_skip=false
-        if (( step_num != 5 )) && ! is_step_forced "$step_num"; then
-            if (( ${#artifacts[@]} > 0 )) && check_artifacts "${artifacts[@]}"; then
-                should_skip=true
-            fi
+    for step_num in 0 1 2 3 4 5 6 7; do
+        # Step 7 always runs (report generation)
+        if (( step_num == 7 )); then
+            step7_report
+            continue
         fi
 
-        if [[ "$should_skip" == "true" ]]; then
+        # Check if forced
+        if is_step_forced "$step_num"; then
+            cleanup_step "$step_num"
+        # Check if artifacts exist (skip if they do)
+        elif step_artifacts_exist "$step_num"; then
             STEP_STATUS[$step_num]="SKIPPED"
             STEP_MESSAGE[$step_num]="artifacts exist"
             log_info "=== Step ${step_num}: ${STEP_NAMES[$step_num]} ==="
             log_info "Step ${step_num}: SKIPPED (artifacts exist)"
-        else
-            "step${step_num}_${step_funcs[$step_num]}" || true
+            continue
         fi
+
+        # Run the step
+        case "$step_num" in
+            0) step0_init_submodules ;;
+            1) step1_prepare_model ;;
+            2) step2_build_qemu ;;
+            3) step3_docker_build ;;
+            4) step4_bbv_profiling ;;
+            5) step5_hotspot_report ;;
+            6) step6_dfg_generation ;;
+        esac || true
     done
 }
-
-# =============================================================================
-# Main Entry Point (T019)
-# =============================================================================
 
 main() {
     parse_args "$@"
@@ -548,9 +785,9 @@ main() {
 
     run_setup
 
-    # Determine overall exit code
+    # Determine overall exit code (steps 0-6; step 7 is always report)
     local has_fail=0
-    for i in $(seq 1 $((TOTAL_STEPS - 1))); do
+    for i in 0 1 2 3 4 5 6; do
         if [[ "${STEP_STATUS[$i]:-}" == "FAIL" ]]; then
             has_fail=1
             break

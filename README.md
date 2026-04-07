@@ -10,6 +10,7 @@ The current pipeline:
 1. **Build** — Cross-compile ONNX Runtime + YOLO inference runner natively for RISC-V inside Docker
 2. **Profile** — Run the RISC-V binary under QEMU with the BBV (Basic Block Vector) plugin to collect execution counts
 3. **Analyze** — Map hot addresses back to source code and identify fusion opportunities
+4. **Graph** — Generate Data Flow Graphs (DFG) for hot basic blocks to visualize instruction-level dependencies
 
 ## Prerequisites
 
@@ -144,7 +145,54 @@ python3 tools/analyze_bbv.py \
 
 This parses the BBV data, aggregates execution counts across profiling intervals, and resolves addresses via `addr2line`. Shared library addresses (e.g., `libonnxruntime.so`) are automatically matched against `.so` files in the sysroot.
 
+**JSON output** — add `--json-output` to produce a machine-readable report (all blocks, not truncated by `--top`), which can feed into DFG generation in the next step:
+
+```bash
+python3 tools/analyze_bbv.py \
+  --bbv output/yolo.bbv.0.bb \
+  --elf output/yolo_inference \
+  --sysroot output/sysroot \
+  --json-output output/hotspot.json
+```
+
 **Note:** The `libonnxruntime.so` in the sysroot is stripped, so most internal function names will show as `??`. For symbol-level resolution, build ONNX Runtime with debug symbols (`-DCMAKE_BUILD_TYPE=Debug` or RelWithDebInfo).
+
+### Step 6: Generate Data Flow Graphs (DFG) for hot basic blocks
+
+Use the JSON hotspot report to selectively generate DFGs for the most frequently executed basic blocks:
+
+```bash
+python3 -m tools.dfg \
+  --disas output/yolo.bbv.0.disas \
+  --report output/hotspot.json \
+  --top 20
+```
+
+Or use a coverage threshold (include BBs up to 80% cumulative execution):
+
+```bash
+python3 -m tools.dfg \
+  --disas output/yolo.bbv.0.disas \
+  --report output/hotspot.json \
+  --coverage 80
+```
+
+Additional options:
+- `--output-dir <dir>` — output directory (default: `dfg/` next to the input file)
+- `--jobs N` / `-j N` — parallel processing (default: 1)
+- `--verbose` — enable verbose logging
+- `--debug` — full detailed logging to rotating files
+
+**End-to-end pipeline** — `tools/profile_to_dfg.sh` chains Steps 5 and 6 automatically (analyzes BBV, generates JSON, runs DFG generation):
+
+```bash
+./tools/profile_to_dfg.sh \
+  --bbv output/yolo.bbv.0.bb \
+  --elf output/yolo_inference \
+  --sysroot output/sysroot \
+  --top 20 \
+  --coverage 80
+```
 
 ### Typical hotspot findings
 
@@ -167,7 +215,12 @@ RVFuse/
 │   ├── yolo_runner/
 │   │   ├── yolo_runner.cpp      # YOLO inference runner (ONNX Runtime C++ API)
 │   │   └── stb_image.h          # Header-only image loader
-│   └── analyze_bbv.py           # BBV hotspot report generator
+│   ├── dfg/                     # Data Flow Graph generation
+│   │   ├── __main__.py          # CLI entry point
+│   │   ├── filter.py            # Report-driven BB selection (top-N / coverage)
+│   │   └── tests/
+│   ├── analyze_bbv.py           # BBV hotspot report generator (text + JSON)
+│   └── profile_to_dfg.sh        # End-to-end: BBV analysis → selective DFG
 ├── output/                      # Build artifacts and profiling data
 │   ├── yolo_inference           # RISC-V inference binary
 │   ├── yolo11n.ort              # Optimized ORT format model

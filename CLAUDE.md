@@ -53,6 +53,16 @@ python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_infere
 
 # Run analyze_bbv.py tests
 cd tools && python3 -m pytest test_analyze_bbv.py -v
+
+# Run the full setup pipeline (Steps 0-6) with report
+./setup.sh
+
+# Run with specific options
+./setup.sh --shallow --bbv-interval 50000 --top 30 --coverage 85
+
+# Force re-run specific steps (deletes artifacts first)
+./setup.sh --force 2,3     # re-build QEMU and Docker image
+./setup.sh --force-all      # re-run everything from scratch
 ```
 
 ## Architecture Decisions (ADRs)
@@ -121,6 +131,7 @@ git merge --no-ff <feature-branch>
 ```
 
 ## Recent Changes
+- setup.sh redesign: Rewrote as thin orchestrator for README Steps 0-6 (was 5-step repo setup)
 - 003-automated-setup-flow: Added Bash 4.0+ (available on all modern Linux x86_64) + Git 2.30+, standard Unix utilities (ls, cat, grep, df, date)
 
 - 001-riscv-fusion-setup: Added N/A (documentation-only phase) + Git (for submodule integration), Markdown rendering
