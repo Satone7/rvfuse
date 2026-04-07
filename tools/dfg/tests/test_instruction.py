@@ -388,5 +388,87 @@ class TestRV64IInstructions(unittest.TestCase):
         self.assertEqual(r.src_regs, [])
 
 
+class TestRegisterKind(unittest.TestCase):
+    """Tests for the RegisterKind system and float register extraction."""
+
+    def test_float_kind_matches_f_reg(self):
+        from dfg.instruction import FLOAT_KIND
+        self.assertIsNotNone(FLOAT_KIND.pattern.match("f0"))
+        self.assertIsNotNone(FLOAT_KIND.pattern.match("f31"))
+        self.assertIsNotNone(FLOAT_KIND.pattern.match("ft0"))
+        self.assertIsNotNone(FLOAT_KIND.pattern.match("fa7"))
+        self.assertIsNotNone(FLOAT_KIND.pattern.match("fs11"))
+
+    def test_float_kind_rejects_int_reg(self):
+        from dfg.instruction import FLOAT_KIND
+        self.assertIsNone(FLOAT_KIND.pattern.match("a0"))
+        self.assertIsNone(FLOAT_KIND.pattern.match("t0"))
+
+    def test_integer_kind_matches_abi_names(self):
+        from dfg.instruction import INTEGER_KIND
+        self.assertIsNotNone(INTEGER_KIND.pattern.match("a0"))
+        self.assertIsNotNone(INTEGER_KIND.pattern.match("zero"))
+        self.assertIsNotNone(INTEGER_KIND.pattern.match("ra"))
+
+
+class TestExtractRegistersFloat(unittest.TestCase):
+    """Tests for _extract_registers with float register kinds."""
+
+    def test_fadd_s_two_float_regs(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("fa5,fa0,fa4")
+        self.assertEqual(regs["frd"][0], "fa5")
+        self.assertEqual(regs["frd"][1], "float")
+        self.assertEqual(regs["frs1"][0], "fa0")
+        self.assertEqual(regs["frs1"][1], "float")
+        self.assertEqual(regs["frs2"][0], "fa4")
+        self.assertEqual(regs["frs2"][1], "float")
+
+    def test_fmadd_s_with_rounding_mode(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("dyn,ft2,fa4,ft0,ft2")
+        self.assertEqual(regs["frd"][0], "ft2")
+        self.assertEqual(regs["frs1"][0], "fa4")
+        self.assertEqual(regs["frs2"][0], "ft0")
+        self.assertEqual(regs["frs3"][0], "ft2")
+
+    def test_flw_float_dst_int_base(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("fa4,0(a6)")
+        self.assertEqual(regs["frd"][0], "fa4")
+        self.assertEqual(regs["frd"][1], "float")
+        self.assertEqual(regs["rs1"][0], "a6")
+        self.assertEqual(regs["rs1"][1], "integer")
+
+    def test_fsw_float_src_int_base(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("ft2,0(a2)")
+        self.assertEqual(regs["frs2"][0], "ft2")
+        self.assertEqual(regs["frs2"][1], "float")
+        self.assertEqual(regs["rs1"][0], "a2")
+        self.assertEqual(regs["rs1"][1], "integer")
+
+    def test_integer_registers_still_work(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("a0,a1,a2")
+        self.assertEqual(regs["rd"][0], "a0")
+        self.assertEqual(regs["rd"][1], "integer")
+        self.assertEqual(regs["rs1"][0], "a1")
+        self.assertEqual(regs["rs2"][0], "a2")
+
+    def test_memory_format_int_still_works(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("ra,24(sp)")
+        self.assertEqual(regs["rs2"][0], "ra")
+        self.assertEqual(regs["rs1"][0], "sp")
+
+    def test_rounding_mode_rne_skipped(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("rne,fa5,fa0,fa4")
+        self.assertEqual(regs["frd"][0], "fa5")
+        self.assertEqual(regs["frs1"][0], "fa0")
+        self.assertEqual(regs["frs2"][0], "fa4")
+
+
 if __name__ == "__main__":
     unittest.main()
