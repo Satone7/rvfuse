@@ -34,6 +34,8 @@ logger = logging.getLogger("dfg")
 # Mapping from ISA extension name (uppercase) to (module path, builder function).
 _ISA_MODULES: dict[str, tuple[str, str]] = {
     "I": ("dfg.isadesc.rv64i", "build_registry"),
+    "F": ("dfg.isadesc.rv64f", "build_registry"),
+    "M": ("dfg.isadesc.rv64m", "build_registry"),
 }
 
 # Max debug log size before rotation (100 MB).
