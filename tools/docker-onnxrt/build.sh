@@ -13,7 +13,7 @@ EIGEN_VERSION="3.4.0"
 
 clone_if_missing() {
     local repo_url="$1" version="$2" dest="$3"
-    if [ -d "${dest}" ]; then
+    if [ -d "${dest}" ] && [ -n "$(ls -A "${dest}" 2>/dev/null)" ]; then
         echo "=== Skipping ${dest} (already exists) ==="
     else
         echo "=== Cloning ${repo_url} @ ${version} ==="
