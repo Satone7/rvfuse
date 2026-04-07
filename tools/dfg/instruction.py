@@ -37,9 +37,9 @@ class RegisterFlow:
 
     def resolve(self, operands: str) -> ResolvedFlow:
         """Map positional names to actual register names from the operand string."""
-        regs = _extract_registers(operands)
-        dst = [regs.get(p) for p in self.dst_regs if regs.get(p)]
-        src = [regs.get(p) for p in self.src_regs if regs.get(p)]
+        regs = _extract_registers(operands, kinds=_BUILTIN_KINDS)
+        dst = [regs[p][0] for p in self.dst_regs if p in regs]
+        src = [regs[p][0] for p in self.src_regs if p in regs]
         return ResolvedFlow(dst_regs=dst, src_regs=src)
 
 
@@ -79,50 +79,113 @@ class DFG:
     source: str = "script"
 
 
-def _extract_registers(operands: str) -> dict[str, str]:
+@dataclass
+class RegisterKind:
+    """Describes a register name space (integer, float, vector, ...).
+
+    Attributes:
+        name: Kind identifier, e.g. "integer", "float", "vector".
+        pattern: Compiled regex matching register names in this space.
+        position_prefix: Prefix for position names extracted from operands.
+            E.g. "f" means operands map to "frd", "frs1", "frs2", "frs3".
+    """
+
+    name: str
+    pattern: re.Pattern
+    position_prefix: str
+
+
+def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -> dict[str, tuple[str, str]]:
     """Extract register names from an operand string.
 
     Handles formats:
-      - "rd,rs1,rs2" -> {"rd": "a0", "rs1": "a1", "rs2": "a2"}
-      - "rs2,offset(rs1)" -> {"rs2": "a0", "rs1": "s0"}
-      - "rd,offset(rs1)" -> {"rd": "a0", "rs1": "s0"}
-    Returns a mapping from position name to register name.
+      - "rd,rs1,rs2" -> {"rd": ("a0", "integer"), "rs1": ("a1", "integer"), ...}
+      - "rs2,offset(rs1)" -> {"rs2": ("a0", "integer"), "rs1": ("s0", "integer")}
+      - "fmadd.s dyn,ft2,fa4,ft0,ft2" -> {"frd": ("ft2","float"), "frs1": ("fa4","float"), ...}
+      - "flw fa4,0(a6)" -> {"frd": ("fa4","float"), "rs1": ("a6","integer")}
+    Returns a mapping from position name to (register_name, kind_name).
     """
-    regs: dict[str, str] = {}
+    if kinds is None:
+        kinds = _BUILTIN_KINDS
+    regs: dict[str, tuple[str, str]] = {}
     parts = [p.strip() for p in operands.split(",")]
     if not parts:
         return regs
 
     # Detect memory format: "rs2, offset(rs1)" or "rd, offset(rs1)"
-    # This has exactly 2 comma-separated parts, second contains "("
     if len(parts) == 2 and "(" in parts[1]:
         first = parts[0].strip()
         match = re.match(r"(-?\d+)\((\w+)\)", parts[1].strip())
         if match:
-            offset_reg = match.group(2)
-            regs["rs1"] = offset_reg
-            # Both rd and rs2 are set to the first operand because loads use rd
-            # and stores use rs2 for the first operand. RegisterFlow.resolve()
-            # selects only the positions each instruction's flow definition
-            # specifies, so the dual-assignment is safe.
-            regs["rd"] = first
-            regs["rs2"] = first
+            offset_reg_name = match.group(2)
+            offset_reg_kind = _match_kind(offset_reg_name, kinds)
+            if offset_reg_kind:
+                regs[offset_reg_kind.position_prefix + "rs1"] = (
+                    offset_reg_name,
+                    offset_reg_kind.name,
+                )
+            # Both rd and rs2 use the first operand — RegisterFlow.resolve()
+            # selects only the positions each instruction specifies.
+            first_kind = _match_kind(first, kinds)
+            if first_kind:
+                regs[first_kind.position_prefix + "rd"] = (first, first_kind.name)
+                regs[first_kind.position_prefix + "rs2"] = (first, first_kind.name)
         return regs
 
-    # Standard format: "rd, rs1, rs2" or "rd, rs1, imm"
+    # Standard format: "rd, rs1, rs2, rs3" or "rd, rs1, imm"
     position_names = ["rd", "rs1", "rs2", "rs3"]
-    for i, part in enumerate(parts):
-        if i >= len(position_names):
-            break
-        token = part.strip()
-        # Skip immediates (numbers, hex values)
+    pos_idx = 0
+    for token in parts:
+        token = token.strip()
+        # Skip immediates
         if re.match(r"^-?\d+$", token) or re.match(r"^0x[0-9a-fA-F]+$", token):
             continue
-        # Only accept valid RISC-V register names (x0-x31 or ABI names)
-        if not re.match(r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|[sf]\d+)$", token):
+        # Skip rounding modes
+        if token in _ROUNDING_MODES:
             continue
-        regs[position_names[i]] = token
+        # Try matching against registered kinds
+        matched_kind = _match_kind(token, kinds)
+        if matched_kind is None:
+            continue
+        if pos_idx >= len(position_names):
+            break
+        pos_name = matched_kind.position_prefix + position_names[pos_idx]
+        regs[pos_name] = (token, matched_kind.name)
+        pos_idx += 1
     return regs
+
+
+def _match_kind(
+    token: str,
+    kinds: list[RegisterKind],
+) -> RegisterKind | None:
+    """Find the first RegisterKind whose pattern matches *token*."""
+    for kind in kinds:
+        if kind.pattern.match(token):
+            return kind
+    return None
+
+
+# Builtin register kinds
+INTEGER_KIND = RegisterKind(
+    name="integer",
+    pattern=re.compile(
+        r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|s\d+|jt?\d*)$"
+    ),
+    position_prefix="",
+)
+
+FLOAT_KIND = RegisterKind(
+    name="float",
+    pattern=re.compile(
+        r"^(f\d+|ft\d+|fs\d+|fa\d+|fv\d+)$"
+    ),
+    position_prefix="f",
+)
+
+_BUILTIN_KINDS: list[RegisterKind] = [INTEGER_KIND, FLOAT_KIND]
+
+_ROUNDING_MODES = frozenset({"dyn", "rne", "rtz", "rdn", "rup", "rmm"})
 
 
 class ISARegistry:
