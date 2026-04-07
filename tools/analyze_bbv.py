@@ -21,14 +21,19 @@ class ReportEntry:
     pct: float
     cumulative_pct: float
     location: str
+    bb_id: int | None = None
 
 
 def parse_bbv(bbv_path):
-    """Parse BBV file into list of (address, count) tuples.
+    """Parse BBV file into list of (address, count) tuples and address-to-bb_id map.
 
     Supports two formats:
     - Native QEMU BBV: T:id1:count1 :id2:count2 ... (with companion .disas)
     - Simple: address count (e.g. 0x10000 42)
+
+    Returns:
+        (addr_counts, addr_to_bb_id) where addr_counts is list of (address, count)
+        and addr_to_bb_id maps address -> bb_id (None for simple format).
     """
     import re
 
@@ -63,6 +68,9 @@ def parse_bbv(bbv_path):
                 if m:
                     bb_addr_map[int(m.group(1))] = int(m.group(2), 16)
 
+        # Build reverse map: address -> bb_id
+        addr_to_bb_id = {v: k for k, v in bb_addr_map.items()}
+
         # Parse BBV: each line is "T:id1:count1 :id2:count2 ..."
         # Aggregate counts across all intervals per address
         addr_counts = {}
@@ -86,9 +94,9 @@ def parse_bbv(bbv_path):
                     addr = bb_addr_map.get(bb_id)
                     if addr is not None:
                         addr_counts[addr] = addr_counts.get(addr, 0) + count
-        return list(addr_counts.items())
+        return list(addr_counts.items()), addr_to_bb_id
 
-    # Simple format: address count
+    # Simple format: address count (no bb_id available)
     blocks = []
     with open(bbv_file) as f:
         for line in f:
@@ -100,7 +108,7 @@ def parse_bbv(bbv_path):
                 continue
             addr = int(parts[0], 16) if parts[0].startswith("0x") else int(parts[0])
             blocks.append((addr, int(parts[1])))
-    return blocks
+    return blocks, None
 
 
 def resolve_addresses(blocks, elf_path, sysroot=None):
@@ -140,7 +148,7 @@ def resolve_addresses(blocks, elf_path, sysroot=None):
     return resolved
 
 
-def build_report_data(resolved):
+def build_report_data(resolved, addr_to_bb_id=None):
     """Sort resolved blocks by count descending, compute pct and cumulative_pct.
 
     Returns full untruncated list of ReportEntry objects.
@@ -154,6 +162,7 @@ def build_report_data(resolved):
     for rank, (addr, count, location) in enumerate(sorted_blocks, 1):
         pct = (count / total * 100) if total else 0.0
         cumulative += pct
+        bb_id = addr_to_bb_id.get(addr) if addr_to_bb_id else None
         entries.append(ReportEntry(
             rank=rank,
             address=addr,
@@ -161,6 +170,7 @@ def build_report_data(resolved):
             pct=pct,
             cumulative_pct=cumulative,
             location=location,
+            bb_id=bb_id,
         ))
     return entries
 
@@ -400,6 +410,7 @@ def generate_report_json(entries):
                 "pct": round(e.pct, 2),
                 "cumulative_pct": round(e.cumulative_pct, 2),
                 "location": e.location,
+                "bb_id": e.bb_id,
             }
             for e in entries
         ],
@@ -425,14 +436,14 @@ def main():
     parser.add_argument("-o", "--output", help="Output file (default: stdout)")
     args = parser.parse_args()
 
-    blocks = parse_bbv(args.bbv)
+    blocks, addr_to_bb_id = parse_bbv(args.bbv)
     if not blocks:
         print("Error: no basic blocks found in BBV file", file=sys.stderr)
         sys.exit(1)
     print(f"Parsed {len(blocks)} basic blocks from {args.bbv}")
 
     resolved = resolve_addresses(blocks, args.elf, args.sysroot)
-    entries = build_report_data(resolved)
+    entries = build_report_data(resolved, addr_to_bb_id)
     report = generate_report(entries, args.top)
 
     if args.output:

@@ -18,6 +18,7 @@ TOP=20
 COVERAGE=""
 OUTPUT_DIR=""
 JOBS=1
+ISA="I,F,M"
 
 # -- parse arguments (hand-written, no dependencies) --------------------------
 while [[ $# -gt 0 ]]; do
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
         --coverage) COVERAGE="$2";  shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         --jobs|-j)  JOBS="$2";     shift 2 ;;
+        --isa)      ISA="$2";      shift 2 ;;
         -h|--help)
             sed -n '2,/^$/s/^# \?//p' "$0"
             exit 0
@@ -107,7 +109,7 @@ python3 "$SCRIPT_DIR/analyze_bbv.py" "${ANALYZE_ARGS[@]}"
 echo ""
 
 # -- build DFG arguments -----------------------------------------------------
-DFG_ARGS=("--disas" "$DISAS" "--report" "$JSON_TMP" "--jobs" "$JOBS")
+DFG_ARGS=("--disas" "$DISAS" "--report" "$JSON_TMP" "--jobs" "$JOBS" "--isa" "$ISA")
 
 if [[ -n "$OUTPUT_DIR" ]]; then
     DFG_ARGS+=("--output-dir" "$OUTPUT_DIR")

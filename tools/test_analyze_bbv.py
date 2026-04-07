@@ -24,7 +24,8 @@ class TestParseBbv(unittest.TestCase):
             path = f.name
 
         try:
-            blocks = parse_bbv(path)
+            blocks, addr_to_bb_id = parse_bbv(path)
+            self.assertIsNone(addr_to_bb_id)
             self.assertEqual(len(blocks), 3)
             self.assertEqual(blocks[0], (0x10000, 42))
             self.assertEqual(blocks[1], (0x10050, 15))
@@ -40,7 +41,8 @@ class TestParseBbv(unittest.TestCase):
             path = f.name
 
         try:
-            blocks = parse_bbv(path)
+            blocks, addr_to_bb_id = parse_bbv(path)
+            self.assertIsNone(addr_to_bb_id)
             self.assertEqual(len(blocks), 2)
             self.assertEqual(blocks[0], (0x20000, 10))
         finally:
@@ -53,7 +55,7 @@ class TestParseBbv(unittest.TestCase):
             path = f.name
 
         try:
-            blocks = parse_bbv(path)
+            blocks, addr_to_bb_id = parse_bbv(path)
             self.assertEqual(blocks, [])
         finally:
             Path(path).unlink()
@@ -66,7 +68,8 @@ class TestParseBbv(unittest.TestCase):
             path = f.name
 
         try:
-            blocks = parse_bbv(path)
+            blocks, addr_to_bb_id = parse_bbv(path)
+            self.assertIsNone(addr_to_bb_id)
             self.assertEqual(blocks, [(65536, 42)])
         finally:
             Path(path).unlink()
@@ -90,13 +93,17 @@ class TestParseBbv(unittest.TestCase):
                 "BB 2 (vaddr: 0x10200, 1 insns):\n"
                 "  0x10200: addi t2, t2, 3\n\n"
             )
-            blocks = parse_bbv(bb_path)
+            blocks, addr_to_bb_id = parse_bbv(bb_path)
             # Counts are aggregated: BB0=100+30, BB1=50, BB2=200+70
             by_addr = dict(blocks)
             self.assertEqual(by_addr[0x10000], 130)
             self.assertEqual(by_addr[0x10050], 50)
             self.assertEqual(by_addr[0x10200], 270)
             self.assertEqual(len(blocks), 3)
+            # Verify bb_id mapping
+            self.assertEqual(addr_to_bb_id[0x10000], 0)
+            self.assertEqual(addr_to_bb_id[0x10050], 1)
+            self.assertEqual(addr_to_bb_id[0x10200], 2)
         finally:
             Path(bb_path).unlink()
             disas_path.unlink(missing_ok=True)
@@ -259,9 +266,11 @@ class TestGenerateReportJson(unittest.TestCase):
         self.assertEqual(len(data["blocks"]), 2)
 
     def test_block_fields(self):
-        entries = self._entries([
-            (0x111f4, 12345, "conv2d (src/conv.c:100)"),
-        ])
+        addr_to_bb_id = {0x111f4: 42}
+        entries = build_report_data(
+            [(0x111f4, 12345, "conv2d (src/conv.c:100)")],
+            addr_to_bb_id,
+        )
         data = json_module.loads(generate_report_json(entries))
         block = data["blocks"][0]
         self.assertEqual(block["rank"], 1)
@@ -270,6 +279,7 @@ class TestGenerateReportJson(unittest.TestCase):
         self.assertAlmostEqual(block["pct"], 100.0, places=2)
         self.assertAlmostEqual(block["cumulative_pct"], 100.0, places=2)
         self.assertEqual(block["location"], "conv2d (src/conv.c:100)")
+        self.assertEqual(block["bb_id"], 42)
 
     def test_empty_input(self):
         data = json_module.loads(generate_report_json([]))
