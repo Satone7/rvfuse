@@ -57,7 +57,7 @@ readonly -a STEP3_ARTIFACTS=(
 readonly -a STEP5_ARTIFACTS=(
     "output/hotspot.json"
 )
-# Step 6 (DFG Generation): non-empty dfg/ directory — checked specially
+# Step 6 (DFG Generation): non-empty output/dfg/ directory — checked specially
 readonly -a STEP7_ARTIFACTS=()  # always runs
 
 # --- Global state ---
@@ -428,7 +428,7 @@ cleanup_step() {
             ;;
         6)
             log_info "Cleaning Step 6 artifacts (DFG output)..."
-            rm -rf "${PROJECT_ROOT}/dfg"
+            rm -rf "${PROJECT_ROOT}/output/dfg"
             ;;
         7)
             # No cleanup for report step
