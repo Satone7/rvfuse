@@ -30,12 +30,10 @@ class RegisterFlow:
 
     Positions use RISC-V spec names (rd, rs1, rs2, rs3, etc.) which are
     resolved to actual register names from the operand string via resolve().
-    When kinds is empty, all operands default to "integer".
     """
 
     dst_regs: list[str]
     src_regs: list[str]
-    kinds: dict[str, str] = field(default_factory=dict)
 
     def resolve(self, operands: str) -> ResolvedFlow:
         """Map positional names to actual register names from the operand string."""
@@ -172,7 +170,7 @@ def _match_kind(
 INTEGER_KIND = RegisterKind(
     name="integer",
     pattern=re.compile(
-        r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|[sf]\d+|jt?\d*)$"
+        r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|s\d+|jt?\d*)$"
     ),
     position_prefix="",
 )

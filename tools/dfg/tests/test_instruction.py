@@ -462,6 +462,13 @@ class TestExtractRegistersFloat(unittest.TestCase):
         self.assertEqual(regs["rs2"][0], "ra")
         self.assertEqual(regs["rs1"][0], "sp")
 
+    def test_bare_float_reg_classified_as_float(self):
+        from dfg.instruction import _extract_registers
+        regs = _extract_registers("f0,f1,f2")
+        self.assertEqual(regs["frd"][1], "float")
+        self.assertEqual(regs["frs1"][1], "float")
+        self.assertEqual(regs["frs2"][1], "float")
+
     def test_rounding_mode_rne_skipped(self):
         from dfg.instruction import _extract_registers
         regs = _extract_registers("rne,fa5,fa0,fa4")
