@@ -67,3 +67,6 @@ tests/tools/*.o
 tests/tools/*.elf
 tests/tools/*.log
 tests/tools/test_hello.c
+
+# llvm-tblgen build artifacts (build/ dir handled by third_party/*/build/ pattern)
+# NOTE: tools/dfg/riscv_instrs.json is committed — it's the reproducible input for gen_isadesc.py
