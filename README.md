@@ -202,8 +202,8 @@ The YOLO inference workload shows hotspots concentrated in matrix multiplication
 
 ```text
 RVFuse/
-├── docs/                        # Architecture and project documents
-├── specs/                       # Feature specifications
+├── docs/                        # Architecture and design documents
+│   └── plans/                   # Design + implementation plans per feature
 ├── memory/                      # Ground-rules and project governance
 ├── tools/
 │   ├── docker-onnxrt/
@@ -252,12 +252,7 @@ RVFuse/
 
 ## Development Workflow
 
-This project uses the Rainbow workflow for feature development:
-
-1. `/rainbow.specify` - Create feature specification from natural language
-2. `/rainbow.design` - Generate design documents
-3. `/rainbow.taskify` - Generate implementation tasks
-4. `/rainbow.implement` - Execute implementation plan
+This project uses the Superpowers workflow for feature development. Design and implementation plans are written to `docs/plans/`.
 
 ## License
 

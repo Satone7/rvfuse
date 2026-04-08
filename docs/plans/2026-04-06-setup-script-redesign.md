@@ -93,7 +93,7 @@ Overall: FAIL
 
 ### Delete
 - `setup.sh` (rewrite)
-- `specs/003-automated-setup-flow/` (entire directory — 6 files based on wrong requirements)
+- `specs/003-automated-setup-flow/` (entire directory — 6 files based on wrong requirements) [completed]
 - `tests/setup/` (entire directory — 5 bats test files testing wrong steps)
 
 ### Create

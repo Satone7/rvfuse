@@ -1,8 +1,8 @@
 # Software Architecture Design: RVFuse
 
-**Version**: 1.1 | **Date**: 2026-03-31 | **Status**: Draft
+**Version**: 2.0 | **Date**: 2026-04-08 | **Status**: Active
 
-**Purpose**: This document describes the current architectural scope of RVFuse for the present phase, which is limited to repository structure, dependency access, and setup guidance. Research workflows such as hotspot analysis, DFG generation, and instruction-fusion validation remain future work.
+**Purpose**: This document describes the architecture of RVFuse, a RISC-V instruction fusion research platform. The project has completed its setup and DFG generation foundation, and is entering Phase 1 (fusion candidate discovery and design) of a three-phase research roadmap.
 
 ---
 
@@ -21,39 +21,48 @@
 
 ## 1. Executive Summary
 
-- **What**: RVFuse is a RISC-V instruction fusion research project whose current phase establishes the project workspace, dependency references, and setup baseline.
-- **Why**: A stable and well-documented setup foundation is required before any profiling, DFG, or fusion-validation work can be designed and implemented safely.
-- **Current Scope**: Repository structure, dependency source references, optional dependency policy, setup guidance, and setup verification criteria.
-- **Deferred Scope**: Hotspot detection, DFG generation, fusion candidate discovery, fused instruction implementation, and cycle comparison.
+- **What**: RVFuse is a RISC-V instruction fusion research platform that profiles applications via QEMU emulation, generates Data Flow Graphs (DFG) from hot basic blocks, and aims to identify high-frequency instruction combinations suitable for hardware fusion.
+- **Why**: RISC-V's modular extension mechanism is naturally suited for instruction fusion optimization. Data-driven analysis of real workloads provides evidence for custom extension design.
+- **Completed Scope**: Repository structure, dependency management, QEMU BBV profiling pipeline, DFG generation engine with I/F/M ISA extensions, and a fully automated setup pipeline (`setup.sh` Steps 0-7).
+- **Current Scope**: Fusion candidate discovery and design — identifying fusible instruction patterns from DFG output.
+- **Future Scope**: Simulation and benefit quantification; ISA extension (D, C, V) and multi-workload diversification.
+
+### Research Roadmap
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| 0 | Setup + profiling + DFG generation | Completed |
+| 1 | Fusion candidate discovery and design | Current |
+| 2 | Simulation and benefit quantification | Planned |
+| 3 | Extension and diversification (ISA D/C/V, multi-workload) | Planned |
 
 ---
 
 ## 2. Architecture Snapshot
 
 - **Business Goals**:
-  1. Define a clear repository structure for the current phase
-  2. Document mandatory and optional external dependencies without ambiguity
-  3. Preserve canonical source references for future dependency acquisition
-  4. Make contributor onboarding repeatable and auditable
-  5. Reserve clean extension points for later research workflows
+  1. Profile real workloads (e.g., YOLO11n inference) to identify hot basic blocks
+  2. Generate accurate Data Flow Graphs from hot basic blocks
+  3. Discover instruction fusion candidates with data dependencies
+  4. Quantify fusion benefits through simulation and cycle comparison
 
 - **Constraints**:
-  - Current phase is limited to project structure and dependency access
   - Development is local-first on Linux x86_64 hosts
-  - External repositories are allowed for dependency acquisition and reference
-  - Xuantie newlib is optional in the current phase and must remain documented
-  - Any future workload example referenced in current documents must have a traceable source
+  - External repositories are managed as Git submodules (`third_party/`)
+  - ISA descriptions are derived from LLVM `.td` files via `llvm-tblgen` for accuracy
+  - Agent integration uses Claude Code CLI subprocess (no separate API key management)
+  - Xuantie newlib remains optional (not required for current workloads)
 
 - **Quality Targets**:
-  - Setup guidance is understandable without relying on future workflow assumptions
-  - Mandatory and optional dependency status is consistent across documents
-  - Current-phase setup can be completed within 30 minutes, excluding network download time, first-time dependency synchronization time, and third-party build time
-  - Current-phase documents do not require profiling, DFG, or fusion-validation capabilities to verify setup completion
+  - Full pipeline runnable from `git clone` via `./setup.sh`
+  - DFG engine tested with ~1300 lines of unit tests
+  - ISA register semantics consistent with LLVM backend definitions
+  - Agent check/generate provides advisory verification without blocking the pipeline
 
 - **Key Dependencies**:
-  - Xuantie QEMU: https://github.com/XUANTIE-RV/qemu
-  - Xuantie LLVM: https://github.com/XUANTIE-RV/llvm-project
-  - Xuantie newlib: https://github.com/XUANTIE-RV/newlib
+  - Xuantie QEMU: https://github.com/XUANTIE-RV/qemu (user-mode emulation + BBV plugin)
+  - Xuantie LLVM: https://github.com/XUANTIE-RV/llvm-project (ISA definitions + cross-compiler)
+  - Xuantie newlib: https://github.com/XUANTIE-RV/newlib (optional, bare-metal scenarios)
 
 ---
 
@@ -63,85 +72,122 @@
 
 ```mermaid
 graph TB
-    Contributor[Contributor] -->|Read setup guidance| RVFuse[RVFuse Setup Foundation]
-    Contributor -->|Review dependency policy| RVFuse
-    RVFuse -->|Reference upstream source| QEMU[Xuantie QEMU]
-    RVFuse -->|Reference upstream source| LLVM[Xuantie LLVM]
-    RVFuse -->|Reference optional source| Newlib[Xuantie newlib]
-    RVFuse -.future planning.-> FutureFlow[Future Research Workflow]
+    Researcher[Researcher] -->|Configure & Run| SetupPipeline[setup.sh Pipeline]
+    SetupPipeline -->|Step 0-3| BuildEnv[Build Environment<br/>QEMU + Docker + YOLO]
+    BuildEnv -->|Step 4| BBVProfiling[BBV Profiling<br/>QEMU + BBV Plugin]
+    BBVProfiling -->|Step 5| HotspotReport[Hotspot Analysis<br/>analyze_bbv.py]
+    HotspotReport -->|Step 6| DFGEngine[DFG Generation<br/>tools/dfg/]
+    DFGEngine -->|DOT/JSON/PNG| Output[DFG Output]
+    DFGEngine --> Phase1[Phase 1: Fusion Candidate Discovery<br/>Planned]
+    Phase1 --> Phase2[Phase 2: Simulation & Quantification<br/>Planned]
+    Phase2 --> Phase3[Phase 3: Extension & Diversification<br/>Planned]
 ```
 
 **Context Description**:
-- **Contributor**: Developer or researcher preparing the workspace for the current phase
-- **RVFuse Setup Foundation**: Repository structure, setup documentation, dependency policy, and verification criteria
-- **Xuantie QEMU / LLVM**: External toolchain dependencies that are part of the current dependency baseline
-- **Xuantie newlib**: Optional external dependency retained as a documented source for future scenarios
-- **Future Research Workflow**: Later-phase profiling, DFG, and fusion-validation work that is intentionally outside the current delivery scope
+- **Researcher**: User who configures and runs the pipeline
+- **setup.sh Pipeline**: Orchestrates Steps 0-7 with artifact-based skip detection
+- **QEMU + BBV Plugin**: User-mode RISC-V emulation with basic block vector sampling
+- **analyze_bbv.py**: Resolves BB addresses to source locations, produces hotspot JSON report
+- **DFG Engine**: Parses `.disas` files, builds RAW dependency graphs, supports I/F/M ISA extensions
+- **Phases 1-3**: Future research work (fusion discovery, simulation, diversification)
 
 ### 3.2 Containers
 
 ```mermaid
 graph TB
-    Contributor -->|Read| Docs[Project Documents]
-    Contributor -->|Follow| SetupGuide[Setup Guidance]
-    SetupGuide -->|Define| Workspace[Workspace Layout]
-    SetupGuide -->|Reference| Deps[Dependency Catalog]
-    Deps -.future use.-> FutureModules[Future Analysis Modules]
+    subgraph BuildInfrastructure[Build Infrastructure]
+        QEMU[Xuantie QEMU<br/>user-mode + BBV plugin]
+        Docker[Docker<br/>RISC-V native build]
+        LLVM[Xuantie LLVM<br/>ISA definitions + compiler]
+    end
+    subgraph AnalysisTools[Analysis Tools]
+        BBV[analyze_bbv.py<br/>hotspot report]
+        DFG[DFG Engine<br/>parser + builder + agent]
+        Pipeline[profile_to_dfg.sh<br/>end-to-end orchestration]
+    end
+    subgraph ISA[ISA Descriptors]
+        RV64I[rv64i.py<br/>base integer + pseudo]
+        RV64F[rv64f.py<br/>single-precision float]
+        RV64M[rv64m.py<br/>multiply/divide]
+        GenISA[gen_isadesc.py<br/>llvm-tblgen generator]
+    end
+    Pipeline --> BBV
+    Pipeline --> DFG
+    DFG --> RV64I
+    DFG --> RV64F
+    DFG --> RV64M
+    GenISA -.generates.-> RV64F
+    GenISA -.generates.-> RV64M
 ```
 
 **Container Description**:
 | Container | Purpose |
 |-----------|---------|
-| Project Documents | Capture scope, architecture, and decisions for the current phase |
-| Setup Guidance | Explain how contributors prepare and verify the current-phase workspace |
-| Workspace Layout | Defines the repository areas expected in the setup phase |
-| Dependency Catalog | Records mandatory and optional dependency references and their roles |
-| Future Analysis Modules | Placeholder for later research capabilities that are not part of the current phase |
+| Build Infrastructure | QEMU emulation, Docker cross-build, LLVM toolchain |
+| Analysis Tools | BBV hotspot analysis, DFG generation, end-to-end orchestration |
+| ISA Descriptors | Per-extension instruction register flow definitions, generated from LLVM `.td` files |
 
 ### 3.3 Components
 
 ```mermaid
 graph TB
-    SetupGuide[Setup Guide] --> LayoutPolicy[Workspace Layout Policy]
-    SetupGuide --> DependencyPolicy[Dependency Policy]
-    SetupGuide --> VerificationChecklist[Setup Verification Checklist]
-    DependencyPolicy --> MandatoryDeps[Mandatory Dependencies]
-    DependencyPolicy --> OptionalDeps[Optional Dependencies]
-    VerificationChecklist -.future boundary.-> DeferredWork[Deferred Workflow Boundary]
+    subgraph DFGEngine[DFG Engine]
+        Parser[parser.py<br/>.disas text → BasicBlock list]
+        Instruction[instruction.py<br/>ISA registry + register flow]
+        Builder[dfg.py<br/>RAW dependency edges]
+        Outputter[output.py<br/>DOT/JSON/PNG]
+        Filter[filter.py<br/>hotspot-based BB filtering]
+        Agent[agent.py<br/>Claude CLI check/generate]
+    end
+    Parser --> Instruction
+    Instruction --> Builder
+    Builder --> Outputter
+    Filter --> Parser
+    Agent --> Builder
 ```
 
 **Component Responsibilities**:
 | Component | Responsibility |
 |-----------|---------------|
-| Setup Guide | Describe the current-phase setup flow for contributors |
-| Workspace Layout Policy | Define the repository structure expected in the current phase |
-| Dependency Policy | Distinguish mandatory and optional dependencies and preserve source references |
-| Setup Verification Checklist | Define how contributors confirm setup completion |
-| Deferred Workflow Boundary | State what remains outside the current phase |
+| parser.py | Read `.disas` text, parse into `BasicBlock` list (address, instruction sequence) |
+| instruction.py | `ISARegistry`: lookup mnemonic → `RegisterFlow` (dst/src registers); multi-kind register support (integer, float) |
+| dfg.py | Iterate BB instructions, build RAW dependency edges using `last_writer` map |
+| output.py | Serialize DFG to DOT (Graphviz), JSON, and PNG formats |
+| filter.py | Read BBV hotspot JSON, filter BBs by `--top N` or `--coverage X%` |
+| agent.py | Dispatch BB to Claude Code CLI for verification (check) or fallback generation (generate) |
 
 ---
 
 ## 4. Deployment Summary
 
-- **Runtime**: Local Linux workstation
-- **Primary Audience**: Contributors preparing the repository for future RVFuse research work
-- **Current Deliverables**: Project documents, dependency references, setup policy, and setup verification guidance
-- **Dependency Access Model**: External toolchain repositories are tracked by reference and are intended to be integrated through the repository setup process
+- **Runtime**: Local Linux x86_64 workstation
+- **Primary Audience**: Researchers analyzing RISC-V instruction fusion opportunities
+- **Current Deliverables**: Fully automated pipeline (`setup.sh` Steps 0-7), DFG engine with I/F/M ISA support, BBV hotspot analysis, two Agent SKILLs (dfg-check, dfg-generate)
+- **Dependency Access Model**: External toolchain repositories tracked as Git submodules in `third_party/`
 
-**Current-Phase Workspace Layout**:
+**Current Workspace Layout**:
 ```text
 RVFuse/
-├── docs/                   # Architecture and contributor-facing project documents
-├── specs/                  # Feature specifications for scoped project work
-├── memory/                 # Project governance and working memory artifacts
-└── third_party/            # External dependency integration point for current and future phases
-    ├── qemu/               # Xuantie QEMU
-    ├── llvm-project/       # Xuantie LLVM
-    └── newlib/             # Xuantie newlib (optional in current phase)
+├── setup.sh               # Pipeline orchestrator (Steps 0-7)
+├── prepare_model.sh       # YOLO model export
+├── verify_bbv.sh          # QEMU + BBV plugin verification
+├── docs/                  # Architecture and design documents
+├── docs/
+│   ├── plans/             # Design + implementation plans per feature
+│   └── architecture.md    # System architecture (this file)
+├── memory/                # Project governance
+├── tools/
+│   ├── analyze_bbv.py     # BBV hotspot analysis (464 lines)
+│   ├── profile_to_dfg.sh  # End-to-end profiling → DFG pipeline
+│   ├── dfg/               # DFG generation engine (~3400 lines)
+│   ├── docker-onnxrt/     # Docker RISC-V native build
+│   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
+│   └── yolo_runner/       # YOLO inference C++ runner
+├── tests/                 # Integration tests
+└── third_party/           # Git submodules
+    ├── qemu/              # Xuantie QEMU (mandatory)
+    └── llvm-project/      # Xuantie LLVM (mandatory)
 ```
-
-**Deferred Layout Areas**:
-- `src/`, `tests/`, `builds/`, `results/`, and analysis-specific configuration assets are future-phase workspace areas and are not required for current-phase setup completion.
 
 ---
 
@@ -153,6 +199,7 @@ RVFuse/
 | ADR-002 | Deliver the Project in Stages | Accepted | 2026-03-31 |
 | ADR-003 | Keep newlib Optional in the Current Phase | Accepted | 2026-03-31 |
 | ADR-004 | Require Traceable Workload References | Accepted | 2026-03-31 |
+| ADR-005 | Use llvm-tblgen for ISA Descriptor Generation | Accepted | 2026-04-07 |
 
 ### ADR-001: Use Git Submodules for External Toolchain Integration
 
@@ -168,85 +215,100 @@ RVFuse/
 
 ### ADR-002: Deliver the Project in Stages
 
-**Context**: The end-state research platform is broader than the current setup work.
+**Context**: The end-state research platform is broader than what can be delivered at once.
 
-**Decision**: Limit the present phase to project structure and dependency access, and defer profiling, DFG, and fusion-validation design to later features.
+**Decision**: Structure delivery into phases — setup foundation (completed), profiling + DFG generation (completed), fusion candidate discovery (current), simulation + quantification (planned), extension + diversification (planned).
 
 **Consequences**:
-- (+) Prevents current documents from overcommitting future implementation work
-- (+) Makes setup validation simpler and more objective
-- (-) Some future architecture details remain intentionally unspecified
+- (+) Each phase has clear scope and validation criteria
+- (+) Completed phases provide immediate research value
+- (-) Some future architecture details remain unspecified until their phase begins
 
 ### ADR-003: Keep newlib Optional in the Current Phase
 
 **Context**: Not every current scenario requires bare-metal runtime support.
 
-**Decision**: Treat Xuantie newlib as optional for the current phase while preserving its canonical source reference for later scenarios.
+**Decision**: Treat Xuantie newlib as optional while preserving its canonical source reference.
 
 **Consequences**:
-- (+) Avoids blocking current setup on an unnecessary dependency
+- (+) Avoids blocking current work on an unnecessary dependency
 - (+) Keeps future bare-metal expansion visible
 - (-) Future features must explicitly state when newlib becomes mandatory
 
 ### ADR-004: Require Traceable Workload References
 
-**Context**: Future validation examples must be attributable to real sources.
+**Context**: Validation examples must be attributable to real sources.
 
-**Decision**: Any workload or benchmark mentioned in current-phase documents must have a traceable origin instead of being invented for convenience.
+**Decision**: Any workload or benchmark mentioned in documents must have a traceable origin.
 
 **Consequences**:
-- (+) Improves credibility of future validation planning
-- (+) Reduces ambiguity in later acceptance criteria
+- (+) Improves credibility of validation planning
+- (+) Reduces ambiguity in acceptance criteria
 - (-) Workload examples cannot be added casually without source documentation
+
+### ADR-005: Use llvm-tblgen for ISA Descriptor Generation
+
+**Context**: Manually maintaining ISA register flow descriptions is error-prone and doesn't scale across extensions.
+
+**Decision**: Generate ISA descriptor Python modules from Xuantie LLVM `.td` files using `llvm-tblgen --dump-json`. Hand-written `rv64i.py` is retained for pseudo-instructions that `llvm-tblgen` does not define.
+
+**Consequences**:
+- (+) Register operand mappings are authoritative (sourced from LLVM backend)
+- (+) Adding new extensions (D, A, V) requires only running the generator
+- (-) Depends on Xuantie LLVM submodule and one-time `llvm-tblgen` build
+- (-) QEMU disassembly mnemonics may differ from LLVM names (handled by name mapping table)
 
 ---
 
 ## 6. Quality Attributes
 
-### 6.1 Setup Clarity
+### 6.1 Pipeline Reliability
 
 - **Targets**:
-  - Contributors can distinguish setup work from deferred research work on first read
-  - Current-phase setup verification does not depend on unfinished later-stage capabilities
+  - Full pipeline (`setup.sh` Steps 0-7) completes without manual intervention
+  - Artifact-based skip detection avoids redundant work on re-runs
+  - Individual steps can be force-re-run via `--force` flag
 
 - **Strategies**:
-  - Keep current-phase and deferred-phase sections explicit
-  - Use one dependency policy across spec and architecture documents
-  - Define setup completion criteria in contributor-facing language
+  - Each step checks for its output artifact before executing
+  - Docker provides deterministic build environments
+  - Agent failures are non-blocking (advisory mode)
 
-### 6.2 Reproducibility
+### 6.2 DFG Accuracy
 
 - **Targets**:
-  - Mandatory dependency status is consistent across planning documents
+  - Register flow definitions match LLVM backend semantics
+  - RAW dependency edges are complete and correct
+  - Agent verification catches script-level errors
+
+- **Strategies**:
+  - ISA descriptors generated from `llvm-tblgen` (ADR-005)
+  - ~1300 lines of unit tests covering parser, instruction, DFG, output, agent
+  - Agent check SKILL provides independent verification layer
+  - Hand-written `rv64i.py` covers pseudo-instructions not in LLVM `.td`
+
+### 6.3 Reproducibility
+
+- **Targets**:
+  - Dependency status is consistent across planning documents
   - Optional dependencies include activation conditions
   - Dependency sources remain traceable
 
 - **Strategies**:
   - Maintain one canonical dependency list
-  - Keep optional dependency rules near the setup guidance
-  - Preserve upstream repository references in architecture and setup documentation
-
-### 6.3 Reliability
-
-- **Targets**:
-  - Contributors can recover from temporary dependency acquisition failures using documented fallback guidance
-  - Current-phase setup can be validated without third-party compilation success
-
-- **Strategies**:
-  - Document retry and fallback expectations
-  - Separate dependency acquisition from later build and execution workflows
-  - Keep current acceptance focused on structure and access, not on deferred runtime behavior
+  - Git submodules pin dependency versions
+  - Preserve upstream repository references in architecture and CLAUDE.md
 
 ### 6.4 Scope Control
 
 - **Targets**:
-  - Profiling, DFG, and fusion-validation requirements do not appear as current-phase deliverables
-  - Deferred technical decisions remain visible without blocking the current phase
+  - Current-phase work is clearly distinguished from future phases
+  - Each phase has defined entry/exit criteria
 
 - **Strategies**:
-  - Move future workflow capabilities into later features
-  - Record only current-phase architectural decisions here
-  - Flag future work explicitly rather than implying readiness
+  - Three-phase roadmap documented in work report and CLAUDE.md
+  - Design documents are tagged by date and feature scope
+  - Future capabilities are flagged explicitly, not implied
 
 ---
 
@@ -254,40 +316,41 @@ RVFuse/
 
 | ID | Risk/Debt | Impact | Mitigation/Plan |
 |----|-----------|--------|-----------------|
-| R-001 | Upstream repository availability | High | Preserve canonical source links and document retry or manual fallback expectations |
-| R-002 | Large dependency footprint | Medium | Keep setup timing separate from download and build costs |
-| R-003 | Optional dependency confusion | Medium | Keep mandatory and optional status synchronized across documents |
-| TD-001 | Profiling workflow remains unspecified | Low | Define it in a later feature after setup completion |
-| TD-002 | DFG validity criteria remain unspecified | Low | Resolve in a future DFG-focused specification rather than in the setup phase |
-| TD-003 | Benchmark selection policy is only partially defined | Low | Require traceable sources and formalize selection criteria in a future validation feature |
+| R-001 | Upstream repository availability | High | Preserve canonical source links; document retry expectations |
+| R-002 | Large dependency footprint (QEMU, LLVM) | Medium | `--shallow` clone support; separate build artifacts from source |
+| R-003 | QEMU disassembly mnemonics differ from LLVM names | Medium | Name mapping table in `gen_isadesc.py`; verify against actual `.disas` output |
+| R-004 | Agent CLi unavailable in CI/headless environments | Low | Agent is advisory; pipeline runs in script-only mode without it |
+| TD-001 | Fusion candidate search algorithm undefined | High | Phase 1 deliverable — design fusion pattern recognition on DFG |
+| TD-002 | Hardware constraint modeling undefined | Medium | Phase 1 deliverable — encode encoding space, pipeline, timing constraints |
+| TD-003 | Simulation/benefit quantification pipeline undefined | Medium | Phase 2 deliverable — BBV-weighted benefit calculation |
+| TD-004 | D/A/V ISA extensions not yet supported | Low | Phase 3 — `gen_isadesc.py` architecture already supports extension |
 
 ---
 
 ## 8. Agent Checklist
 
 ### Inputs
-- Project scope confirmation for the current phase
-- Repository structure expectations
-- Mandatory dependency list
-- Optional dependency list and activation conditions
-- Canonical upstream source references
+- Project roadmap (three-phase plan from `docs/work-report-2026-04-07.md`)
+- Repository structure and module responsibilities
+- DFG engine architecture (parser → instruction → builder → output)
+- ISA descriptor generation pipeline (`llvm-tblgen` → `gen_isadesc.py` → `isadesc/`)
+- Existing Agent SKILLs: `dfg-check`, `dfg-generate`
 
 ### Outputs
-- Current-phase setup documentation
-- Repository structure definition
-- Dependency policy with mandatory and optional status
-- Setup verification guidance
-- Deferred-work boundary notes
+- Fusion candidate search design (Phase 1)
+- Hardware constraint model (Phase 1)
+- Fusion scheme Skill specification (Phase 1)
 
 ### Acceptance Guardrails
-- Do not treat hotspot analysis, DFG generation, or fusion validation as current-phase deliverables
-- Do not mark Xuantie newlib as mandatory in the current phase
-- Do not include download time, first-time dependency synchronization time, or third-party build time in the 30-minute setup target
+- Do not treat simulation or ISA extension work as Phase 1 deliverables
+- Do not modify the DFG engine core (parser, builder, output) unless fixing bugs — Phase 1 builds on top of it
+- Do not mark Xuantie newlib as mandatory
 - Do not reference benchmark or workload examples without a traceable source
 
 ---
 
 **Notes**
 
-- This document intentionally describes the current delivery phase rather than the full long-term research platform
-- Future profiling, DFG, and fusion-validation architecture should be introduced through separate feature specifications and follow-up architecture revisions
+- This document reflects the project state as of 2026-04-08
+- Phase 0 (setup + profiling + DFG) is complete; detailed design documents for each iteration are in `docs/plans/`
+- Future phases should be introduced through separate feature specifications and architecture revisions
