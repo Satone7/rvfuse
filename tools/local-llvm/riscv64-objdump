@@ -1,0 +1,12 @@
+#!/bin/bash
+# riscv64-objdump — Wrapper for locally-built Xuantie llvm-objdump.
+#
+# Usage:
+#   ./tools/local-llvm/riscv64-objdump [OPTIONS] <object file>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+OBJDUMP=$(resolve_tool llvm-objdump)
+
+exec "$OBJDUMP" "$@"

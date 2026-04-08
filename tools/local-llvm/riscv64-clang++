@@ -1,0 +1,35 @@
+#!/bin/bash
+# riscv64-clang++ — Wrapper for locally-built Xuantie clang++ (C++ compiler).
+#
+# Usage:
+#   ./tools/local-llvm/riscv64-clang++ [OPTIONS] <source>
+#
+# Options:
+#   --cpu=<CPU>     Select Xuantie CPU (c906, c906fd, c906fdv, c910, c920)
+#   --version       Show clang++ version
+#   --help          Show clang++ help
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+CLANGXX=$(resolve_tool clang++)
+
+# Parse custom options
+TARGET_ARGS=("--target=riscv64-unknown-linux-gnu")
+EXTRA_ARGS=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --cpu=*)
+            EXTRA_ARGS+=("-mcpu=${arg#*=}")
+            ;;
+        --version|--help)
+            exec "$CLANGXX" "${TARGET_ARGS[@]}" "$@"
+            ;;
+        *)
+            EXTRA_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+exec "$CLANGXX" "${TARGET_ARGS[@]}" "${EXTRA_ARGS[@]}"

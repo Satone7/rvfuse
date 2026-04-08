@@ -1,0 +1,12 @@
+#!/bin/bash
+# riscv64-readelf — Wrapper for locally-built Xuantie llvm-readelf.
+#
+# Usage:
+#   ./tools/local-llvm/riscv64-readelf [OPTIONS] <object file>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+READELF=$(resolve_tool llvm-readelf)
+
+exec "$READELF" "$@"

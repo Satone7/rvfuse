@@ -1,0 +1,12 @@
+#!/bin/bash
+# riscv64-strip — Wrapper for locally-built Xuantie llvm-strip.
+#
+# Usage:
+#   ./tools/local-llvm/riscv64-strip [OPTIONS] <object file>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+STRIP=$(resolve_tool llvm-strip)
+
+exec "$STRIP" "$@"

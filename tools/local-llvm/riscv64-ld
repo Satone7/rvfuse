@@ -1,0 +1,12 @@
+#!/bin/bash
+# riscv64-ld — Wrapper for locally-built Xuantie lld (RISC-V linker).
+#
+# Usage:
+#   ./tools/local-llvm/riscv64-ld [OPTIONS] <object files>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+LD=$(resolve_tool lld)
+
+exec "$LD" "$@"
