@@ -88,3 +88,75 @@ def enumerate_chains(
                 results.append(chain_3)
 
     return results
+
+
+def _build_bbv_map(hotspot: dict) -> dict[str, int]:
+    """Build vaddr -> execution count mapping from hotspot JSON."""
+    result: dict[str, int] = {}
+    for block in hotspot.get("blocks", []):
+        result[block["address"]] = block["count"]
+    return result
+
+
+def aggregate_patterns(
+    dfg_list: list[dict],
+    hotspot: dict,
+    registry: ISARegistry,
+    top: int | None = None,
+) -> list[dict]:
+    """Enumerate, normalize, aggregate, and rank patterns across multiple DFGs."""
+    bbv_map = _build_bbv_map(hotspot)
+    groups: dict[tuple, dict] = {}
+
+    for dfg_data in dfg_list:
+        vaddr = dfg_data["vaddr"]
+        frequency = bbv_map.get(vaddr, 0)
+        chains = enumerate_chains(dfg_data, registry)
+
+        for chain in chains:
+            node_indices = list(range(len(chain)))
+            all_edges = dfg_data["edges"]
+            chain_edges = [
+                {"src": src, "dst": dst, "register": e["register"]}
+                for e in all_edges
+                if (src := e["src"]) in node_indices
+                and (dst := e["dst"]) in node_indices
+                and dst == src + 1
+            ]
+            try:
+                pattern = normalize_chain(chain, chain_edges, registry)
+            except ValueError:
+                continue
+
+            key = pattern.template_key
+            if key not in groups:
+                groups[key] = {
+                    "pattern": pattern,
+                    "occurrence_count": 0,
+                    "total_frequency": 0,
+                    "source_bbs": [],
+                }
+            groups[key]["occurrence_count"] += 1
+            groups[key]["total_frequency"] += frequency
+            if vaddr not in groups[key]["source_bbs"]:
+                groups[key]["source_bbs"].append(vaddr)
+
+    results = []
+    for key, group in groups.items():
+        p = group["pattern"]
+        results.append({
+            "opcodes": p.opcodes,
+            "register_class": p.register_class,
+            "length": p.length,
+            "occurrence_count": group["occurrence_count"],
+            "total_frequency": group["total_frequency"],
+            "chain_registers": p.chain_registers,
+            "source_bbs": group["source_bbs"],
+        })
+
+    results.sort(key=lambda x: x["total_frequency"], reverse=True)
+    if top is not None:
+        results = results[:top]
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+    return results
