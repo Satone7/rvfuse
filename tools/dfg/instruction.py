@@ -182,7 +182,7 @@ def _expand_grouping(
     if config is None or config.lmul <= 1:
         return resolved
 
-    _vec_re = re.compile(r"^v(\d+)$")
+    _vec_re = re.compile(r"^v([1-9]|[1-2]\d|3[0-1])$")
     lmul = config.lmul
 
     def _expand(regs: list[str]) -> list[str]:
