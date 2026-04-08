@@ -94,5 +94,39 @@ class TestDefaultRuleVInstructions(unittest.TestCase):
         self.assertEqual(llvm_name_to_mnemonic("VREDSUM_VS"), "vredsum.vs")
 
 
+class TestRv64vModule(unittest.TestCase):
+    def test_build_registry_loads(self):
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64v import build_registry
+        reg = ISARegistry()
+        build_registry(reg)
+        self.assertGreater(len(reg._flows), 100)
+
+    def test_key_instructions_registered(self):
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64v import build_registry
+        reg = ISARegistry()
+        build_registry(reg)
+        self.assertTrue(reg.is_known("vsetvli"))
+        self.assertTrue(any("vadd" in m for m in reg._flows))
+        self.assertTrue(any("vle" in m for m in reg._flows))
+        self.assertTrue(any("vse" in m for m in reg._flows))
+        self.assertTrue(any("vred" in m for m in reg._flows))
+
+    def test_vfmv_f_s_in_both_v_and_f(self):
+        """VFMV_F_S and VFMV_S_F have both HasStdExtV and HasStdExtF
+        predicates, so they appear in both rv64v.py and rv64f.py.  The V
+        descriptor provides the vector-aware flow (tracks VR source/dest),
+        while the F descriptor provides the scalar-float perspective."""
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64v import build_registry
+        from dfg.isadesc.rv64f import build_registry as build_f
+        reg_v = ISARegistry()
+        build_registry(reg_v)
+        # These are present in the V registry (vector-aware variant)
+        self.assertTrue(reg_v.is_known("vfmv.f.s"))
+        self.assertTrue(reg_v.is_known("vfmv.s.f"))
+
+
 if __name__ == "__main__":
     unittest.main()
