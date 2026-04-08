@@ -48,7 +48,7 @@ RVFuse/
 ├── prepare_model.sh       # YOLO模型导出与测试数据准备
 ├── verify_bbv.sh          # QEMU+BBV插件构建验证
 ├── docs/                  # 架构文档与设计记录
-├── specs/                 # 功能规格说明(001-003)
+│   └── plans/             # 各功能的设计与实施计划
 ├── tools/
 │   ├── analyze_bbv.py     # BBV热点分析工具(464行)
 │   ├── profile_to_dfg.sh  # 剖析→DFG端到端流水线

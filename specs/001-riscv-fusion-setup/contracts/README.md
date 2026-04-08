@@ -1,1 +1,0 @@
-# Contracts\n\nNot applicable for this feature.\n\nThis is a documentation-only phase. No API contracts, service interfaces, or data schemas are defined.\n\nFuture phases may introduce:\n- Profiling API contracts\n- DFG generation interfaces\n- Fusion validation schemas
