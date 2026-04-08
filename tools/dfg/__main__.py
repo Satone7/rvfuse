@@ -27,7 +27,7 @@ from dfg.dfg import build_dfg
 from dfg.instruction import ISARegistry
 from dfg.output import convert_dot_to_png, write_dfg_files, write_summary
 from dfg.filter import select_addresses
-from dfg.parser import parse_disas
+from dfg.parser import _annotate_vector_config, parse_disas
 
 logger = logging.getLogger("dfg")
 
@@ -36,6 +36,7 @@ _ISA_MODULES: dict[str, tuple[str, str]] = {
     "I": ("dfg.isadesc.rv64i", "build_registry"),
     "F": ("dfg.isadesc.rv64f", "build_registry"),
     "M": ("dfg.isadesc.rv64m", "build_registry"),
+    "V": ("dfg.isadesc.rv64v", "build_registry"),
 }
 
 # Max debug log size before rotation (100 MB).
@@ -271,6 +272,8 @@ def _process_bb_worker(
             for a, m, o, r in instructions
         ],
     )
+    from dfg.parser import _annotate_vector_config
+    _annotate_vector_config([bb])
     registry = load_isa_registry(isa_extensions)
     agent = AgentDispatcher(enabled=not no_agent, model=model)
     output_dir = Path(output_dir_str)
@@ -428,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     if not blocks:
         logger.error("No basic blocks found in %s", disas_path)
         return 1
+    _annotate_vector_config(blocks)
     logger.info("Parsed %d basic block(s) from %s", len(blocks), disas_path)
 
     # -- report-driven filtering -----------------------------------------------

@@ -22,6 +22,7 @@ class ResolvedFlow:
 
     dst_regs: list[str]
     src_regs: list[str]
+    config_regs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -34,13 +35,15 @@ class RegisterFlow:
 
     dst_regs: list[str]
     src_regs: list[str]
+    config_regs: list[str] = field(default_factory=list)
 
     def resolve(self, operands: str) -> ResolvedFlow:
         """Map positional names to actual register names from the operand string."""
         regs = _extract_registers(operands, kinds=_BUILTIN_KINDS)
         dst = [regs[p][0] for p in self.dst_regs if p in regs]
         src = [regs[p][0] for p in self.src_regs if p in regs]
-        return ResolvedFlow(dst_regs=dst, src_regs=src)
+        cfg = _resolve_config_regs(self.config_regs)
+        return ResolvedFlow(dst_regs=dst, src_regs=src, config_regs=cfg)
 
 
 @dataclass
@@ -50,6 +53,7 @@ class BasicBlock:
     bb_id: int
     vaddr: int
     instructions: list[Instruction] = field(default_factory=list)
+    vec_config: "VectorConfig | None" = None
 
 
 @dataclass
@@ -77,6 +81,19 @@ class DFG:
     nodes: list[DFGNode] = field(default_factory=list)
     edges: list[DFGEdge] = field(default_factory=list)
     source: str = "script"
+
+
+@dataclass
+class VectorConfig:
+    """Vector configuration state at a point in a basic block."""
+
+    vlen: int
+    sew: int             # 8, 16, 32, or 64
+    lmul: int            # 1, 2, 4, or 8
+    vl: int | None
+    tail_policy: str     # "undisturbed" or "agnostic"
+    mask_policy: str     # "undisturbed" or "agnostic"
+    change_points: list[tuple[int, VectorConfig]] = field(default_factory=list)
 
 
 @dataclass
@@ -115,7 +132,7 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
     # Detect memory format: "rs2, offset(rs1)" or "rd, offset(rs1)"
     if len(parts) == 2 and "(" in parts[1]:
         first = parts[0].strip()
-        match = re.match(r"(-?\d+)\((\w+)\)", parts[1].strip())
+        match = re.match(r"(-?\d+)?\((\w+)\)", parts[1].strip())
         if match:
             offset_reg_name = match.group(2)
             offset_reg_kind = _match_kind(offset_reg_name, kinds)
@@ -126,10 +143,13 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
                 )
             # Both rd and rs2 use the first operand — RegisterFlow.resolve()
             # selects only the positions each instruction specifies.
+            # Also map rs3 for store instructions (e.g. vse32.v, fmadd.s memory).
             first_kind = _match_kind(first, kinds)
             if first_kind:
                 regs[first_kind.position_prefix + "rd"] = (first, first_kind.name)
                 regs[first_kind.position_prefix + "rs2"] = (first, first_kind.name)
+                if first_kind.name == "vector":
+                    regs[first_kind.position_prefix + "rs3"] = (first, first_kind.name)
         return regs
 
     # Standard format: "rd, rs1, rs2, rs3" or "rd, rs1, imm"
@@ -153,6 +173,60 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
         regs[pos_name] = (token, matched_kind.name)
         pos_idx += 1
     return regs
+
+
+def _resolve_config_regs(config_positions: list[str]) -> list[str]:
+    """Resolve implicit config register position names to actual register names.
+
+    Config regs are implicit CSR writes (e.g. vsetvli writes vl, vtype)
+    that are not present in the operand string. Position names follow the
+    RegisterKind prefix convention (e.g. "cvl" -> prefix "c" -> name "vl").
+    """
+    result: list[str] = []
+    for pos in config_positions:
+        for kind in _BUILTIN_KINDS:
+            pfx = kind.position_prefix
+            if pfx and pos.startswith(pfx):
+                name = pos[len(pfx):]
+                if kind.pattern.match(name):
+                    result.append(name)
+                    break
+    return result
+
+
+def _expand_grouping(
+    resolved: ResolvedFlow,
+    config: VectorConfig | None,
+) -> ResolvedFlow:
+    """Expand vector register names to physical register groups based on LMUL.
+
+    If config is None or LMUL is 1, returns the flow unchanged.
+    Only registers matching v{1-31} pattern are expanded.
+    """
+    if config is None or config.lmul <= 1:
+        return resolved
+
+    _vec_re = re.compile(r"^v([1-9]|[1-2]\d|3[0-1])$")
+    lmul = config.lmul
+
+    def _expand(regs: list[str]) -> list[str]:
+        result: list[str] = []
+        for r in regs:
+            m = _vec_re.match(r)
+            if m:
+                base = int(m.group(1))
+                if base + lmul > 32:
+                    continue  # group exceeds register file
+                for i in range(lmul):
+                    result.append(f"v{base + i}")
+            else:
+                result.append(r)
+        return result
+
+    return ResolvedFlow(
+        dst_regs=_expand(resolved.dst_regs),
+        src_regs=_expand(resolved.src_regs),
+    )
 
 
 def _match_kind(
@@ -183,7 +257,31 @@ FLOAT_KIND = RegisterKind(
     position_prefix="f",
 )
 
-_BUILTIN_KINDS: list[RegisterKind] = [INTEGER_KIND, FLOAT_KIND]
+VECTOR_KIND = RegisterKind(
+    name="vector",
+    pattern=re.compile(
+        r"^v([1-9]|[1-2]\d|3[0-1])$"
+    ),
+    position_prefix="v",
+)
+
+MASK_KIND = RegisterKind(
+    name="mask",
+    pattern=re.compile(
+        r"^v0$"
+    ),
+    position_prefix="v",
+)
+
+CSR_VEC_KIND = RegisterKind(
+    name="csr_vec",
+    pattern=re.compile(
+        r"^(vl|vtype|vstart|vxrm|vxsat)$"
+    ),
+    position_prefix="c",
+)
+
+_BUILTIN_KINDS: list[RegisterKind] = [INTEGER_KIND, FLOAT_KIND, VECTOR_KIND, MASK_KIND, CSR_VEC_KIND]
 
 _ROUNDING_MODES = frozenset({"dyn", "rne", "rtz", "rdn", "rup", "rmm"})
 

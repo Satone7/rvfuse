@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 
 import pytest
@@ -192,3 +193,95 @@ class TestRawLinePreserved:
         bb = parse_disas(text)[0]
         insn = bb.instructions[0]
         assert insn.raw_line == "  0x111f4: addi                    sp,sp,-32"
+
+
+class TestVectorConfigAnnotation(unittest.TestCase):
+    """Tests for _annotate_vector_config post-processing."""
+
+    def test_bb_with_vsetvli_gets_config(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        text = (
+            "BB 1 (vaddr: 0x1000, 2 insns):\n"
+            "  0x1000: vsetvli a0, a1, e32,m2\n"
+            "  0x1004: vadd.vv v4, v2, v6\n"
+        )
+        blocks = parse_disas(text)
+        _annotate_vector_config(blocks)
+        self.assertIsNotNone(blocks[0].vec_config)
+        self.assertEqual(blocks[0].vec_config.sew, 32)
+        self.assertEqual(blocks[0].vec_config.lmul, 2)
+
+    def test_bb_without_vector_gets_none(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        text = (
+            "BB 1 (vaddr: 0x1000, 2 insns):\n"
+            "  0x1000: addi a0, a1, 1\n"
+            "  0x1004: addi a2, a3, 2\n"
+        )
+        blocks = parse_disas(text)
+        _annotate_vector_config(blocks)
+        self.assertIsNone(blocks[0].vec_config)
+
+    def test_mid_bb_config_change(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        text = (
+            "BB 1 (vaddr: 0x1000, 4 insns):\n"
+            "  0x1000: vsetvli a0, a1, e32,m2\n"
+            "  0x1004: vadd.vv v4, v2, v6\n"
+            "  0x1008: vsetvli zero, zero, e8,m1\n"
+            "  0x100c: vadd.vv v4, v2, v6\n"
+        )
+        blocks = parse_disas(text)
+        _annotate_vector_config(blocks)
+        self.assertIsNotNone(blocks[0].vec_config)
+        # First config is e32,m2
+        self.assertEqual(blocks[0].vec_config.sew, 32)
+        self.assertEqual(blocks[0].vec_config.lmul, 2)
+        # Change point recorded at instruction index 2 (the second vsetvli)
+        self.assertEqual(len(blocks[0].vec_config.change_points), 1)
+        idx, new_cfg = blocks[0].vec_config.change_points[0]
+        self.assertEqual(idx, 2)
+        self.assertEqual(new_cfg.sew, 8)
+        self.assertEqual(new_cfg.lmul, 1)
+
+    def test_sew_variants(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        for sew_str, expected_sew in [("e8", 8), ("e16", 16), ("e32", 32), ("e64", 64)]:
+            text = (
+                f"BB 1 (vaddr: 0x1000, 1 insns):\n"
+                f"  0x1000: vsetvli a0, a1, {sew_str},m1\n"
+            )
+            blocks = parse_disas(text)
+            _annotate_vector_config(blocks)
+            self.assertEqual(blocks[0].vec_config.sew, expected_sew, f"Failed for {sew_str}")
+
+    def test_lmul_variants(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        for lmul_str, expected_lmul in [("m1", 1), ("m2", 2), ("m4", 4), ("m8", 8), ("mf2", 1), ("mf4", 1)]:
+            text = (
+                f"BB 1 (vaddr: 0x1000, 1 insns):\n"
+                f"  0x1000: vsetvli a0, a1, e32,{lmul_str}\n"
+            )
+            blocks = parse_disas(text)
+            _annotate_vector_config(blocks)
+            self.assertEqual(blocks[0].vec_config.lmul, expected_lmul, f"Failed for {lmul_str}")
+
+    def test_tail_mask_policies(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        text = (
+            "BB 1 (vaddr: 0x1000, 1 insns):\n"
+            "  0x1000: vsetvli a0, a1, e32,m2,tu,mu\n"
+        )
+        blocks = parse_disas(text)
+        _annotate_vector_config(blocks)
+        self.assertEqual(blocks[0].vec_config.tail_policy, "agnostic")
+        self.assertEqual(blocks[0].vec_config.mask_policy, "agnostic")
+
+    def test_parse_vector_fixture_file(self):
+        from dfg.parser import parse_disas, _annotate_vector_config
+        fixture = Path(__file__).parent / "fixtures" / "sample_vector_disas.txt"
+        blocks = parse_disas(fixture)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(len(blocks[0].instructions), 5)
+        _annotate_vector_config(blocks)
+        self.assertIsNotNone(blocks[0].vec_config)
