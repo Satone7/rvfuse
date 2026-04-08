@@ -160,3 +160,36 @@ def aggregate_patterns(
     for i, r in enumerate(results):
         r["rank"] = i + 1
     return results
+
+
+def mine(
+    dfg_dir: Path,
+    hotspot_path: Path,
+    registry: ISARegistry,
+    output_path: Path,
+    top: int | None = None,
+) -> list[dict]:
+    """Run the full mining pipeline: load DFGs, aggregate, write output."""
+    dfg_files = sorted(dfg_dir.glob("*.json"))
+    dfg_list = []
+    for f in dfg_files:
+        try:
+            data = json.loads(f.read_text())
+            if "nodes" in data and "edges" in data:
+                dfg_list.append(data)
+        except (json.JSONDecodeError, KeyError):
+            logger.warning("Skipping invalid DFG file: %s", f)
+
+    hotspot = json.loads(hotspot_path.read_text())
+    patterns = aggregate_patterns(dfg_list, hotspot, registry, top=top)
+
+    output = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "source_df_count": len(dfg_list),
+        "pattern_count": len(patterns),
+        "patterns": patterns,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(output, indent=2) + "\n")
+    logger.info("Mined %d patterns from %d DFGs (top=%s)", len(patterns), len(dfg_list), top)
+    return patterns

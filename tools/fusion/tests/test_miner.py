@@ -128,3 +128,46 @@ class TestAggregatePatterns(unittest.TestCase):
         hotspot = json.loads((FIXTURES / "hotspot.json").read_text())
         patterns = aggregate_patterns([dfg1, dfg2], hotspot, registry, top=1)
         self.assertEqual(len(patterns), 1)
+
+
+class TestMineOutput(unittest.TestCase):
+    """End-to-end mine function: load -> aggregate -> serialize."""
+
+    def test_mine_produces_valid_json(self):
+        """mine() writes a JSON file with correct structure."""
+        import tempfile
+        from fusion.miner import mine
+        registry = _make_registry()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "patterns.json"
+            patterns = mine(
+                dfg_dir=FIXTURES,
+                hotspot_path=FIXTURES / "hotspot.json",
+                registry=registry,
+                output_path=output_path,
+                top=5,
+            )
+            self.assertGreater(len(patterns), 0)
+            data = json.loads(output_path.read_text())
+            self.assertIn("generated", data)
+            self.assertIn("source_df_count", data)
+            self.assertIn("pattern_count", data)
+            self.assertIn("patterns", data)
+            self.assertEqual(data["patterns"][0]["rank"], 1)
+
+    def test_mine_empty_directory(self):
+        """mine() on a directory with no JSON files produces empty result."""
+        import tempfile
+        from fusion.miner import mine
+        registry = _make_registry()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "patterns.json"
+            patterns = mine(
+                dfg_dir=Path(tmpdir),
+                hotspot_path=FIXTURES / "hotspot.json",
+                registry=registry,
+                output_path=output_path,
+            )
+            self.assertEqual(len(patterns), 0)
+            data = json.loads(output_path.read_text())
+            self.assertEqual(data["pattern_count"], 0)
