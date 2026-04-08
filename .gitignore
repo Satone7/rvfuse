@@ -3,8 +3,9 @@
 # Git
 .git/
 
-# Third-party submodule build artifacts (if built locally)
+# Third-party submodule build/install artifacts (if built locally)
 third_party/*/build/
+third_party/llvm-install/
 third_party/*/*.o
 third_party/*/*.a
 third_party/*/*.so
