@@ -137,3 +137,72 @@ class TestControlFlowDetection(unittest.TestCase):
         from fusion.pattern import is_control_flow
         for mn in ("add", "addi", "fadd.s", "fmul.s", "ld", "sd", "lw", "fsw"):
             self.assertFalse(is_control_flow(mn))
+
+
+class TestNormalizeChain(unittest.TestCase):
+    """Test normalization of concrete chains to Pattern templates."""
+
+    def _make_registry(self):
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64f import build_registry as build_f
+        from dfg.isadesc.rv64i import build_registry as build_i
+        reg = ISARegistry()
+        build_i(reg)
+        build_f(reg)
+        return reg
+
+    def test_float_pair_chain(self):
+        """fadd.s ft2,fa0,fa1 -> fmul.s ft3,ft2,fa2 normalizes to chain_registers=[['frd','frs1']]."""
+        from fusion.pattern import normalize_chain
+        registry = self._make_registry()
+        chain = [
+            ("fadd.s", "ft2,fa0,fa1"),
+            ("fmul.s", "ft3,ft2,fa2"),
+        ]
+        edges_between = [{"src": 0, "dst": 1, "register": "ft2"}]
+        pattern = normalize_chain(chain, edges_between, registry)
+        self.assertEqual(pattern.opcodes, ["fadd.s", "fmul.s"])
+        self.assertEqual(pattern.register_class, "float")
+        self.assertEqual(pattern.chain_registers, [["frd", "frs1"]])
+
+    def test_integer_pair_chain(self):
+        """addi a0,sp,16 -> add a1,a0,a2 normalizes to chain_registers=[['rd','rs1']]."""
+        from fusion.pattern import normalize_chain
+        registry = self._make_registry()
+        chain = [
+            ("addi", "a0,sp,16"),
+            ("add", "a1,a0,a2"),
+        ]
+        edges_between = [{"src": 0, "dst": 1, "register": "a0"}]
+        pattern = normalize_chain(chain, edges_between, registry)
+        self.assertEqual(pattern.opcodes, ["addi", "add"])
+        self.assertEqual(pattern.register_class, "integer")
+        self.assertEqual(pattern.chain_registers, [["rd", "rs1"]])
+
+    def test_length_3_chain(self):
+        """Three-instruction chain with two RAW links."""
+        from fusion.pattern import normalize_chain
+        registry = self._make_registry()
+        chain = [
+            ("fadd.s", "ft2,fa0,fa1"),
+            ("fmul.s", "ft2,ft2,fa2"),
+            ("fsub.s", "ft3,ft2,fa3"),
+        ]
+        edges_between = [
+            {"src": 0, "dst": 1, "register": "ft2"},
+            {"src": 1, "dst": 2, "register": "ft2"},
+        ]
+        pattern = normalize_chain(chain, edges_between, registry)
+        self.assertEqual(pattern.opcodes, ["fadd.s", "fmul.s", "fsub.s"])
+        self.assertEqual(len(pattern.chain_registers), 2)
+
+    def test_unknown_mnemonic_raises(self):
+        """Unknown instruction mnemonic in the chain raises ValueError."""
+        from fusion.pattern import normalize_chain
+        registry = self._make_registry()
+        chain = [
+            ("fadd.s", "ft2,fa0,fa1"),
+            ("unknown_op", "ft3,ft2,fa2"),
+        ]
+        with self.assertRaises(ValueError):
+            normalize_chain(chain, [{"src": 0, "dst": 1, "register": "ft2"}], registry)
