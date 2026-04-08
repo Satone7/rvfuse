@@ -12,9 +12,9 @@ fi
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QEMU_DIR="${WORKSPACE}/third_party/qemu"
-DEMO_SRC="${WORKSPACE}/demo.c"
-DEMO_ELF="${WORKSPACE}/demo.elf"
-BBV_OUT="${WORKSPACE}/bbv.out"
+DEMO_SRC="${WORKSPACE}/tools/bbv/demo.c"
+DEMO_ELF="${WORKSPACE}/tools/bbv/demo.elf"
+BBV_OUT="${WORKSPACE}/tools/bbv/bbv.out"
 QEMU_BIN="${QEMU_DIR}/build/qemu-riscv64"
 PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/libbbv.so"
 
