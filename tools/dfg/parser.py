@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -131,8 +132,15 @@ def _annotate_vector_config(blocks: list[BasicBlock]) -> None:
         # Also set config if any vector instructions exist but no vsetvli
         # was found (use default LMUL=1, SEW=32)
         if config is None:
+            from dfg.isadesc.rv64v import ALL_RV64V
+            _vector_mnemonics = frozenset(mnemonic for mnemonic, _ in ALL_RV64V)
             for insn in bb.instructions:
-                if insn.mnemonic.startswith("v"):
+                if insn.mnemonic in _vector_mnemonics:
+                    logging.warning(
+                        "BB %d: no VSETVLI found; assuming default SEW=32/LMUL=1 "
+                        "(incoming config may differ)",
+                        bb.bb_id,
+                    )
                     bb.vec_config = VectorConfig(
                         vlen=0, sew=32, lmul=1, vl=None,
                         tail_policy="undisturbed", mask_policy="undisturbed",

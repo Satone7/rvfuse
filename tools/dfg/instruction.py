@@ -22,6 +22,7 @@ class ResolvedFlow:
 
     dst_regs: list[str]
     src_regs: list[str]
+    config_regs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -41,7 +42,8 @@ class RegisterFlow:
         regs = _extract_registers(operands, kinds=_BUILTIN_KINDS)
         dst = [regs[p][0] for p in self.dst_regs if p in regs]
         src = [regs[p][0] for p in self.src_regs if p in regs]
-        return ResolvedFlow(dst_regs=dst, src_regs=src)
+        cfg = _resolve_config_regs(self.config_regs)
+        return ResolvedFlow(dst_regs=dst, src_regs=src, config_regs=cfg)
 
 
 @dataclass
@@ -146,7 +148,8 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
             if first_kind:
                 regs[first_kind.position_prefix + "rd"] = (first, first_kind.name)
                 regs[first_kind.position_prefix + "rs2"] = (first, first_kind.name)
-                regs[first_kind.position_prefix + "rs3"] = (first, first_kind.name)
+                if first_kind.name == "vector":
+                    regs[first_kind.position_prefix + "rs3"] = (first, first_kind.name)
         return regs
 
     # Standard format: "rd, rs1, rs2, rs3" or "rd, rs1, imm"
@@ -172,6 +175,25 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
     return regs
 
 
+def _resolve_config_regs(config_positions: list[str]) -> list[str]:
+    """Resolve implicit config register position names to actual register names.
+
+    Config regs are implicit CSR writes (e.g. vsetvli writes vl, vtype)
+    that are not present in the operand string. Position names follow the
+    RegisterKind prefix convention (e.g. "cvl" -> prefix "c" -> name "vl").
+    """
+    result: list[str] = []
+    for pos in config_positions:
+        for kind in _BUILTIN_KINDS:
+            pfx = kind.position_prefix
+            if pfx and pos.startswith(pfx):
+                name = pos[len(pfx):]
+                if kind.pattern.match(name):
+                    result.append(name)
+                    break
+    return result
+
+
 def _expand_grouping(
     resolved: ResolvedFlow,
     config: VectorConfig | None,
@@ -193,6 +215,8 @@ def _expand_grouping(
             m = _vec_re.match(r)
             if m:
                 base = int(m.group(1))
+                if base + lmul > 32:
+                    continue  # group exceeds register file
                 for i in range(lmul):
                     result.append(f"v{base + i}")
             else:
