@@ -100,3 +100,40 @@ class TestPatternTemplateKey(unittest.TestCase):
         )
         d = {p.template_key: 42}
         self.assertEqual(d[p.template_key], 42)
+
+
+class TestRegisterClassification(unittest.TestCase):
+
+    def test_integer_registers(self):
+        from fusion.pattern import classify_register
+        for name in ("a0", "t1", "s2", "ra", "sp", "zero", "x5", "tp", "gp"):
+            self.assertEqual(classify_register(name), "integer")
+
+    def test_float_registers(self):
+        from fusion.pattern import classify_register
+        for name in ("ft0", "ft2", "fa0", "fa4", "fs0", "f5", "fv0"):
+            self.assertEqual(classify_register(name), "float")
+
+    def test_unknown_registers(self):
+        from fusion.pattern import classify_register
+        self.assertIsNone(classify_register("v0"))
+        self.assertIsNone(classify_register("unknown_reg"))
+        self.assertIsNone(classify_register(""))
+
+
+class TestControlFlowDetection(unittest.TestCase):
+
+    def test_branches(self):
+        from fusion.pattern import is_control_flow
+        for mn in ("beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "bnez"):
+            self.assertTrue(is_control_flow(mn))
+
+    def test_jumps_and_calls(self):
+        from fusion.pattern import is_control_flow
+        for mn in ("jal", "jalr", "call", "ret", "j", "jr"):
+            self.assertTrue(is_control_flow(mn))
+
+    def test_non_control_flow(self):
+        from fusion.pattern import is_control_flow
+        for mn in ("add", "addi", "fadd.s", "fmul.s", "ld", "sd", "lw", "fsw"):
+            self.assertFalse(is_control_flow(mn))

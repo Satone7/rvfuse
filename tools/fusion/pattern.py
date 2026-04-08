@@ -2,7 +2,33 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+# Register classification patterns (matching dfg/instruction.py)
+_INTEGER_RE = re.compile(r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|s\d+|jt?\d*)$")
+_FLOAT_RE = re.compile(r"^(f\d+|ft\d+|fs\d+|fa\d+|fv\d+)$")
+
+# Control flow mnemonics
+_CONTROL_FLOW_MNEMONICS = frozenset({
+    "beq", "bne", "blt", "bge", "bltu", "bgeu",
+    "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
+    "jal", "jalr", "j", "jr", "call", "ret",
+})
+
+
+def classify_register(reg_name: str) -> str | None:
+    """Return 'integer', 'float', or None for a register name."""
+    if _INTEGER_RE.match(reg_name):
+        return "integer"
+    if _FLOAT_RE.match(reg_name):
+        return "float"
+    return None
+
+
+def is_control_flow(mnemonic: str) -> bool:
+    """Return True if the mnemonic is a branch, jump, or call."""
+    return mnemonic in _CONTROL_FLOW_MNEMONICS
 
 
 @dataclass
