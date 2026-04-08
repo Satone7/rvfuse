@@ -30,7 +30,9 @@ class TestEnumerateChains(unittest.TestCase):
         dfg = json.loads((FIXTURES / "float_chain_2.json").read_text())
         chains = enumerate_chains(dfg, registry)
         self.assertEqual(len(chains), 1)
-        self.assertEqual(len(chains[0]), 2)
+        start, chain = chains[0]
+        self.assertEqual(start, 0)
+        self.assertEqual(len(chain), 2)
 
     def test_float_chain_3_produces_three_chains(self):
         """float_chain_3.json has edges 0->1 and 1->2.
@@ -40,7 +42,7 @@ class TestEnumerateChains(unittest.TestCase):
         dfg = json.loads((FIXTURES / "float_chain_3.json").read_text())
         chains = enumerate_chains(dfg, registry)
         self.assertEqual(len(chains), 3)
-        lengths = sorted(len(c) for c in chains)
+        lengths = sorted(len(chain) for _, chain in chains)
         self.assertEqual(lengths, [2, 2, 3])
 
     def test_mixed_class_produces_no_chains(self):
@@ -65,7 +67,8 @@ class TestEnumerateChains(unittest.TestCase):
         registry = _make_registry()
         dfg = json.loads((FIXTURES / "float_chain_2.json").read_text())
         chains = enumerate_chains(dfg, registry)
-        chain = chains[0]
+        start, chain = chains[0]
+        self.assertEqual(start, 0)
         self.assertEqual(chain[0], ("fadd.s", "ft2,fa0,fa1"))
         self.assertEqual(chain[1], ("fmul.s", "ft3,ft2,fa2"))
 

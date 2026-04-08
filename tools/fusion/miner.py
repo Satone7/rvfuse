@@ -23,7 +23,7 @@ logger = logging.getLogger("fusion")
 def enumerate_chains(
     dfg_data: dict,
     registry: ISARegistry,
-) -> list[list[tuple[str, str]]]:
+) -> list[tuple[int, list[tuple[str, str]]]]:
     """Extract all valid linear RAW chains from a single DFG.
 
     Args:
@@ -31,7 +31,9 @@ def enumerate_chains(
         registry: ISA registry for register classification.
 
     Returns:
-        List of chains. Each chain is a list of (mnemonic, operands) tuples.
+        List of (start_index, chain) tuples. Each chain is a list of
+        (mnemonic, operands) tuples, and start_index is the DFG node index
+        where the chain begins.
     """
     nodes = dfg_data["nodes"]
     edges = dfg_data["edges"]
@@ -54,7 +56,7 @@ def enumerate_chains(
         all_regs = resolved.dst_regs + resolved.src_regs
         return classify_register(all_regs[0]) if all_regs else None
 
-    results: list[list[tuple[str, str]]] = []
+    results: list[tuple[int, list[tuple[str, str]]]] = []
 
     def _valid_pair(i: int, j: int) -> bool:
         mn_i, mn_j = nodes[i]["mnemonic"], nodes[j]["mnemonic"]
@@ -67,6 +69,7 @@ def enumerate_chains(
 
     # Scan for length-2 and length-3 chains
     for i in range(len(nodes) - 1):
+        assert nodes[i]["index"] == i, f"Node index mismatch: expected {i}, got {nodes[i]['index']}"
         if not _valid_pair(i, i + 1):
             continue
         if (i, i + 1) not in edge_map:
@@ -77,7 +80,7 @@ def enumerate_chains(
             (nodes[i]["mnemonic"], nodes[i]["operands"]),
             (nodes[i + 1]["mnemonic"], nodes[i + 1]["operands"]),
         ]
-        results.append(chain_2)
+        results.append((i, chain_2))
 
         # Try to extend to length-3
         if i + 2 < len(nodes) and _valid_pair(i + 1, i + 2):
@@ -85,7 +88,7 @@ def enumerate_chains(
                 chain_3 = chain_2 + [
                     (nodes[i + 2]["mnemonic"], nodes[i + 2]["operands"]),
                 ]
-                results.append(chain_3)
+                results.append((i, chain_3))
 
     return results
 
@@ -113,14 +116,14 @@ def aggregate_patterns(
         frequency = bbv_map.get(vaddr, 0)
         chains = enumerate_chains(dfg_data, registry)
 
-        for chain in chains:
-            node_indices = list(range(len(chain)))
+        for chain_start, chain in chains:
+            chain_end = chain_start + len(chain)
             all_edges = dfg_data["edges"]
             chain_edges = [
                 {"src": src, "dst": dst, "register": e["register"]}
                 for e in all_edges
-                if (src := e["src"]) in node_indices
-                and (dst := e["dst"]) in node_indices
+                if (src := e["src"]) >= chain_start
+                and (dst := e["dst"]) < chain_end
                 and dst == src + 1
             ]
             try:

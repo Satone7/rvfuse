@@ -97,10 +97,8 @@ def _find_role(
     role_names: list[str],
 ) -> str | None:
     """Find the role name corresponding to a concrete register name."""
-    for i, resolved in enumerate(resolved_regs):
-        if resolved == reg_name and i < len(role_names):
-            return role_names[i]
-    return None
+    role_map = dict(zip(resolved_regs, role_names))
+    return role_map.get(reg_name)
 
 
 @dataclass
