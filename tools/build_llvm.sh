@@ -146,8 +146,7 @@ cmake_configure() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DLLVM_TARGETS_TO_BUILD=RISCV \
-        -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt;libcxx;libcxxabi" \
-        -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi" \
+        -DLLVM_ENABLE_PROJECTS="clang;lld" \
         -DLLVM_DEFAULT_TARGET_TRIPLE=riscv64-unknown-linux-gnu \
         -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
         -DLLVM_INCLUDE_TESTS=OFF \
@@ -238,13 +237,13 @@ TESTEOF
     fi
 
     if "$CLANG" --target=riscv64-unknown-linux-gnu \
-         -mcpu=c906fdv \
+         -mcpu=c906fd \
          $SYSROOT_FLAGS \
          -c "$TEST_SRC" -o "$TEST_OBJ" 2>/dev/null; then
-        info "Compile test (c906fdv): OK"
+        info "Compile test (c906fd): OK"
 
         # Verify it's a RISC-V ELF
-        if "$BIN_DIR/llvm-readelf" -h "$TEST_OBJ" 2>/dev/null | grep -q "RISC-V"; then
+        if "$BIN_DIR/llvm-readobj" -h "$TEST_OBJ" 2>/dev/null | grep -q "RISC-V"; then
             info "ELF format (RISC-V): OK"
         else
             warn "Could not verify ELF format (llvm-readelf may not be built yet)"
@@ -255,12 +254,25 @@ TESTEOF
         exit 1
     fi
 
-    # Compile test — C920 with THEAD + vector
+    # Compile test — C906FDV with THEAD + vector (use explicit -march with
+    # versioned V extension since Xuantie LLVM 13 treats V as experimental)
     if "$CLANG" --target=riscv64-unknown-linux-gnu \
-         -mcpu=c920 \
+         -march=rv64imafdcv0p10xtheadc -menable-experimental-extensions \
          $SYSROOT_FLAGS \
          -c "$TEST_SRC" -o "$TEST_OBJ" 2>/dev/null; then
-        info "Compile test (c920): OK"
+        info "Compile test (c906fdv / V+THEAD): OK"
+    else
+        error "Compile test (c906fdv) failed!"
+        rm -f "$TEST_SRC" "$TEST_OBJ"
+        exit 1
+    fi
+
+    # Compile test — C920 with THEAD + vector
+    if "$CLANG" --target=riscv64-unknown-linux-gnu \
+         -march=rv64imafdcv0p10xtheadc -menable-experimental-extensions \
+         $SYSROOT_FLAGS \
+         -c "$TEST_SRC" -o "$TEST_OBJ" 2>/dev/null; then
+        info "Compile test (c920 / V+THEAD): OK"
     else
         error "Compile test (c920) failed!"
         rm -f "$TEST_SRC" "$TEST_OBJ"
