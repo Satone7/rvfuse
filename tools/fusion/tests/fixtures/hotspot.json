@@ -1,0 +1,9 @@
+{
+  "total_blocks": 3,
+  "total_executions": 350000,
+  "blocks": [
+    {"rank": 1, "address": "0x1000", "count": 200000, "pct": 57.14, "cumulative_pct": 57.14, "location": "libonnxruntime.so+0x1000", "bb_id": 1},
+    {"rank": 2, "address": "0x2000", "count": 100000, "pct": 28.57, "cumulative_pct": 85.71, "location": "libonnxruntime.so+0x2000", "bb_id": 2},
+    {"rank": 3, "address": "0x3000", "count": 50000, "pct": 14.29, "cumulative_pct": 100.0, "location": "libonnxruntime.so+0x3000", "bb_id": 3}
+  ]
+}
