@@ -1,0 +1,10 @@
+{
+  "bb_id": 4,
+  "vaddr": "0x4000",
+  "source": "script",
+  "nodes": [
+    {"index": 0, "address": "0x4000", "mnemonic": "fadd.s", "operands": "ft0,fa0,fa1"},
+    {"index": 1, "address": "0x4004", "mnemonic": "fmul.s", "operands": "ft1,fa2,fa3"}
+  ],
+  "edges": []
+}
