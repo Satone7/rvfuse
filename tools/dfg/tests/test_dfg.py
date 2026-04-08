@@ -222,5 +222,84 @@ class TestFExtensionDfg(unittest.TestCase):
         self.assertEqual(len(dfg.edges), 0)
 
 
+class TestVectorDfg(unittest.TestCase):
+    """DFG builder tests for vector instructions with LMUL expansion."""
+
+    def _make_v_registry(self) -> ISARegistry:
+        from dfg.isadesc.rv64i import build_registry as build_i
+        from dfg.isadesc.rv64v import build_registry as build_v
+        reg = ISARegistry()
+        build_i(reg)
+        build_v(reg)
+        return reg
+
+    def test_vadd_vv_simple(self):
+        """vadd.vv v4,v2,v6 — basic vector dependency, default LMUL=1."""
+        bb = BasicBlock(bb_id=1, vaddr=0x1000, instructions=[
+            Instruction(0x1000, "vle32.v", "v2, (a0)", ""),
+            Instruction(0x1004, "vadd.vv", "v4, v2, v6", ""),
+        ])
+        bb.vec_config = None  # default LMUL=1
+        dfg = build_dfg(bb, self._make_v_registry())
+        v2_edges = [e for e in dfg.edges if e.register == "v2"]
+        self.assertEqual(len(v2_edges), 1)
+        self.assertEqual(v2_edges[0].src_index, 0)
+        self.assertEqual(v2_edges[0].dst_index, 1)
+
+    def test_vadd_vv_lmul2_expansion(self):
+        """vadd.vv v4,v2,v6 with LMUL=2 — should expand to physical registers."""
+        from dfg.instruction import VectorConfig
+        bb = BasicBlock(bb_id=1, vaddr=0x1000, instructions=[
+            Instruction(0x1000, "vle32.v", "v2, (a0)", ""),
+            Instruction(0x1004, "vadd.vv", "v4, v2, v6", ""),
+        ])
+        bb.vec_config = VectorConfig(
+            vlen=128, sew=32, lmul=2, vl=None,
+            tail_policy="undisturbed", mask_policy="undisturbed",
+            change_points=[],
+        )
+        dfg = build_dfg(bb, self._make_v_registry())
+        edge_regs = [e.register for e in dfg.edges]
+        # LMUL=2: vle32.v writes v2,v3; vadd.vv reads v2,v3,v6,v7
+        # Only v2,v3 have intra-BB writers, so 2 edges
+        self.assertIn("v2", edge_regs)
+        self.assertIn("v3", edge_regs)
+        self.assertEqual(len(dfg.edges), 2)
+
+    def test_full_vector_bb(self):
+        """Full vector BB from sample fixture: vsetvli + vle + vadd + vse."""
+        from pathlib import Path
+        from dfg.parser import parse_disas, _annotate_vector_config
+        fixture = Path(__file__).parent / "fixtures" / "sample_vector_disas.txt"
+        blocks = parse_disas(fixture)
+        _annotate_vector_config(blocks)
+        bb = blocks[0]
+        dfg = build_dfg(bb, self._make_v_registry())
+        self.assertEqual(len(dfg.nodes), 5)
+        # Should have edges (at minimum: vle->vadd via v2, vadd->vse via v4)
+        self.assertGreater(len(dfg.edges), 0)
+
+    def test_vsetvli_writes_gpr(self):
+        """vsetvli a0, a1, e32,m2 — should have edge from a1-writer to vsetvli."""
+        from dfg.instruction import VectorConfig
+        bb = BasicBlock(bb_id=1, vaddr=0x1000, instructions=[
+            Instruction(0x1000, "mv", "a1, a0", ""),
+            Instruction(0x1004, "vsetvli", "a0, a1, e32,m2", ""),
+            Instruction(0x1008, "vadd.vv", "v4, v2, v6", ""),
+        ])
+        bb.vec_config = VectorConfig(
+            vlen=128, sew=32, lmul=2, vl=None,
+            tail_policy="undisturbed", mask_policy="undisturbed",
+            change_points=[],
+        )
+        dfg = build_dfg(bb, self._make_v_registry())
+        self.assertEqual(len(dfg.nodes), 3)
+        # mv writes a1; vsetvli reads a1 -> edge from 0 to 1
+        a1_edges = [e for e in dfg.edges if e.register == "a1"]
+        self.assertEqual(len(a1_edges), 1)
+        self.assertEqual(a1_edges[0].src_index, 0)
+        self.assertEqual(a1_edges[0].dst_index, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,30 @@ instruction last wrote each register.
 
 from __future__ import annotations
 
-from dfg.instruction import BasicBlock, DFG, DFGEdge, DFGNode, ISARegistry
+from dfg.instruction import (
+    BasicBlock,
+    DFG,
+    DFGEdge,
+    DFGNode,
+    ISARegistry,
+    VectorConfig,
+    _expand_grouping,
+)
+
+
+def _get_vec_config(bb: BasicBlock, idx: int) -> VectorConfig | None:
+    """Get the effective VectorConfig for instruction at *idx*.
+
+    Walks change_points to find the most recent config change before *idx*.
+    Returns bb.vec_config if no change_points apply, or None if no config.
+    """
+    if bb.vec_config is None:
+        return None
+    config = bb.vec_config
+    for cp_idx, cp_config in config.change_points:
+        if cp_idx < idx:
+            config = cp_config
+    return config
 
 
 def build_dfg(
@@ -38,6 +61,10 @@ def build_dfg(
             continue
 
         resolved = flow.resolve(insn.operands)
+
+        # Apply LMUL register grouping expansion for vector registers.
+        vec_config = _get_vec_config(bb, idx)
+        resolved = _expand_grouping(resolved, vec_config)
 
         # Create edges for source registers (RAW dependencies).
         for reg in resolved.src_regs:

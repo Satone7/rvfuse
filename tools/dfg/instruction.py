@@ -130,7 +130,7 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
     # Detect memory format: "rs2, offset(rs1)" or "rd, offset(rs1)"
     if len(parts) == 2 and "(" in parts[1]:
         first = parts[0].strip()
-        match = re.match(r"(-?\d+)\((\w+)\)", parts[1].strip())
+        match = re.match(r"(-?\d+)?\((\w+)\)", parts[1].strip())
         if match:
             offset_reg_name = match.group(2)
             offset_reg_kind = _match_kind(offset_reg_name, kinds)
@@ -141,10 +141,12 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
                 )
             # Both rd and rs2 use the first operand — RegisterFlow.resolve()
             # selects only the positions each instruction specifies.
+            # Also map rs3 for store instructions (e.g. vse32.v, fmadd.s memory).
             first_kind = _match_kind(first, kinds)
             if first_kind:
                 regs[first_kind.position_prefix + "rd"] = (first, first_kind.name)
                 regs[first_kind.position_prefix + "rs2"] = (first, first_kind.name)
+                regs[first_kind.position_prefix + "rs3"] = (first, first_kind.name)
         return regs
 
     # Standard format: "rd, rs1, rs2, rs3" or "rd, rs1, imm"
