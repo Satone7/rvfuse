@@ -1,0 +1,41 @@
+{
+  "skill_name": "xuantie-qemu-usage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想用 QEMU 运行 output 目录下的一个 RISC-V 向量程序，但不知道怎么选 CPU 类型。帮我构造命令。",
+      "expected_output": "推荐使用 -cpu c908v 或 -cpu rv64,v=true 来运行向量程序，给出完整命令示例",
+      "files": [],
+      "expectations": [
+        "Recommends a CPU type with V extension support (c908v, c910v, or rv64,v=true)",
+        "Includes -L sysroot flag in the command",
+        "Uses qemu-riscv64 (not qemu-system-riscv64)",
+        "Provides a complete runnable command example"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "帮我用 BBV 插件对 yolo_inference 做性能分析，输出文件放到 output/yolo.bbv",
+      "expected_output": "给出完整的 qemu-riscv64 -plugin 命令，包含 interval、outfile 参数和 -L sysroot",
+      "files": [],
+      "expectations": [
+        "Uses -plugin flag with libbbv.so path",
+        "Specifies interval parameter (e.g. interval=10000)",
+        "Specifies outfile=output/yolo.bbv parameter",
+        "Includes -L output/sysroot for dynamic linking",
+        "Mentions yolo_inference as the target binary"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "qemu-riscv64 跑程序报找不到共享库，怎么解决？",
+      "expected_output": "解释需要用 -L 指定 sysroot 路径，给出正确命令格式",
+      "files": [],
+      "expectations": [
+        "Identifies the root cause: missing -L sysroot for shared library resolution",
+        "Provides correct command with -L flag pointing to sysroot",
+        "References the project's sysroot path (output/sysroot or similar)"
+      ]
+    }
+  ]
+}
