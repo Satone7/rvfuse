@@ -410,6 +410,31 @@ class TestRegisterKind(unittest.TestCase):
         self.assertIsNotNone(INTEGER_KIND.pattern.match("zero"))
         self.assertIsNotNone(INTEGER_KIND.pattern.match("ra"))
 
+    def test_vector_kind_matches_v_regs(self):
+        from dfg.instruction import VECTOR_KIND
+        self.assertIsNotNone(VECTOR_KIND.pattern.match("v1"))
+        self.assertIsNotNone(VECTOR_KIND.pattern.match("v31"))
+        self.assertIsNotNone(VECTOR_KIND.pattern.match("v8"))
+        self.assertIsNone(VECTOR_KIND.pattern.match("v0"))  # v0 is mask, not vector
+
+    def test_mask_kind_matches_v0_only(self):
+        from dfg.instruction import MASK_KIND
+        self.assertIsNotNone(MASK_KIND.pattern.match("v0"))
+        self.assertIsNone(MASK_KIND.pattern.match("v1"))
+        self.assertEqual(MASK_KIND.name, "mask")
+        self.assertEqual(MASK_KIND.position_prefix, "v")
+
+    def test_csr_vec_kind_matches_vector_csrs(self):
+        from dfg.instruction import CSR_VEC_KIND
+        self.assertIsNotNone(CSR_VEC_KIND.pattern.match("vl"))
+        self.assertIsNotNone(CSR_VEC_KIND.pattern.match("vtype"))
+        self.assertIsNotNone(CSR_VEC_KIND.pattern.match("vstart"))
+        self.assertIsNotNone(CSR_VEC_KIND.pattern.match("vxrm"))
+        self.assertIsNotNone(CSR_VEC_KIND.pattern.match("vxsat"))
+        self.assertIsNone(CSR_VEC_KIND.pattern.match("v0"))
+        self.assertEqual(CSR_VEC_KIND.name, "csr_vec")
+        self.assertEqual(CSR_VEC_KIND.position_prefix, "c")
+
 
 class TestExtractRegistersFloat(unittest.TestCase):
     """Tests for _extract_registers with float register kinds."""

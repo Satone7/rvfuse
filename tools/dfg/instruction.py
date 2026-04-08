@@ -183,7 +183,31 @@ FLOAT_KIND = RegisterKind(
     position_prefix="f",
 )
 
-_BUILTIN_KINDS: list[RegisterKind] = [INTEGER_KIND, FLOAT_KIND]
+VECTOR_KIND = RegisterKind(
+    name="vector",
+    pattern=re.compile(
+        r"^v([1-9]|[1-2]\d|3[0-1])$"
+    ),
+    position_prefix="v",
+)
+
+MASK_KIND = RegisterKind(
+    name="mask",
+    pattern=re.compile(
+        r"^v0$"
+    ),
+    position_prefix="v",
+)
+
+CSR_VEC_KIND = RegisterKind(
+    name="csr_vec",
+    pattern=re.compile(
+        r"^(vl|vtype|vstart|vxrm|vxsat)$"
+    ),
+    position_prefix="c",
+)
+
+_BUILTIN_KINDS: list[RegisterKind] = [INTEGER_KIND, FLOAT_KIND, VECTOR_KIND, MASK_KIND, CSR_VEC_KIND]
 
 _ROUNDING_MODES = frozenset({"dyn", "rne", "rtz", "rdn", "rup", "rmm"})
 
