@@ -72,6 +72,13 @@ REG_CLASS_TO_PREFIX: dict[str, str] = {
     "GPRC": "",
     "FPR32C": "f",
     "SP": "",
+    # Vector register classes (V extension)
+    "VR":       "v",
+    "VRM1":     "v",
+    "VRM2":     "v",
+    "VRM4":     "v",
+    "VRM8":     "v",
+    "VRN":      "v",
 }
 
 # Operand name -> canonical position name.  Operands not listed here are
@@ -90,6 +97,13 @@ OPERAND_TO_POSITION: dict[str, str] = {
     "vd": "rd",
     "vs1": "rs1",
     "vs2": "rs2",
+    # Vector operand names (V extension)
+    "vs3": "rs3",
+    "vl": "rd",
+    "vtype": "rd",
+    "vstart": "rd",
+    "vxrm": "rd",
+    "vxsat": "rd",
 }
 
 
@@ -103,6 +117,7 @@ OPERAND_TO_POSITION: dict[str, str] = {
 EXTENSION_PREDICATES: dict[str, set[str]] = {
     "F": {"HasStdExtF"},
     "M": {"HasStdExtM"},
+    "V": {"HasStdExtV"},
     # Future extensions can be added here:
     # "D": {"HasStdExtD"},
     # "C": {"HasStdExtC"},
@@ -199,11 +214,6 @@ def _should_include(name: str) -> bool:
     """Return True if the instruction with the given LLVM def name should be
     included in the generated descriptor."""
     if name.startswith(SKIP_PREFIXES):
-        return False
-    # Skip vector instructions (they have their own extension handling)
-    if name.startswith("V") and not name.startswith(("VFMV_F_S", "VFMV_S_F")):
-        # Exclude all V-prefixed instructions except the scalar move helpers
-        # that occasionally leak into the F predicate set.
         return False
     return True
 
