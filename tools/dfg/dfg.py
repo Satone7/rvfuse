@@ -83,4 +83,10 @@ def build_dfg(
                 continue
             last_writer[reg] = idx
 
+        # Wire config_regs (e.g. vl, vtype from VSETVLI) into the DFG so
+        # that CSR side-effects appear as data-flow edges.
+        for reg in resolved.config_regs:
+            if reg not in ("zero", "x0"):
+                last_writer[reg] = idx
+
     return DFG(bb=bb, nodes=nodes, edges=edges, source=source)
