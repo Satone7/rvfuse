@@ -34,6 +34,7 @@ class RegisterFlow:
 
     dst_regs: list[str]
     src_regs: list[str]
+    config_regs: list[str] = field(default_factory=list)
 
     def resolve(self, operands: str) -> ResolvedFlow:
         """Map positional names to actual register names from the operand string."""
@@ -50,6 +51,7 @@ class BasicBlock:
     bb_id: int
     vaddr: int
     instructions: list[Instruction] = field(default_factory=list)
+    vec_config: "VectorConfig | None" = None
 
 
 @dataclass
@@ -77,6 +79,19 @@ class DFG:
     nodes: list[DFGNode] = field(default_factory=list)
     edges: list[DFGEdge] = field(default_factory=list)
     source: str = "script"
+
+
+@dataclass
+class VectorConfig:
+    """Vector configuration state at a point in a basic block."""
+
+    vlen: int
+    sew: int             # 8, 16, 32, or 64
+    lmul: int            # 1, 2, 4, or 8
+    vl: int | None
+    tail_policy: str     # "undisturbed" or "agnostic"
+    mask_policy: str     # "undisturbed" or "agnostic"
+    change_points: list[tuple[int, VectorConfig]] = field(default_factory=list)
 
 
 @dataclass
@@ -153,6 +168,39 @@ def _extract_registers(operands: str, kinds: list[RegisterKind] | None = None) -
         regs[pos_name] = (token, matched_kind.name)
         pos_idx += 1
     return regs
+
+
+def _expand_grouping(
+    resolved: ResolvedFlow,
+    config: VectorConfig | None,
+) -> ResolvedFlow:
+    """Expand vector register names to physical register groups based on LMUL.
+
+    If config is None or LMUL is 1, returns the flow unchanged.
+    Only registers matching v{1-31} pattern are expanded.
+    """
+    if config is None or config.lmul <= 1:
+        return resolved
+
+    _vec_re = re.compile(r"^v(\d+)$")
+    lmul = config.lmul
+
+    def _expand(regs: list[str]) -> list[str]:
+        result: list[str] = []
+        for r in regs:
+            m = _vec_re.match(r)
+            if m:
+                base = int(m.group(1))
+                for i in range(lmul):
+                    result.append(f"v{base + i}")
+            else:
+                result.append(r)
+        return result
+
+    return ResolvedFlow(
+        dst_regs=_expand(resolved.dst_regs),
+        src_regs=_expand(resolved.src_regs),
+    )
 
 
 def _match_kind(

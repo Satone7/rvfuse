@@ -502,5 +502,77 @@ class TestExtractRegistersFloat(unittest.TestCase):
         self.assertEqual(regs["frs2"][0], "fa4")
 
 
+class TestVectorConfig(unittest.TestCase):
+    def test_vector_config_creation(self):
+        from dfg.instruction import VectorConfig
+        vc = VectorConfig(vlen=128, sew=32, lmul=2, vl=64, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        self.assertEqual(vc.sew, 32)
+        self.assertEqual(vc.lmul, 2)
+        self.assertEqual(vc.vl, 64)
+
+    def test_basic_block_vec_config_default_none(self):
+        from dfg.instruction import BasicBlock
+        bb = BasicBlock(bb_id=1, vaddr=0x1000)
+        self.assertIsNone(bb.vec_config)
+
+
+class TestExpandGrouping(unittest.TestCase):
+    def test_lmul1_no_expansion(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["v4"], src_regs=["v8"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=1, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(result.dst_regs, ["v4"])
+        self.assertEqual(result.src_regs, ["v8"])
+
+    def test_lmul2_expansion(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["v4"], src_regs=["v8"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=2, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(result.dst_regs, ["v4", "v5"])
+        self.assertEqual(result.src_regs, ["v8", "v9"])
+
+    def test_lmul4_expansion(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["v4"], src_regs=["v8"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=4, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(result.dst_regs, ["v4", "v5", "v6", "v7"])
+        self.assertEqual(result.src_regs, ["v8", "v9", "v10", "v11"])
+
+    def test_lmul8_expansion(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["v4"], src_regs=["v8"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=8, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(len(result.dst_regs), 8)
+        self.assertEqual(result.dst_regs[0], "v4")
+        self.assertEqual(result.dst_regs[7], "v11")
+
+    def test_non_vector_regs_unchanged(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["a0"], src_regs=["sp"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=4, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(result.dst_regs, ["a0"])
+        self.assertEqual(result.src_regs, ["sp"])
+
+    def test_csr_regs_unchanged(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow, VectorConfig
+        rf = ResolvedFlow(dst_regs=["rd", "cvl", "cvtype"], src_regs=["rs1"])
+        vc = VectorConfig(vlen=128, sew=32, lmul=1, vl=None, tail_policy="undisturbed", mask_policy="agnostic", change_points=[])
+        result = _expand_grouping(rf, vc)
+        self.assertEqual(result.dst_regs, ["rd", "cvl", "cvtype"])
+        self.assertEqual(result.src_regs, ["rs1"])
+
+    def test_default_lmul_is_1(self):
+        from dfg.instruction import _expand_grouping, ResolvedFlow
+        rf = ResolvedFlow(dst_regs=["v4"], src_regs=["v8"])
+        result = _expand_grouping(rf, None)
+        self.assertEqual(result.dst_regs, ["v4"])
+        self.assertEqual(result.src_regs, ["v8"])
+
+
 if __name__ == "__main__":
     unittest.main()
