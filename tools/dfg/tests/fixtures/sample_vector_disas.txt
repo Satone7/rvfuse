@@ -1,0 +1,6 @@
+BB 1 (vaddr: 0x1000, 5 insns):
+  0x1000: vsetvli a0, a1, e32,m2
+  0x1004: vle32.v v2, (a2)
+  0x1008: vadd.vv v4, v2, v6
+  0x100c: vse32.v v4, (a3)
+  0x1010: vsetvli zero, zero, e8,m1
