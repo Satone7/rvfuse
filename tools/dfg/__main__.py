@@ -36,6 +36,7 @@ _ISA_MODULES: dict[str, tuple[str, str]] = {
     "I": ("dfg.isadesc.rv64i", "build_registry"),
     "F": ("dfg.isadesc.rv64f", "build_registry"),
     "M": ("dfg.isadesc.rv64m", "build_registry"),
+    "V": ("dfg.isadesc.rv64v", "build_registry"),
 }
 
 # Max debug log size before rotation (100 MB).
