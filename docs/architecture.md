@@ -1,8 +1,8 @@
 # Software Architecture Design: RVFuse
 
-**Version**: 2.0 | **Date**: 2026-04-08 | **Status**: Active
+**Version**: 2.1 | **Date**: 2026-04-08 | **Status**: Active
 
-**Purpose**: This document describes the architecture of RVFuse, a RISC-V instruction fusion research platform. The project has completed its setup and DFG generation foundation, and is entering Phase 1 (fusion candidate discovery and design) of a three-phase research roadmap.
+**Purpose**: This document describes the architecture of RVFuse, a RISC-V instruction fusion research platform. The project has completed Phase 1 (setup and DFG generation foundation), and is entering Phase 2 (fusion candidate discovery and design) of a four-phase research roadmap.
 
 ---
 
@@ -31,10 +31,10 @@
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 0 | Setup + profiling + DFG generation | Completed |
-| 1 | Fusion candidate discovery and design | Current |
-| 2 | Simulation and benefit quantification | Planned |
-| 3 | Extension and diversification (ISA D/C/V, multi-workload) | Planned |
+| 1 | Setup + profiling + DFG generation | Completed |
+| 2 | Fusion candidate discovery and design | Current |
+| 3 | Simulation and benefit quantification | Planned |
+| 4 | Extension and diversification (ISA D/C/V, multi-workload) | Planned |
 
 ---
 
@@ -78,9 +78,9 @@ graph TB
     BBVProfiling -->|Step 5| HotspotReport[Hotspot Analysis<br/>analyze_bbv.py]
     HotspotReport -->|Step 6| DFGEngine[DFG Generation<br/>tools/dfg/]
     DFGEngine -->|DOT/JSON/PNG| Output[DFG Output]
-    DFGEngine --> Phase1[Phase 1: Fusion Candidate Discovery<br/>Planned]
-    Phase1 --> Phase2[Phase 2: Simulation & Quantification<br/>Planned]
-    Phase2 --> Phase3[Phase 3: Extension & Diversification<br/>Planned]
+    DFGEngine --> Phase2[Phase 2: Fusion Candidate Discovery<br/>Current]
+    Phase2 --> Phase3[Phase 3: Simulation & Quantification<br/>Planned]
+    Phase3 --> Phase4[Phase 4: Extension & Diversification<br/>Planned]
 ```
 
 **Context Description**:
@@ -89,7 +89,7 @@ graph TB
 - **QEMU + BBV Plugin**: User-mode RISC-V emulation with basic block vector sampling
 - **analyze_bbv.py**: Resolves BB addresses to source locations, produces hotspot JSON report
 - **DFG Engine**: Parses `.disas` files, builds RAW dependency graphs, supports I/F/M ISA extensions
-- **Phases 1-3**: Future research work (fusion discovery, simulation, diversification)
+- **Phases 2-4**: Future research work (fusion discovery, simulation, diversification)
 
 ### 3.2 Containers
 
@@ -217,7 +217,7 @@ RVFuse/
 
 **Context**: The end-state research platform is broader than what can be delivered at once.
 
-**Decision**: Structure delivery into phases — setup foundation (completed), profiling + DFG generation (completed), fusion candidate discovery (current), simulation + quantification (planned), extension + diversification (planned).
+**Decision**: Structure delivery into phases — Phase 1 setup + profiling + DFG (completed), Phase 2 fusion candidate discovery (current), Phase 3 simulation + quantification (planned), Phase 4 extension + diversification (planned).
 
 **Consequences**:
 - (+) Each phase has clear scope and validation criteria
@@ -306,7 +306,7 @@ RVFuse/
   - Each phase has defined entry/exit criteria
 
 - **Strategies**:
-  - Three-phase roadmap documented in work report and CLAUDE.md
+  - Four-phase roadmap documented in CLAUDE.md and feature roadmap
   - Design documents are tagged by date and feature scope
   - Future capabilities are flagged explicitly, not implied
 
@@ -320,30 +320,30 @@ RVFuse/
 | R-002 | Large dependency footprint (QEMU, LLVM) | Medium | `--shallow` clone support; separate build artifacts from source |
 | R-003 | QEMU disassembly mnemonics differ from LLVM names | Medium | Name mapping table in `gen_isadesc.py`; verify against actual `.disas` output |
 | R-004 | Agent CLi unavailable in CI/headless environments | Low | Agent is advisory; pipeline runs in script-only mode without it |
-| TD-001 | Fusion candidate search algorithm undefined | High | Phase 1 deliverable — design fusion pattern recognition on DFG |
-| TD-002 | Hardware constraint modeling undefined | Medium | Phase 1 deliverable — encode encoding space, pipeline, timing constraints |
-| TD-003 | Simulation/benefit quantification pipeline undefined | Medium | Phase 2 deliverable — BBV-weighted benefit calculation |
-| TD-004 | D/A/V ISA extensions not yet supported | Low | Phase 3 — `gen_isadesc.py` architecture already supports extension |
+| TD-001 | Fusion candidate search algorithm undefined | High | Phase 2 deliverable — design fusion pattern recognition on DFG |
+| TD-002 | Hardware constraint modeling undefined | Medium | Phase 2 deliverable — encode encoding space, pipeline, timing constraints |
+| TD-003 | Simulation/benefit quantification pipeline undefined | Medium | Phase 3 deliverable — BBV-weighted benefit calculation |
+| TD-004 | D/A/V ISA extensions not yet supported | Low | Phase 4 — `gen_isadesc.py` architecture already supports extension |
 
 ---
 
 ## 8. Agent Checklist
 
 ### Inputs
-- Project roadmap (three-phase plan from `docs/work-report-2026-04-07.md`)
+- Project roadmap (four-phase plan in CLAUDE.md and `docs/plans/2026-04-08-phase2-feature-roadmap.md`)
 - Repository structure and module responsibilities
 - DFG engine architecture (parser → instruction → builder → output)
 - ISA descriptor generation pipeline (`llvm-tblgen` → `gen_isadesc.py` → `isadesc/`)
 - Existing Agent SKILLs: `dfg-check`, `dfg-generate`
 
 ### Outputs
-- Fusion candidate search design (Phase 1)
-- Hardware constraint model (Phase 1)
-- Fusion scheme Skill specification (Phase 1)
+- Fusion candidate search design (Phase 2)
+- Hardware constraint model (Phase 2)
+- Fusion scheme Skill specification (Phase 2)
 
 ### Acceptance Guardrails
-- Do not treat simulation or ISA extension work as Phase 1 deliverables
-- Do not modify the DFG engine core (parser, builder, output) unless fixing bugs — Phase 1 builds on top of it
+- Do not treat simulation or ISA extension work as Phase 2 deliverables
+- Do not modify the DFG engine core (parser, builder, output) unless fixing bugs — Phase 2 builds on top of it
 - Do not mark Xuantie newlib as mandatory
 - Do not reference benchmark or workload examples without a traceable source
 
@@ -352,5 +352,5 @@ RVFuse/
 **Notes**
 
 - This document reflects the project state as of 2026-04-08
-- Phase 0 (setup + profiling + DFG) is complete; detailed design documents for each iteration are in `docs/plans/`
+- Phase 1 (setup + profiling + DFG) is complete; detailed design documents for each iteration are in `docs/plans/`
 - Future phases should be introduced through separate feature specifications and architecture revisions

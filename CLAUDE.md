@@ -10,20 +10,31 @@ RVFuse is a RISC-V instruction fusion research platform. The goal is to:
 3. Identify high-frequency instruction combinations with data dependencies
 4. Test fused instructions in the emulator and compare cycle counts
 
-**Current Phase**: Fusion candidate discovery and design (Phase 1 of 3).
+**Current Phase**: Fusion candidate discovery and design (Phase 2 of 4).
 
 **Completed phases**:
-- Setup foundation (repository structure, dependency references, setup guidance)
-- BBV profiling pipeline (QEMU + BBV plugin + analyze_bbv.py)
-- DFG generation engine (parser, builder, agent check/generate, I/F/M ISA extensions)
+- Phase 1: Setup + profiling + DFG generation (repository structure, QEMU BBV profiling, DFG engine with I/F/M ISA extensions, automated setup pipeline)
 
 **Roadmap**:
 | Phase | Goal | Status |
 |-------|------|--------|
-| 0 | Setup + profiling + DFG generation | Completed |
-| 1 | Fusion candidate discovery and design | Current |
-| 2 | Simulation and benefit quantification | Planned |
-| 3 | Extension and diversification | Planned |
+| 1 | Setup + profiling + DFG generation | Completed |
+| 2 | Fusion candidate discovery and design | Current |
+| 3 | Simulation and benefit quantification | Planned |
+| 4 | Extension and diversification | Planned |
+
+**Phase 2 Feature Roadmap**: See [`docs/plans/2026-04-08-phase2-feature-roadmap.md`](docs/plans/2026-04-08-phase2-feature-roadmap.md)
+for the complete feature breakdown, dependency chain, and acceptance criteria.
+
+| Feature | Description | Status | Design Doc |
+|---------|-------------|--------|------------|
+| F1: Pattern Mining | Discover fusible instruction subgraphs from DFG output | Not started | TBD |
+| F2: Scoring & Constraints | Rank candidates by frequency and hardware feasibility | Not started | TBD (blocked by F1) |
+| F3: Scheme Specification | Agent skill for fusion encoding scheme generation | Not started | TBD (blocked by F2) |
+
+**IMPORTANT**: When starting Phase 1 work, always read the feature roadmap first.
+Pick up features in order (F1 → F2 → F3). Each feature needs its own design doc
+in `docs/plans/` before implementation begins.
 
 ## Active Technologies
 - Bash 4.0+ (available on all modern Linux x86_64) + Git 2.30+, standard Unix utilities (ls, cat, grep, df, date)
