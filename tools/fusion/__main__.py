@@ -56,15 +56,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dfg-dir",
-        required=True,
+        required=False,
+        default=None,
         type=Path,
-        help="Directory containing DFG JSON files",
+        help="Directory containing DFG JSON files (required for discover)",
     )
     parser.add_argument(
         "--report",
-        required=True,
+        required=False,
+        default=None,
         type=Path,
-        help="Path to BBV hotspot JSON report",
+        help="Path to BBV hotspot JSON report (required for discover)",
     )
     parser.add_argument(
         "--output",
@@ -160,6 +162,12 @@ def main(argv: list[str] | None = None) -> None:
                   f"(score={top['score']:.4f}, {top['hardware']['status']})")
         print(f"  Output: {args.output}")
         return
+
+    # Validate discover-specific arguments
+    if not args.dfg_dir:
+        parser.error("--dfg-dir is required for discover command")
+    if not args.report:
+        parser.error("--report is required for discover command")
 
     patterns = mine(
         dfg_dir=args.dfg_dir,

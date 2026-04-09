@@ -283,14 +283,22 @@ def _extract_encoding(entry: dict, reg_class: str) -> InstructionFormat:
     _R4_OPCODES = {0x43, 0x47, 0x4b, 0x4f}
     has_rs3 = opcode in _R4_OPCODES and has_var_field(27, 5)
 
-    has_imm = not has_rs2 and not has_rs3
-    imm_bits = 12 if has_imm and not may_load and not may_store else 0
-    if may_store:
-        imm_bits = 12
+    # Determine has_imm and imm_bits.
+    # The positional heuristic (no rs2/rs3 at bits 20-24/27-31) correctly
+    # identifies I-type immediates for base integer/FP instructions, but
+    # misclassifies V-extension VI-format ops (e.g. vadd.vi has simm5 at bits
+    # 15-19 that looks like rs1) and load/store ops whose upper immediate bits
+    # overlap the rs2 position.  Handle load/store explicitly first.
+    has_imm = False
+    imm_bits = 0
+
+    if may_load or may_store:
         has_imm = True
-    if may_load:
         imm_bits = 12
+    elif not has_rs2 and not has_rs3:
+        # Standard I-type immediate (bits 20-31)
         has_imm = True
+        imm_bits = 12
 
     if has_rs3:
         format_type = "R4"
