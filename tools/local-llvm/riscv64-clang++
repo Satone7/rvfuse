@@ -1,11 +1,11 @@
-#!/bin/bash
-# riscv64-clang++ — Wrapper for locally-built Xuantie clang++ (C++ compiler).
+#!/usr/bin/env bash
+# riscv64-clang++ — Wrapper for locally-built LLVM clang++ (C++ compiler).
 #
 # Usage:
 #   ./tools/local-llvm/riscv64-clang++ [OPTIONS] <source>
 #
 # Options:
-#   --cpu=<CPU>     Select Xuantie CPU (c906, c906fd, c906fdv, c910, c920)
+#   --march=<ARCH>  Select RISC-V march (default: rv64gcv)
 #   --version       Show clang++ version
 #   --help          Show clang++ help
 
@@ -17,11 +17,12 @@ CLANGXX=$(resolve_tool clang++)
 # Parse custom options
 TARGET_ARGS=("--target=riscv64-unknown-linux-gnu")
 EXTRA_ARGS=()
+MARCH="rv64gcv"
 
 for arg in "$@"; do
     case "$arg" in
-        --cpu=*)
-            EXTRA_ARGS+=("-mcpu=${arg#*=}")
+        --march=*)
+            MARCH="${arg#*=}"
             ;;
         --version|--help)
             exec "$CLANGXX" "${TARGET_ARGS[@]}" "$@"
@@ -32,4 +33,4 @@ for arg in "$@"; do
     esac
 done
 
-exec "$CLANGXX" "${TARGET_ARGS[@]}" "${EXTRA_ARGS[@]}"
+exec "$CLANGXX" "${TARGET_ARGS[@]}" "-march=${MARCH}" "${EXTRA_ARGS[@]}"
