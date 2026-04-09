@@ -190,9 +190,9 @@ class ConstraintChecker:
             for dst in flow.dst_regs:
                 if dst not in internal_regs:
                     external_dsts.add(dst)
-            # Check for immediate
+            # Check for immediate that fits in 5 bits (Mode B requirement)
             enc = encodings[i]
-            if enc is not None and enc.has_imm:
+            if enc is not None and enc.has_imm and enc.imm_bits and enc.imm_bits <= 5:
                 has_immediate = True
 
         num_external_srcs = len(external_srcs)
@@ -206,7 +206,7 @@ class ConstraintChecker:
         if not (valid_a or valid_b):
             return ("operand_format",
                 f"操作数格式不符合: 外部源={num_external_srcs}, 外部目的={num_external_dsts}, "
-                f"有立即数={has_immediate} (要求: 3源+1目的无imm 或 2源+1目的+5位imm)")
+                f"有5位立即数={has_immediate} (要求: 3源+1目的无imm 或 2源+1目的+≤5位imm)")
 
         return None
 

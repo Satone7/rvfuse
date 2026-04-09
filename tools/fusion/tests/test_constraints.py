@@ -280,7 +280,7 @@ class TestNewHardwareConstraints(unittest.TestCase):
         # custom.ld: reads from rs1 and rs2, writes to rd, has immediate
         # This matches Mode B: 2 external sources + 1 dst + immediate
         registry.register("custom.ld", RegisterFlow(["rd"], ["rs1", "rs2"],
-            encoding=InstructionFormat("I", 0x13, 0x0, has_imm=True, reg_class="integer")))
+            encoding=InstructionFormat("I", 0x13, 0x0, has_imm=True, imm_bits=5, reg_class="integer")))
 
         config = ConstraintConfig.defaults()
         for name in config.enabled:
