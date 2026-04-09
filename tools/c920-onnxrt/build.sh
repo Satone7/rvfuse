@@ -96,7 +96,8 @@ extract_sysroot() {
     # to avoid the linker picking up static libs from /lib over shared libs from /usr/lib
     mkdir -p "${sysroot}/lib/riscv64-linux-gnu"
     docker cp "${tmp_container}:/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1" \
-        "${sysroot}/lib/riscv64-linux-gnu/" 2>/dev/null || true
+        "${sysroot}/lib/riscv64-linux-gnu/" || \
+        error "Failed to copy dynamic linker from container. Is ld-linux-riscv64-lp64d.so.1 present?"
     # GCC ld looks for the dynamic linker at /lib/ld-linux-*.so.1 (not in the
     # riscv64-linux-gnu/ subdirectory), so create a top-level symlink.
     ln -sf "riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1" \
@@ -140,7 +141,6 @@ extract_sysroot() {
     echo "  $(du -sh "${sysroot}" | cut -f1)"
 }
 
-
 # --- Step 2: Build cross-compilation Docker image ---
 build_image() {
     info "Building cross-compilation Docker image..."
@@ -162,7 +162,7 @@ cross_compile() {
     fi
 
     info "Cross-compiling ONNX Runtime (full build)..."
-    rm -rf "${ort_build}" 2>/dev/null || sudo rm -rf "${ort_build}" 2>/dev/null || true
+    rm -rf "${ort_build}" 2>/dev/null || { warn "Build directory owned by root, using sudo to clean up..."; sudo rm -rf "${ort_build}"; } || true
     mkdir -p "${ort_build}" "${ort_install}"
 
     docker run --rm \
