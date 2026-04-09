@@ -50,6 +50,7 @@ tools/docker-onnxrt/vendor/
 # ONNX Runtime + YOLO build artifacts
 output/*
 !output/.gitkeep
+!output/test_video.mp4
 *.pt
 
 # BBV plugin output files
