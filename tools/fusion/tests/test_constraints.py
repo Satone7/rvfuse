@@ -67,7 +67,11 @@ class TestVerdict(unittest.TestCase):
 
 class TestConstraintCheckerFeasible(unittest.TestCase):
     def setUp(self):
-        self.checker = ConstraintChecker(_make_registry())
+        config = ConstraintConfig.defaults()
+        # Enable all constraints for comprehensive feasible testing
+        for name in config.enabled:
+            config.enabled[name] = True
+        self.checker = ConstraintChecker(_make_registry(), config=config)
 
     def test_float_add_mul_chain(self):
         pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float", "chain_registers": [["frd", "frs1"]]}
@@ -92,7 +96,15 @@ class TestConstraintCheckerFeasible(unittest.TestCase):
 
 class TestConstraintCheckerInfeasible(unittest.TestCase):
     def setUp(self):
-        self.checker = ConstraintChecker(_make_registry())
+        config = ConstraintConfig.defaults()
+        # Disable all constraints except old infeasible ones for isolated testing
+        for name in config.enabled:
+            config.enabled[name] = False
+        config.enabled["no_load_store"] = True
+        config.enabled["register_class_mismatch"] = True
+        config.enabled["no_config_write"] = True
+        config.enabled["unknown_instruction"] = True
+        self.checker = ConstraintChecker(_make_registry(), config=config)
 
     def test_load_in_chain(self):
         pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float", "chain_registers": [["frd", "frs1"]]}
@@ -127,7 +139,13 @@ class TestConstraintCheckerInfeasible(unittest.TestCase):
 
 class TestConstraintCheckerConstrained(unittest.TestCase):
     def setUp(self):
-        self.checker = ConstraintChecker(_make_registry())
+        config = ConstraintConfig.defaults()
+        # Disable all constraints except old soft ones for isolated testing
+        for name in config.enabled:
+            config.enabled[name] = False
+        config.enabled["has_immediate"] = True
+        config.enabled["missing_encoding"] = True
+        self.checker = ConstraintChecker(_make_registry(), config=config)
 
     def test_immediate_in_chain(self):
         pattern = {"opcodes": ["addi", "add"], "register_class": "integer", "chain_registers": [["rd", "rs1"]]}
@@ -144,7 +162,11 @@ class TestConstraintCheckerConstrained(unittest.TestCase):
         registry = ISARegistry()
         registry.register("fadd.s", RegisterFlow(["frd"], ["frs1", "frs2"]))
         registry.register("fmul.s", RegisterFlow(["frd"], ["frs1", "frs2"]))
-        checker = ConstraintChecker(registry)
+        config = ConstraintConfig.defaults()
+        for name in config.enabled:
+            config.enabled[name] = False
+        config.enabled["missing_encoding"] = True
+        checker = ConstraintChecker(registry, config=config)
         pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float", "chain_registers": [["frd", "frs1"]]}
         verdict = checker.check(pattern)
         self.assertEqual(verdict.status, "constrained")
@@ -196,3 +218,43 @@ class TestConstraintConfigFromFile(unittest.TestCase):
             f.flush()
             config = ConstraintConfig.from_file(Path(f.name))
         self.assertEqual(config.enabled, ConstraintConfig.defaults().enabled)
+
+
+class TestNewHardwareConstraints(unittest.TestCase):
+    def setUp(self):
+        self.registry = _make_registry()
+        config = ConstraintConfig.defaults()
+        # Disable all constraints except new ones for isolated testing
+        for name in ConstraintConfig.ALL_CONSTRAINTS:
+            config.enabled[name] = False
+        config.enabled["encoding_32bit"] = True
+        config.enabled["operand_format"] = True
+        config.enabled["datatype_encoding_space"] = True
+        self.checker = ConstraintChecker(self.registry, config=config)
+
+    def test_encoding_32bit_passes_for_standard_instructions(self):
+        pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]]}
+        verdict = self.checker.check(pattern)
+        self.assertNotIn("encoding_32bit", verdict.violations)
+
+    def test_encoding_32bit_detects_compressed(self):
+        # Register a fake compressed instruction (opcode low bits = 0x00)
+        registry = ISARegistry()
+        registry.register("c.add", RegisterFlow(["rd"], ["rs1", "rs2"],
+            encoding=InstructionFormat("R", 0x00, 0x0, 0x00, reg_class="integer")))
+        config = ConstraintConfig.defaults()
+        for name in config.enabled:
+            config.enabled[name] = False
+        config.enabled["encoding_32bit"] = True
+        checker = ConstraintChecker(registry, config=config)
+        pattern = {"opcodes": ["c.add"], "register_class": "integer",
+                   "chain_registers": []}
+        verdict = checker.check(pattern)
+        self.assertIn("encoding_32bit", verdict.violations)
+
+    def test_datatype_encoding_space_single_type_ok(self):
+        pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]]}
+        verdict = self.checker.check(pattern)
+        self.assertNotIn("datatype_encoding_space", verdict.violations)
