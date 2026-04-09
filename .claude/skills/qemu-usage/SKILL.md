@@ -1,16 +1,16 @@
 ---
-name: xuantie-qemu-usage
+name: qemu-usage
 description: |
-  How to use Xuantie QEMU (qemu-riscv64) for running RISC-V programs, profiling with the BBV plugin,
+  How to use QEMU (qemu-riscv64) for running RISC-V programs, profiling with the BBV plugin,
   and debugging within the RVFuse project. Use this skill whenever the user mentions running QEMU,
   qemu-riscv64, BBV profiling, RISC-V emulation, QEMU plugins, sysroot, running RISC-V binaries,
   QEMU CPU selection, vector extension programs, or QEMU debugging options — even if they don't
   explicitly ask for "QEMU help."
 ---
 
-# Xuantie QEMU Usage Guide (RVFuse Project)
+# QEMU Usage Guide (RVFuse Project)
 
-This skill covers **runtime usage** of Xuantie QEMU within the RVFuse project.
+This skill covers **runtime usage** of QEMU within the RVFuse project.
 It does NOT cover building QEMU — see `verify_bbv.sh` for build instructions.
 
 ## Key Paths
@@ -18,7 +18,7 @@ It does NOT cover building QEMU — see `verify_bbv.sh` for build instructions.
 | Item | Path |
 |------|------|
 | QEMU binary | `third_party/qemu/build/qemu-riscv64` |
-| BBV plugin | `third_party/qemu/build/contrib/plugins/libbbv.so` |
+| BBV plugin | `third_party/qemu/build/contrib/plugins/bbv.so` |
 | Sysroot | `output/sysroot` (RISC-V shared libraries) |
 | ELF binary | e.g. `output/yolo_inference` |
 | BBV output | `output/yolo.bbv.<pid>.bb` + `output/yolo.bbv.disas` |
@@ -36,9 +36,6 @@ qemu-riscv64 -L output/sysroot ./your_program [args...]
 The `-cpu` flag selects the emulated CPU model and its default ISA extensions:
 
 ```bash
-# T-Head CPUs with vector support (for running V extension programs)
-qemu-riscv64 -cpu c908v -L output/sysroot ./your_vec_program
-
 # Generic RV64 with specific extensions enabled
 qemu-riscv64 -cpu rv64,v=true -L output/sysroot ./your_vec_program
 
@@ -46,14 +43,12 @@ qemu-riscv64 -cpu rv64,v=true -L output/sysroot ./your_vec_program
 qemu-riscv64 -cpu help
 ```
 
-**Common CPU types:**
+**Common CPU types (upstream QEMU):**
 
 | CPU | Features | Use case |
 |-----|----------|----------|
-| `c908` | I, M, C | Basic integer workloads |
-| `c908v` | I, M, C, V | Vector programs (RVV 1.0) |
-| `c910v` | I, M, A, F, D, C, V | Full-featured with atomic + float + vector |
-| `rv64` | I (base) | Minimal; add extensions via `ext=true` |
+| `rv64` | I (base) | Minimal; add extensions via flags |
+| `any` | All supported | Feature exploration |
 | `max` | All supported | Feature exploration |
 
 **Enabling extensions on generic CPUs:**
@@ -103,7 +98,7 @@ This is the primary profiling mechanism in RVFuse.
 
 ```bash
 qemu-riscv64 -L output/sysroot \
-  -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
+  -plugin third_party/qemu/build/contrib/plugins/bbv.so,interval=10000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
 ```
 
@@ -167,19 +162,16 @@ Plugin `.so` files are located in `third_party/qemu/build/contrib/plugins/`.
 
 To run programs that use the RISC-V Vector extension:
 
-1. Ensure the binary was compiled with `-march=rv64gcv` (or equivalent)
-2. Select a CPU with V support, or enable V explicitly:
+1. Ensure the binary was compiled with `-march=rv64gcv`
+2. Enable V explicitly on the CPU:
 
 ```bash
-# Option 1: Use T-Head CPU with built-in V support
-qemu-riscv64 -cpu c908v -L output/sysroot ./vec_program
-
-# Option 2: Use generic CPU with V enabled
+# Use generic CPU with V enabled
 qemu-riscv64 -cpu rv64,v=true -L output/sysroot ./vec_program
 
 # With BBV profiling on vector code
-qemu-riscv64 -cpu c908v -L output/sysroot \
-  -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/vec.bbv \
+qemu-riscv64 -cpu rv64,v=true -L output/sysroot \
+  -plugin third_party/qemu/build/contrib/plugins/bbv.so,interval=10000,outfile=output/vec.bbv \
   ./vec_program [args...]
 ```
 

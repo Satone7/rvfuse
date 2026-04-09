@@ -48,7 +48,7 @@ in `docs/plans/` before implementation begins.
 git submodule update --init
 
 # Add optional newlib submodule (if bare-metal support needed)
-git submodule add https://github.com/XUANTIE-RV/newlib third_party/newlib
+git submodule add https://github.com/llvm/llvm-project/runtimes/newlib third_party/newlib
 
 # Merge feature branches (ALWAYS use --no-ff)
 git merge --no-ff <branch-name>
@@ -68,7 +68,7 @@ git submodule update --remote
 # Run BBV profiling on the YOLO binary (dynamically linked, needs sysroot)
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
 qemu-riscv64 -L output/sysroot \
-  -plugin third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/yolo.bbv \
+  -plugin third_party/qemu/build/contrib/plugins/bbv.so,interval=10000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
 
 # Generate hotspot report from BBV data
@@ -106,7 +106,7 @@ cd tools && python -m pytest dfg/tests/ -v
 |-----|----------|
 | ADR-001 | Git submodules for external toolchain (third_party/) |
 | ADR-002 | Deliver in stages — setup, profiling/DFG, fusion discovery, simulation, extension |
-| ADR-003 | Xuantie newlib is optional (not required for current phase) |
+| ADR-003 | newlib is optional (not required for current phase) |
 | ADR-004 | All workload/benchmark references must have traceable sources |
 
 ## Repository Structure
@@ -139,8 +139,8 @@ RVFuse/
 │   └── yolo_runner/       # YOLO inference C++ runner
 ├── tests/                 # Integration tests
 ├── third_party/           # Git submodules
-│   ├── qemu/              # Xuantie QEMU (mandatory)
-│   └── llvm-project/      # Xuantie LLVM (mandatory)
+│   ├── qemu/              # QEMU (mandatory)
+│   └── llvm-project/      # LLVM (mandatory)
 └── .rainbow/              # Workflow automation scripts
 ```
 
@@ -148,9 +148,8 @@ RVFuse/
 
 | Dependency | Source | Status |
 |------------|--------|--------|
-| Xuantie QEMU | https://github.com/XUANTIE-RV/qemu | Mandatory |
-| Xuantie LLVM | https://github.com/XUANTIE-RV/llvm-project | Mandatory |
-| Xuantie newlib | https://github.com/XUANTIE-RV/newlib | Optional |
+| QEMU | https://gitlab.com/qemu-project/qemu | Mandatory |
+| LLVM | https://github.com/llvm/llvm-project | Mandatory |
 
 ## Code Style
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_tblgen.sh — Build llvm-tblgen from Xuantie LLVM and extract RISC-V instruction JSON.
+# setup_tblgen.sh — Build llvm-tblgen from LLVM and extract RISC-V instruction JSON.
 #
 # This is a one-time setup step (or re-run when the llvm-project submodule is updated)
 # to produce tools/dfg/riscv_instrs.json, which is the reproducible input for

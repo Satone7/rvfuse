@@ -79,7 +79,7 @@ This initializes the QEMU submodule, configures it for `riscv64-linux-user` with
 ```
 third_party/qemu/build/
 ├── qemu-riscv64                              # QEMU RISC-V user-mode emulator
-└── contrib/plugins/libbbv.so                  # BBV profiling plugin
+└── contrib/plugins/bbv.so                     # BBV profiling plugin
 ```
 
 ### Step 3: Build ONNX Runtime + YOLO runner for RISC-V
@@ -117,7 +117,7 @@ output/
 ```bash
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=100000,outfile=output/yolo.bbv \
+  -plugin ./third_party/qemu/build/contrib/plugins/bbv.so,interval=100000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 1
 ```
 
@@ -332,10 +332,10 @@ RVFuse/
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| QEMU (Xuantie) | `third_party/qemu/` | RISC-V emulation + BBV profiling plugin |
+| QEMU | `third_party/qemu/` | RISC-V emulation + BBV profiling plugin |
 | ONNX Runtime | microsoft/onnxruntime v1.17.3 | Neural network inference engine |
 | Eigen | libeigen 3.4.0 | Linear algebra (ONNX Runtime dependency) |
-| Xuantie LLVM | `third_party/llvm-project/` | RISC-V toolchain (future phases) |
+| LLVM | `third_party/llvm-project/` | RISC-V toolchain (future phases) |
 
 ## Architecture Decisions
 

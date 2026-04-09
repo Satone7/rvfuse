@@ -2,7 +2,7 @@
 # Shared functions for Docker LLVM toolchain
 
 # Default configurations
-DEFAULT_IMAGE="rvfuse/llvm-riscv:13"
+DEFAULT_IMAGE="rvfuse/llvm-riscv:22"
 DOCKER_IMAGE="${RVFUSE_LLVM_IMAGE:-$DEFAULT_IMAGE}"
 DOCKER_OPTS=""
 

@@ -46,7 +46,7 @@ readonly -a STEP1_ARTIFACTS=(
 )
 # shellcheck disable=SC2034
 readonly -a STEP2_ARTIFACTS=(
-    "third_party/qemu/build/contrib/plugins/libbbv.so"
+    "third_party/qemu/build/contrib/plugins/bbv.so"
 )
 # shellcheck disable=SC2034
 readonly -a STEP3_ARTIFACTS=(
@@ -516,7 +516,7 @@ step2_build_qemu() {
         return 1
     fi
 
-    record_step_result "$step" "PASS" "libbbv.so built"
+    record_step_result "$step" "PASS" "bbv.so built"
     return 0
 }
 
@@ -546,7 +546,7 @@ step4_bbv_profiling() {
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
     local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
-    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/libbbv.so"
+    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/bbv.so"
     local inference_bin="${PROJECT_ROOT}/output/yolo_inference"
     local ort_model="${PROJECT_ROOT}/output/yolo11n.ort"
     local test_image="${PROJECT_ROOT}/output/test.jpg"

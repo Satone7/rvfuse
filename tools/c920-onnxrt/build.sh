@@ -172,7 +172,7 @@ cross_compile() {
         -v "${OUTPUT_DIR}/sysroot:/sysroot:ro" \
         -v "${ort_build}:/build" \
         -v "${ort_install}:/install" \
-        -v "${SCRIPT_DIR}/riscv64-linux-clang13.cmake:/toolchain.cmake:ro" \
+        -v "${SCRIPT_DIR}/riscv64-linux-toolchain.cmake:/toolchain.cmake:ro" \
         -e LLVM_INSTALL=/llvm-install \
         -e SYSROOT=/sysroot \
         -w /build \

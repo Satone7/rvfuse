@@ -51,7 +51,7 @@
   - External repositories are managed as Git submodules (`third_party/`)
   - ISA descriptions are derived from LLVM `.td` files via `llvm-tblgen` for accuracy
   - Agent integration uses Claude Code CLI subprocess (no separate API key management)
-  - Xuantie newlib remains optional (not required for current workloads)
+  - newlib remains optional (not required for current workloads)
 
 - **Quality Targets**:
   - Full pipeline runnable from `git clone` via `./setup.sh`
@@ -60,9 +60,8 @@
   - Agent check/generate provides advisory verification without blocking the pipeline
 
 - **Key Dependencies**:
-  - Xuantie QEMU: https://github.com/XUANTIE-RV/qemu (user-mode emulation + BBV plugin)
-  - Xuantie LLVM: https://github.com/XUANTIE-RV/llvm-project (ISA definitions + cross-compiler)
-  - Xuantie newlib: https://github.com/XUANTIE-RV/newlib (optional, bare-metal scenarios)
+  - QEMU: https://gitlab.com/qemu-project/qemu (user-mode emulation + BBV plugin)
+  - LLVM: https://github.com/llvm/llvm-project (ISA definitions + cross-compiler)
 
 ---
 
@@ -96,9 +95,9 @@ graph TB
 ```mermaid
 graph TB
     subgraph BuildInfrastructure[Build Infrastructure]
-        QEMU[Xuantie QEMU<br/>user-mode + BBV plugin]
+        QEMU[QEMU<br/>user-mode + BBV plugin]
         Docker[Docker<br/>RISC-V native build]
-        LLVM[Xuantie LLVM<br/>ISA definitions + compiler]
+        LLVM[LLVM<br/>ISA definitions + compiler]
     end
     subgraph AnalysisTools[Analysis Tools]
         BBV[analyze_bbv.py<br/>hotspot report]
@@ -185,8 +184,8 @@ RVFuse/
 │   └── yolo_runner/       # YOLO inference C++ runner
 ├── tests/                 # Integration tests
 └── third_party/           # Git submodules
-    ├── qemu/              # Xuantie QEMU (mandatory)
-    └── llvm-project/      # Xuantie LLVM (mandatory)
+    ├── qemu/              # QEMU (mandatory)
+    └── llvm-project/      # LLVM (mandatory)
 ```
 
 ---
@@ -228,7 +227,7 @@ RVFuse/
 
 **Context**: Not every current scenario requires bare-metal runtime support.
 
-**Decision**: Treat Xuantie newlib as optional while preserving its canonical source reference.
+**Decision**: Treat newlib as optional while preserving its canonical source reference.
 
 **Consequences**:
 - (+) Avoids blocking current work on an unnecessary dependency
@@ -250,12 +249,12 @@ RVFuse/
 
 **Context**: Manually maintaining ISA register flow descriptions is error-prone and doesn't scale across extensions.
 
-**Decision**: Generate ISA descriptor Python modules from Xuantie LLVM `.td` files using `llvm-tblgen --dump-json`. Hand-written `rv64i.py` is retained for pseudo-instructions that `llvm-tblgen` does not define.
+**Decision**: Generate ISA descriptor Python modules from LLVM `.td` files using `llvm-tblgen --dump-json`. Hand-written `rv64i.py` is retained for pseudo-instructions that `llvm-tblgen` does not define.
 
 **Consequences**:
 - (+) Register operand mappings are authoritative (sourced from LLVM backend)
 - (+) Adding new extensions (D, A, V) requires only running the generator
-- (-) Depends on Xuantie LLVM submodule and one-time `llvm-tblgen` build
+- (-) Depends on LLVM submodule and one-time `llvm-tblgen` build
 - (-) QEMU disassembly mnemonics may differ from LLVM names (handled by name mapping table)
 
 ---
@@ -344,7 +343,7 @@ RVFuse/
 ### Acceptance Guardrails
 - Do not treat simulation or ISA extension work as Phase 2 deliverables
 - Do not modify the DFG engine core (parser, builder, output) unless fixing bugs — Phase 2 builds on top of it
-- Do not mark Xuantie newlib as mandatory
+- Do not mark newlib as mandatory
 - Do not reference benchmark or workload examples without a traceable source
 
 ---

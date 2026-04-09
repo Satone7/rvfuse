@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/common.sh"
 TARGET_ARGS=("--target=riscv64-unknown-elf")
 
 if [[ "$1" == "--version" ]]; then
-    echo "Docker LLVM Toolchain (based on LLVM 13)"
+    echo "Docker LLVM Toolchain (based on LLVM 22)"
     run_in_docker clang++ --version | grep -i version
     exit $?
 fi
