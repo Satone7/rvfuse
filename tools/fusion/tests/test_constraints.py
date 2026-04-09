@@ -69,8 +69,11 @@ class TestConstraintCheckerFeasible(unittest.TestCase):
     def setUp(self):
         config = ConstraintConfig.defaults()
         # Enable all constraints for comprehensive feasible testing
+        # Note: operand_format requires exact counts (3src+1dst or 2src+1dst+imm),
+        # which these patterns don't satisfy, so disable it for these tests.
         for name in config.enabled:
             config.enabled[name] = True
+        config.enabled["operand_format"] = False
         self.checker = ConstraintChecker(_make_registry(), config=config)
 
     def test_float_add_mul_chain(self):
@@ -252,6 +255,32 @@ class TestNewHardwareConstraints(unittest.TestCase):
                    "chain_registers": []}
         verdict = checker.check(pattern)
         self.assertIn("encoding_32bit", verdict.violations)
+
+    def test_operand_format_passes_3src_1dst_no_imm(self):
+        # fmadd.s has 3 sources + 1 destination, no immediate
+        pattern = {"opcodes": ["fmadd.s"], "register_class": "float",
+                   "chain_registers": []}
+        verdict = self.checker.check(pattern)
+        self.assertNotIn("operand_format", verdict.violations)
+
+    def test_operand_format_mode_b_requires_exact_2src_1dst_imm(self):
+        # Mode B requires EXACTLY 2 external sources + 1 external destination + immediate.
+        # vsetvli has: rd (dst), rs1 (src), and imm (12-bit).
+        # Without chaining: 1 external source (rs1), 1 external destination (rd), has imm.
+        # This gives 1 src + 1 dst + imm - Mode B requires exactly 2 sources -> should fail.
+        pattern = {"opcodes": ["vsetvli"], "register_class": "vector",
+                   "chain_registers": []}
+        verdict = self.checker.check(pattern)
+        self.assertIn("operand_format", verdict.violations)
+
+    def test_operand_format_detects_mismatch(self):
+        # fadd.s + fmul.s: each has 2 sources + 1 destination
+        # Chain passes frd -> frs1, so external: frs2 from both = 2 sources
+        # Mode A needs 3 sources, Mode B needs imm -> neither satisfied
+        pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]]}
+        verdict = self.checker.check(pattern)
+        self.assertIn("operand_format", verdict.violations)
 
     def test_datatype_encoding_space_single_type_ok(self):
         pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",

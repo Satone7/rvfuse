@@ -198,20 +198,15 @@ class ConstraintChecker:
         num_external_srcs = len(external_srcs)
         num_external_dsts = len(external_dsts)
 
-        # Mode A: 3 external sources + 1 destination (no immediate)
-        # Mode B: 2 external sources + 5-bit immediate + 1 destination
-        if not has_immediate:
-            # Mode A check
-            if num_external_srcs > 3:
-                return ("operand_format", f"Mode A requires <=3 external sources, found {num_external_srcs}")
-            if num_external_dsts > 1:
-                return ("operand_format", f"Mode A requires <=1 external destination, found {num_external_dsts}")
-        else:
-            # Mode B check
-            if num_external_srcs > 2:
-                return ("operand_format", f"Mode B requires <=2 external sources, found {num_external_srcs}")
-            if num_external_dsts > 1:
-                return ("operand_format", f"Mode B requires <=1 external destination, found {num_external_dsts}")
+        # Mode A: exactly 3 external sources + 1 destination (no immediate)
+        # Mode B: exactly 2 external sources + 5-bit immediate + 1 destination
+        valid_a = (num_external_srcs == 3 and num_external_dsts == 1 and not has_immediate)
+        valid_b = (num_external_srcs == 2 and num_external_dsts == 1 and has_immediate)
+
+        if not (valid_a or valid_b):
+            return ("operand_format",
+                f"操作数格式不符合: 外部源={num_external_srcs}, 外部目的={num_external_dsts}, "
+                f"有立即数={has_immediate} (要求: 3源+1目的无imm 或 2源+1目的+5位imm)")
 
         return None
 
