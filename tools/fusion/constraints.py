@@ -8,8 +8,10 @@ Implements a three-tier verdict model:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Literal
+from pathlib import Path
+from typing import ClassVar, Literal
 
 from dfg.instruction import ISARegistry
 
@@ -34,6 +36,61 @@ _SOFT_VIOLATIONS: frozenset[str] = frozenset({
 # Known config-register-writing instructions (vsetvli, vsetivli, vsetvl).
 # Detected by opcode 0x57 (OP-V) + funct3 0x7.
 _CONFIG_FUNCT3 = frozenset({0x07})
+
+
+@dataclass
+class ConstraintConfig:
+    """Per-constraint enable/disable configuration."""
+
+    enabled: dict[str, bool] = field(default_factory=dict)
+
+    ALL_CONSTRAINTS: ClassVar[dict[str, tuple[str, bool, str]]] = {
+        "encoding_32bit":          ("hard", True,  "指令编码限定为32位（压缩指令除外）"),
+        "operand_format":          ("hard", True,  "操作数格式: 3源+1目的 或 2源+5位imm+1目的"),
+        "datatype_encoding_space": ("hard", True,  "区分数据类型时需预留编码空间"),
+        "instruction_count":       ("hard", True,  "融合链指令数量限制"),
+        "no_load_store":           ("hard", False, "链中包含 load/store 指令"),
+        "register_class_mismatch": ("hard", False, "指令寄存器类与模式不匹配"),
+        "no_config_write":         ("hard", False, "链中包含配置寄存器写入指令"),
+        "unknown_instruction":     ("hard", False, "opcode 在 ISA 注册表中不存在"),
+        "too_many_destinations":   ("hard", False, "唯一目标字段数 > 1"),
+        "too_many_sources":        ("hard", False, "唯一源字段数 > 3"),
+        "has_immediate":           ("soft", False, "链中包含立即数操作数"),
+        "missing_encoding":        ("soft", False, "指令缺少 InstructionFormat 元数据"),
+    }
+
+    @classmethod
+    def defaults(cls) -> "ConstraintConfig":
+        return cls(enabled={name: meta[1] for name, meta in cls.ALL_CONSTRAINTS.items()})
+
+    @classmethod
+    def from_file(cls, path: Path) -> "ConstraintConfig":
+        path = Path(path)
+        if not path.exists():
+            return cls.defaults()
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return cls.defaults()
+        config = cls.defaults()
+        constraints = data.get("constraints", {})
+        for name, value in constraints.items():
+            if name in cls.ALL_CONSTRAINTS and isinstance(value, bool):
+                config.enabled[name] = value
+        return config
+
+    def to_dict(self) -> dict:
+        return {
+            "constraints": {
+                name: {
+                    "category": meta[0],
+                    "default": meta[1],
+                    "enabled": self.enabled.get(name, meta[1]),
+                    "description": meta[2],
+                }
+                for name, meta in self.ALL_CONSTRAINTS.items()
+            }
+        }
 
 
 @dataclass
