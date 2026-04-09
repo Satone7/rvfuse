@@ -154,11 +154,11 @@ class TestConstraintCheckerConstrained(unittest.TestCase):
 class TestConstraintConfigDefaults(unittest.TestCase):
     def test_defaults_has_all_constraints(self):
         config = ConstraintConfig.defaults()
-        self.assertEqual(len(config.enabled), 12)
+        self.assertEqual(len(config.enabled), 11)
 
     def test_defaults_new_constraints_enabled(self):
         config = ConstraintConfig.defaults()
-        for name in ["encoding_32bit", "operand_format", "datatype_encoding_space", "instruction_count"]:
+        for name in ["encoding_32bit", "operand_format", "datatype_encoding_space"]:
             self.assertTrue(config.enabled[name], f"{name} should default enabled")
 
     def test_defaults_old_constraints_disabled(self):

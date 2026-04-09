@@ -48,7 +48,6 @@ class ConstraintConfig:
         "encoding_32bit":          ("hard", True,  "指令编码限定为32位（压缩指令除外）"),
         "operand_format":          ("hard", True,  "操作数格式: 3源+1目的 或 2源+5位imm+1目的"),
         "datatype_encoding_space": ("hard", True,  "区分数据类型时需预留编码空间"),
-        "instruction_count":       ("hard", True,  "融合链指令数量限制"),
         "no_load_store":           ("hard", False, "链中包含 load/store 指令"),
         "register_class_mismatch": ("hard", False, "指令寄存器类与模式不匹配"),
         "no_config_write":         ("hard", False, "链中包含配置寄存器写入指令"),
