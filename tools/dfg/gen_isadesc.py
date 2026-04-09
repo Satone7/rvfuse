@@ -21,6 +21,15 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
+# Ensure dfg package imports work whether this file is invoked directly
+# (e.g. ``python3 dfg/gen_isadesc.py`` from tools/) or via pytest.
+if __name__ == "__main__" and __package__ is None:
+    _script_dir = str(Path(__file__).resolve().parent.parent)
+    if _script_dir not in sys.path:
+        sys.path.insert(0, _script_dir)
+
+from dfg.instruction import InstructionFormat  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Configuration: which LLVM tablegen names map to which QEMU mnemonics
@@ -124,8 +133,28 @@ EXTENSION_PREDICATES: dict[str, set[str]] = {
     # "A": {"HasStdExtA"},
 }
 
+# Instructions that also carry any of these predicates are excluded from the
+# extension's descriptor, even if they carry the extension's own predicate.
+# This prevents F from pulling in vector-FP instructions that are already
+# covered by the V descriptor.
+EXTENSION_EXCLUDED_PREDICATES: dict[str, set[str]] = {
+    "F": {"HasStdExtV"},
+}
 
-def _has_extension(entry: dict, ext: str) -> bool:
+# LLVM def names that override the exclusion -- these are included even if they
+# carry a normally-excluded predicate.
+EXTENSION_EXCLUSION_OVERRIDES: dict[str, set[str]] = {
+    "F": {"VFMV_F_S", "VFMV_S_F"},
+}
+
+EXTENSION_REG_CLASS: dict[str, str] = {
+    "F": "float",
+    "M": "integer",
+    "V": "vector",
+}
+
+
+def _has_extension(entry: dict, ext: str, name: str = "") -> bool:
     """Return True if *entry* is an instruction belonging to extension *ext*."""
     required = EXTENSION_PREDICATES.get(ext)
     if required is None:
@@ -141,7 +170,19 @@ def _has_extension(entry: dict, ext: str) -> bool:
         return False
 
     pred_names = {p.get("def", "") for p in preds if isinstance(p, dict)}
-    return required.issubset(pred_names)
+    if not required.issubset(pred_names):
+        return False
+
+    # Exclude instructions that carry predicates from a different extension
+    # (e.g. skip vector-FP instructions when generating F descriptor),
+    # unless the instruction is in the override allowlist.
+    excluded = EXTENSION_EXCLUDED_PREDICATES.get(ext)
+    if excluded and excluded & pred_names:
+        overrides = EXTENSION_EXCLUSION_OVERRIDES.get(ext, set())
+        if name not in overrides:
+            return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +238,79 @@ def _extract_flow(entry: dict) -> tuple[list[str], list[str]]:
     return dst, src
 
 
+def _extract_encoding(entry: dict, reg_class: str) -> InstructionFormat:
+    """Extract encoding layout metadata from a tablegen instruction entry.
+
+    Parses the Inst array (LSB-first) to determine which fields are present,
+    the instruction format type, and fixed encoding bits (opcode, funct3,
+    funct7).
+    """
+    inst = entry.get("Inst", [])
+    if len(inst) < 32:
+        return InstructionFormat(format_type="R", opcode=0, reg_class=reg_class)
+
+    def bv(el):
+        """Return int value if element is a fixed bit, else None for variable."""
+        return el if isinstance(el, int) else None
+
+    def extract_field(start: int, width: int) -> int | None:
+        bits = [bv(inst[start + i]) for i in range(width)]
+        if any(b is None for b in bits):
+            return None
+        return sum(b * (1 << i) for i, b in enumerate(bits))
+
+    def has_var_field(start: int, width: int) -> bool:
+        return any(bv(inst[start + i]) is None for i in range(width))
+
+    # Opcode: the Opcode field is stored in reverse order
+    opcode_bits = entry.get("Opcode", [0] * 7)
+    opcode = int("".join(str(b) for b in reversed(opcode_bits)), 2)
+
+    funct3 = extract_field(12, 3)
+    funct7 = extract_field(25, 7)
+
+    has_rd = has_var_field(7, 5)
+    has_rs1 = has_var_field(15, 5)
+    has_rs2 = has_var_field(20, 5)
+
+    may_load = bool(entry.get("mayLoad", 0))
+    may_store = bool(entry.get("mayStore", 0))
+
+    # R4 format: only for 4-operand FP instructions (opcode 0x43 MADD,
+    # 0x47 MSUB, 0x4b NMSUB, 0x4f NMADD).  Bits 27-31 are rs3 only in
+    # this context; for I/S formats those same bit positions are part of
+    # the immediate.
+    _R4_OPCODES = {0x43, 0x47, 0x4b, 0x4f}
+    has_rs3 = opcode in _R4_OPCODES and has_var_field(27, 5)
+
+    has_imm = not has_rs2 and not has_rs3
+    imm_bits = 12 if has_imm and not may_load and not may_store else 0
+    if may_store:
+        imm_bits = 12
+        has_imm = True
+    if may_load:
+        imm_bits = 12
+        has_imm = True
+
+    if has_rs3:
+        format_type = "R4"
+    elif may_store:
+        format_type = "S"
+    elif may_load:
+        format_type = "I"
+    elif has_imm:
+        format_type = "I"
+    else:
+        format_type = "R"
+
+    return InstructionFormat(
+        format_type=format_type, opcode=opcode, funct3=funct3, funct7=funct7,
+        has_rd=has_rd, has_rs1=has_rs1, has_rs2=has_rs2, has_rs3=has_rs3,
+        has_imm=has_imm, imm_bits=imm_bits, may_load=may_load, may_store=may_store,
+        reg_class=reg_class,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Filtering
 # ---------------------------------------------------------------------------
@@ -222,7 +336,10 @@ def _should_include(name: str) -> bool:
 # Code generation
 # ---------------------------------------------------------------------------
 
-def _generate_module(ext: str, entries: list[tuple[str, list[str], list[str]]]) -> str:
+def _generate_module(
+    ext: str,
+    entries: list[tuple[str, list[str], list[str], InstructionFormat]],
+) -> str:
     """Generate the Python source for an ISA descriptor module."""
     ext_lower = ext.lower()
     var_name = f"ALL_RV64{ext}"
@@ -232,7 +349,7 @@ def _generate_module(ext: str, entries: list[tuple[str, list[str], list[str]]]) 
     lines.append("")
     lines.append("from __future__ import annotations")
     lines.append("")
-    lines.append("from dfg.instruction import ISARegistry, RegisterFlow")
+    lines.append("from dfg.instruction import ISARegistry, InstructionFormat, RegisterFlow")
     lines.append("")
     lines.append("")
 
@@ -240,10 +357,14 @@ def _generate_module(ext: str, entries: list[tuple[str, list[str], list[str]]]) 
     lines.append(f"# RV64{ext} instructions (auto-generated by gen_isadesc.py)")
     lines.append(f"{var_name}: list[tuple[str, RegisterFlow]] = [")
 
-    for mnemonic, dst, src in entries:
+    for mnemonic, dst, src, enc in entries:
         dst_repr = repr(dst)
         src_repr = repr(src)
-        lines.append(f'    ("{mnemonic}", RegisterFlow({dst_repr}, {src_repr})),')
+        enc_repr = _format_encoding(enc)
+        if enc_repr:
+            lines.append(f'    ("{mnemonic}", RegisterFlow({dst_repr}, {src_repr}, encoding={enc_repr})),')
+        else:
+            lines.append(f'    ("{mnemonic}", RegisterFlow({dst_repr}, {src_repr})),')
 
     lines.append("]")
     lines.append("")
@@ -260,6 +381,34 @@ def _generate_module(ext: str, entries: list[tuple[str, list[str], list[str]]]) 
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _format_encoding(enc: InstructionFormat) -> str:
+    """Format an InstructionFormat as a Python source expression."""
+    parts = [
+        f'format_type={enc.format_type!r}',
+        f'opcode=0x{enc.opcode:02x}',
+    ]
+    if enc.funct3 is not None:
+        parts.append(f'funct3=0x{enc.funct3:02x}')
+    else:
+        parts.append('funct3=None')
+    if enc.funct7 is not None:
+        parts.append(f'funct7=0x{enc.funct7:02x}')
+    else:
+        parts.append('funct7=None')
+    parts.extend([
+        f'has_rd={enc.has_rd!r}',
+        f'has_rs1={enc.has_rs1!r}',
+        f'has_rs2={enc.has_rs2!r}',
+        f'has_rs3={enc.has_rs3!r}',
+        f'has_imm={enc.has_imm!r}',
+        f'imm_bits={enc.imm_bits}',
+        f'may_load={enc.may_load!r}',
+        f'may_store={enc.may_store!r}',
+        f'reg_class={enc.reg_class!r}',
+    ])
+    return f'InstructionFormat({", ".join(parts)})'
 
 
 # ---------------------------------------------------------------------------
@@ -298,14 +447,16 @@ def main(argv: list[str] | None = None) -> None:
     with open(args.json_path, "r") as f:
         data = json.load(f)
 
+    reg_class = EXTENSION_REG_CLASS.get(args.ext, "integer")
+
     # Filter and extract instructions for the given extension
-    entries: list[tuple[str, list[str], list[str]]] = []
+    entries: list[tuple[str, list[str], list[str], InstructionFormat]] = []
     for name, entry in sorted(data.items()):
         if not isinstance(entry, dict):
             continue
         if not _should_include(name):
             continue
-        if not _has_extension(entry, args.ext):
+        if not _has_extension(entry, args.ext, name=name):
             continue
 
         mnemonic = llvm_name_to_mnemonic(name)
@@ -315,7 +466,8 @@ def main(argv: list[str] | None = None) -> None:
         if not dst and not src:
             continue
 
-        entries.append((mnemonic, dst, src))
+        enc = _extract_encoding(entry, reg_class)
+        entries.append((mnemonic, dst, src, enc))
 
     if not entries:
         print(
