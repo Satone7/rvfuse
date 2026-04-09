@@ -206,23 +206,29 @@ class Scorer:
 
 def score(
     catalog_path: str | Path,
+    registry: ISARegistry,
     output_path: str | Path | None = None,
     top: int | None = None,
     min_score: float = 0.0,
     weights: dict[str, float] | None = None,
+    feasibility_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Load a pattern catalog JSON, score all patterns, write results.
 
     Args:
         catalog_path: Path to the JSON catalog produced by the miner.
+        registry: ISA registry with encoding metadata.
         output_path: Optional path to write scored results JSON.
         top: Keep only the top N patterns.
         min_score: Discard patterns scoring below this threshold.
         weights: Optional custom scoring weights.
+        feasibility_only: Only check constraints, skip scoring.
 
     Returns:
         The list of scored result dicts.
     """
+    from datetime import datetime, timezone
+
     catalog_path = Path(catalog_path)
     with open(catalog_path) as f:
         catalog = json.load(f)
@@ -233,19 +239,53 @@ def score(
 
     max_freq = max(p.get("total_frequency", 0) for p in patterns)
 
-    # Build a minimal ISA registry from the catalog if needed.
-    # For CLI usage, the caller should ensure the registry is populated.
-    # We create an empty registry and rely on constraints being lenient.
-    registry = ISARegistry()
-
-    scorer = Scorer(registry, max_frequency=max_freq, weights=weights)
-    results = scorer.score_patterns(patterns, top=top, min_score=min_score)
+    if feasibility_only:
+        checker = ConstraintChecker(registry)
+        results = []
+        for p in patterns:
+            verdict = checker.check(p)
+            results.append({
+                "pattern": {
+                    "opcodes": p["opcodes"],
+                    "register_class": p.get("register_class"),
+                    "chain_registers": p.get("chain_registers", []),
+                },
+                "input_frequency": p.get("total_frequency", 0),
+                "input_occurrence_count": p.get("occurrence_count", 0),
+                "hardware": {
+                    "status": verdict.status,
+                    "reasons": verdict.reasons,
+                    "violations": verdict.violations,
+                },
+                "score": 0.0 if verdict.status == "infeasible" else (
+                    0.5 if verdict.status == "constrained" else 1.0),
+            })
+        results.sort(key=lambda x: x["score"], reverse=True)
+        for i, r in enumerate(results):
+            r["rank"] = i + 1
+        if top is not None:
+            results = results[:top]
+    else:
+        scorer = Scorer(registry, max_frequency=max_freq, weights=weights)
+        results = scorer.score_patterns(patterns, top=top, min_score=min_score)
 
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        output = {
+            "generated": datetime.now(timezone.utc).isoformat(),
+            "source_pattern_count": len(patterns),
+            "candidate_count": len(results),
+            "candidates": results,
+        }
         with open(output_path, "w") as f:
-            json.dump({"results": results}, f, indent=2)
+            json.dump(output, f, indent=2)
+            f.write("\n")
+
+    logger.info(
+        "Scored %d patterns -> %d candidates (top=%s, min_score=%s)",
+        len(patterns), len(results), top, min_score,
+    )
 
     return results
 

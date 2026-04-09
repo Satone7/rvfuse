@@ -1,7 +1,8 @@
-"""CLI entry point for fusion pattern mining.
+"""CLI entry point for fusion pattern mining and scoring.
 
 Usage:
     python -m tools.fusion discover --dfg-dir <dir> --report <json> --output <json>
+    python -m tools.fusion score --catalog <json> --output <json>
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ _ISA_MODULES: dict[str, tuple[str, str]] = {
     "I": ("dfg.isadesc.rv64i", "build_registry"),
     "F": ("dfg.isadesc.rv64f", "build_registry"),
     "M": ("dfg.isadesc.rv64m", "build_registry"),
+    "V": ("dfg.isadesc.rv64v", "build_registry"),
 }
 
 
@@ -49,8 +51,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        choices=["discover"],
-        help="Command to run (currently: discover)",
+        choices=["discover", "score"],
+        help="Command to run",
     )
     parser.add_argument(
         "--dfg-dir",
@@ -76,10 +78,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=20,
         help="Number of top patterns to include (default: 20)",
     )
+    parser.add_argument("--catalog", type=Path, default=None,
+        help="Path to Feature 1 pattern catalog JSON (required for score)")
+    parser.add_argument("--min-score", type=float, default=0.0,
+        help="Minimum score threshold (default: 0.0)")
+    parser.add_argument("--feasibility-only", action="store_true", default=False,
+        help="Only check constraints, skip scoring")
+    parser.add_argument("--weight-freq", type=float, default=None, dest="weight_freq",
+        help="Weight for frequency score (default: 0.4)")
+    parser.add_argument("--weight-tight", type=float, default=None, dest="weight_tight",
+        help="Weight for tightness score (default: 0.3)")
+    parser.add_argument("--weight-hw", type=float, default=None, dest="weight_hw",
+        help="Weight for hardware score (default: 0.3)")
     parser.add_argument(
         "--isa",
-        default="I,F,M",
-        help="Comma-separated ISA extensions (default: I,F,M)",
+        default="I,F,M,V",
+        help="Comma-separated ISA extensions (default: I,F,M,V)",
     )
     parser.add_argument(
         "--no-agent",
@@ -111,6 +125,41 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     registry = load_isa_registry(args.isa)
+
+    if args.command == "score":
+        if not args.catalog:
+            parser.error("--catalog is required for score command")
+        if not args.output:
+            parser.error("--output is required for score command")
+
+        from fusion.scorer import score as run_score
+
+        weights = None
+        if args.weight_freq is not None or args.weight_tight is not None or args.weight_hw is not None:
+            weights = {
+                "frequency": args.weight_freq if args.weight_freq is not None else 0.4,
+                "tightness": args.weight_tight if args.weight_tight is not None else 0.3,
+                "hardware": args.weight_hw if args.weight_hw is not None else 0.3,
+            }
+
+        candidates = run_score(
+            catalog_path=args.catalog, registry=registry, output_path=args.output,
+            top=args.top, min_score=args.min_score, weights=weights,
+            feasibility_only=args.feasibility_only,
+        )
+
+        feasible = sum(1 for c in candidates if c.get("hardware", {}).get("status") == "feasible")
+        constrained = sum(1 for c in candidates if c.get("hardware", {}).get("status") == "constrained")
+        infeasible = sum(1 for c in candidates if c.get("hardware", {}).get("status") == "infeasible")
+
+        print(f"\nFusion Candidate Scoring Results")
+        print(f"  Candidates: {len(candidates)} (feasible={feasible}, constrained={constrained}, infeasible={infeasible})")
+        if candidates:
+            top = candidates[0]
+            print(f"  Top: {' → '.join(top['pattern']['opcodes'])} "
+                  f"(score={top['score']:.4f}, {top['hardware']['status']})")
+        print(f"  Output: {args.output}")
+        return
 
     patterns = mine(
         dfg_dir=args.dfg_dir,
