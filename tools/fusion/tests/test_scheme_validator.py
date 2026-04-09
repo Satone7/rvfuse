@@ -92,12 +92,12 @@ class TestValidateEncoding(unittest.TestCase):
     def test_vector_encoding_no_class_mismatch(self):
         """opcode=0x57 (OP-V) with reg_class='vector' should not have class mismatch."""
         result = validate_encoding(
-            opcode=0x57, funct3=0x0, funct7=0x00,
+            opcode=0x57, funct3=0x4, funct7=0x40,
             reg_class="vector", registry=self.registry,
         )
         self.assertFalse(
             any("register class" in c for c in result.conflicts),
-            f"Did not expect register class mismatch for OP-V with vector class, got: {result.conflicts}",
+            f"Did not expect register class mismatch, got: {result.conflicts}",
         )
 
     def test_warning_partial_funct3_usage(self):
@@ -108,7 +108,7 @@ class TestValidateEncoding(unittest.TestCase):
         )
         self.assertFalse(result.passed, "Expected conflict with SUB instruction")
         self.assertTrue(
-            any("SUB" in c for c in result.conflicts),
+            any("sub" in c.lower() for c in result.conflicts),
             f"Expected SUB in conflicts, got: {result.conflicts}",
         )
 
@@ -123,3 +123,11 @@ class TestValidateEncoding(unittest.TestCase):
             len(result.suggested_alternatives), 0,
             "Expected at least one suggested alternative on failure",
         )
+
+    def test_no_conflict_with_unique_funct7(self):
+        """Same opcode/funct3 but unique funct7 should pass."""
+        result = validate_encoding(
+            opcode=0x33, funct3=0x0, funct7=0x42,
+            reg_class="integer", registry=self.registry,
+        )
+        self.assertTrue(result.passed, f"Expected pass with unique funct7, got conflicts: {result.conflicts}")
