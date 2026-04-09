@@ -156,7 +156,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "validate":
         if args.opcode is None:
-            sys.exit("--opcode is required for validate command")
+            print("Usage error: --opcode is required for validate command", file=sys.stderr)
+            print("Run 'python -m tools.fusion validate --help' for usage.", file=sys.stderr)
+            sys.exit(2)
 
         from fusion.scheme_validator import validate_encoding
         import json

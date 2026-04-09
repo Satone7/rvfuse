@@ -40,7 +40,7 @@ def validate_encoding(
     opcode_users: list[tuple[str, int | None, int | None, str]] = []
 
     # Scan all registered instructions for conflicts
-    for mnemonic, flow in registry._flows.items():
+    for mnemonic, flow in registry.items().items():
         encoding = flow.encoding
         if encoding is None:
             continue
@@ -170,16 +170,35 @@ def _suggest_alternatives(
         candidate_opcodes = [0x57]
 
     for op in candidate_opcodes:
+        # Track used funct3 values and funct7 values within each funct3
         used_funct3: set[int] = set()
-        for mnemonic, flow in registry._flows.items():
-            encoding = flow.encoding
-            if encoding and encoding.opcode == op and encoding.funct3 is not None:
-                used_funct3.add(encoding.funct3)
+        funct7_by_funct3: dict[int, set[int]] = {}
 
+        for mnemonic, flow in registry.items().items():
+            encoding = flow.encoding
+            if encoding and encoding.opcode == op:
+                if encoding.funct3 is not None:
+                    used_funct3.add(encoding.funct3)
+                    if encoding.funct7 is not None:
+                        if encoding.funct3 not in funct7_by_funct3:
+                            funct7_by_funct3[encoding.funct3] = set()
+                        funct7_by_funct3[encoding.funct3].add(encoding.funct7)
+
+        # First try unused funct3 slots
         for f3 in range(8):
             if f3 not in used_funct3:
                 suggestions.append(f"opcode 0x{op:02X} funct3 0x{f3:X}")
                 if len(suggestions) >= 3:
                     return suggestions
+
+        # If all funct3 slots are used, check for funct7 gaps within each
+        for f3 in range(8):
+            if f3 in used_funct3:
+                used_f7 = funct7_by_funct3.get(f3, set())
+                for f7 in range(128):  # funct7 is 7-bit (0-127)
+                    if f7 not in used_f7:
+                        suggestions.append(f"opcode 0x{op:02X} funct3 0x{f3:X} funct7 0x{f7:02X}")
+                        if len(suggestions) >= 3:
+                            return suggestions
 
     return suggestions

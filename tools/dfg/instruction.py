@@ -353,3 +353,7 @@ class ISARegistry:
         if flow is None:
             return None
         return flow.encoding
+
+    def items(self) -> dict[str, RegisterFlow]:
+        """Return all registered instruction flows as a dictionary."""
+        return self._flows.copy()
