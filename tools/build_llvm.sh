@@ -284,11 +284,11 @@ VECEOF
          -mllvm -riscv-v-vector-bits-min=128 \
          -S "$VEC_SRC" -o "$VEC_ASM" 2>/dev/null; then
         # Check for RVV vector instructions (vadd, vfadd, vle, vse, vsetvli, etc.)
-        if grep -qE '(vfadd|vadd|vle|vse|vl1re|vs1r|vsetivli|vsetvli)[[:space:]]' "$VEC_ASM"; then
+        if grep -qE '(vfadd|vadd|vle|vse|vl1re|vs1r|vsetivli|vsetvli)[.[:space:]]' "$VEC_ASM"; then
             info "RVV auto-vectorization: OK (vector instructions detected)"
         else
             warn "No RVV vector instructions found in assembly output"
-            warn "This may be normal for small loop bodies — review $VEC_ASM manually"
+            warn "This may be normal for small loop bodies — check compiler flags if vectorization is expected"
         fi
     else
         warn "Auto-vectorization test compilation failed"
