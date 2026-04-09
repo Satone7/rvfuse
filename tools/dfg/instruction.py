@@ -26,6 +26,41 @@ class ResolvedFlow:
 
 
 @dataclass
+class InstructionFormat:
+    """RISC-V instruction encoding layout metadata.
+
+    Attributes:
+        format_type: RISC-V instruction format ("R", "I", "S", "B", "U", "J", "R4", "V").
+        opcode: 7-bit opcode value (e.g., 0x33 for OP, 0x53 for OP-FP, 0x57 for OP-V).
+        funct3: 3-bit funct3 value, or None if variable.
+        funct7: 7-bit funct7 value, or None if variable.
+        has_rd: Whether the rd/destination field is present.
+        has_rs1: Whether the rs1 field is present.
+        has_rs2: Whether the rs2 field is present.
+        has_rs3: Whether the rs3 field is present (R4-type only).
+        has_imm: Whether an immediate field is present.
+        imm_bits: Immediate field width in bits (0 if no imm).
+        may_load: Whether the instruction accesses memory (load).
+        may_store: Whether the instruction accesses memory (store).
+        reg_class: Register class ("integer", "float", "vector").
+    """
+
+    format_type: str
+    opcode: int
+    funct3: int | None = None
+    funct7: int | None = None
+    has_rd: bool = True
+    has_rs1: bool = True
+    has_rs2: bool = True
+    has_rs3: bool = False
+    has_imm: bool = False
+    imm_bits: int = 0
+    may_load: bool = False
+    may_store: bool = False
+    reg_class: str = "integer"
+
+
+@dataclass
 class RegisterFlow:
     """Describes which register positions are dst/src for an instruction.
 
@@ -36,6 +71,7 @@ class RegisterFlow:
     dst_regs: list[str]
     src_regs: list[str]
     config_regs: list[str] = field(default_factory=list)
+    encoding: InstructionFormat | None = None
 
     def resolve(self, operands: str) -> ResolvedFlow:
         """Map positional names to actual register names from the operand string."""
@@ -310,3 +346,10 @@ class ISARegistry:
     def is_known(self, mnemonic: str) -> bool:
         """Check if a mnemonic is registered."""
         return mnemonic in self._flows
+
+    def get_encoding(self, mnemonic: str) -> InstructionFormat | None:
+        """Get encoding format for a mnemonic, or None if unknown or not set."""
+        flow = self._flows.get(mnemonic)
+        if flow is None:
+            return None
+        return flow.encoding
