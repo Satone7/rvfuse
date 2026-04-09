@@ -71,9 +71,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        required=True,
+        required=False,
+        default=None,
         type=Path,
-        help="Output path for pattern catalog JSON",
+        help="Output path for pattern catalog JSON (required for discover and score)",
     )
     parser.add_argument(
         "--top",
@@ -155,7 +156,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "validate":
         if args.opcode is None:
-            parser.error("--opcode is required for validate command")
+            sys.exit("--opcode is required for validate command")
 
         from fusion.scheme_validator import validate_encoding
         import json
@@ -179,9 +180,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "score":
         if not args.catalog:
-            parser.error("--catalog is required for score command")
+            sys.exit("--catalog is required for score command")
         if not args.output:
-            parser.error("--output is required for score command")
+            sys.exit("--output is required for score command")
 
         from fusion.scorer import score as run_score
 
@@ -214,9 +215,11 @@ def main(argv: list[str] | None = None) -> None:
 
     # Validate discover-specific arguments
     if not args.dfg_dir:
-        parser.error("--dfg-dir is required for discover command")
+        sys.exit("--dfg-dir is required for discover command")
     if not args.report:
-        parser.error("--report is required for discover command")
+        sys.exit("--report is required for discover command")
+    if not args.output:
+        sys.exit("--output is required for discover command")
 
     patterns = mine(
         dfg_dir=args.dfg_dir,
