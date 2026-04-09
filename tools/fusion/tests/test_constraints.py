@@ -273,6 +273,27 @@ class TestNewHardwareConstraints(unittest.TestCase):
         verdict = self.checker.check(pattern)
         self.assertIn("operand_format", verdict.violations)
 
+    def test_operand_format_passes_2src_imm_1dst(self):
+        """Mode B: 2 external sources + immediate + 1 destination should pass."""
+        # Create a custom instruction with exactly 2 sources + immediate + 1 destination
+        registry = ISARegistry()
+        # custom.ld: reads from rs1 and rs2, writes to rd, has immediate
+        # This matches Mode B: 2 external sources + 1 dst + immediate
+        registry.register("custom.ld", RegisterFlow(["rd"], ["rs1", "rs2"],
+            encoding=InstructionFormat("I", 0x13, 0x0, has_imm=True, reg_class="integer")))
+
+        config = ConstraintConfig.defaults()
+        for name in config.enabled:
+            config.enabled[name] = False
+        config.enabled["operand_format"] = True
+        checker = ConstraintChecker(registry, config=config)
+
+        pattern = {"opcodes": ["custom.ld"], "register_class": "integer",
+                   "chain_registers": []}
+        verdict = checker.check(pattern)
+        # custom.ld: 2 src (rs1, rs2), 1 dst (rd), has imm -> Mode B satisfied
+        self.assertNotIn("operand_format", verdict.violations)
+
     def test_operand_format_detects_mismatch(self):
         # fadd.s + fmul.s: each has 2 sources + 1 destination
         # Chain passes frd -> frs1, so external: frs2 from both = 2 sources
