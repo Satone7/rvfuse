@@ -51,3 +51,54 @@ check_prerequisites() {
 }
 
 check_prerequisites
+
+# --- Step 1: Extract riscv64 sysroot ---
+extract_sysroot() {
+    local sysroot="${OUTPUT_DIR}/sysroot"
+
+    if [[ "${SKIP_SYSROOT}" == "true" && -d "${sysroot}/usr" ]]; then
+        info "Skipping sysroot extraction (--skip-sysroot)"
+        return 0
+    fi
+
+    if [[ "${FORCE}" != "true" && -d "${sysroot}/usr" ]]; then
+        info "Sysroot already exists at ${sysroot}. Use --force to re-extract."
+        return 0
+    fi
+
+    info "Extracting riscv64 sysroot from riscv64/ubuntu:22.04..."
+    rm -rf "${sysroot}"
+    mkdir -p "${sysroot}"
+
+    local tmp_container="rvfuse-sysroot-prep-$$"
+
+    docker run --name "${tmp_container}" -d riscv64/ubuntu:22.04 tail -f /dev/null > /dev/null
+    trap "docker rm -f ${tmp_container} 2>/dev/null || true" RETURN
+
+    docker exec "${tmp_container}" apt-get update -qq
+    docker exec "${tmp_container}" apt-get install -y --no-install-recommends -qq \
+        libc6-dev \
+        libstdc++-dev \
+        libgcc-s-dev \
+        libprotobuf-dev \
+        libabsl-dev \
+        > /dev/null
+
+    info "Copying sysroot directories from container..."
+
+    docker cp "${tmp_container}:/lib"          "${sysroot}/lib"
+    docker cp "${tmp_container}:/usr/lib"      "${sysroot}/usr_lib_tmp"
+    docker cp "${tmp_container}:/usr/include"  "${sysroot}/usr_include_tmp"
+
+    docker rm -f "${tmp_container}" > /dev/null
+    trap - RETURN
+
+    mkdir -p "${sysroot}/usr"
+    mv "${sysroot}/usr_lib_tmp"     "${sysroot}/usr/lib"
+    mv "${sysroot}/usr_include_tmp" "${sysroot}/usr/include"
+
+    info "Sysroot extracted to ${sysroot}"
+    echo "  $(du -sh "${sysroot}" | cut -f1)"
+}
+
+extract_sysroot
