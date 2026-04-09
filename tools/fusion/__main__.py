@@ -3,6 +3,7 @@
 Usage:
     python -m tools.fusion discover --dfg-dir <dir> --report <json> --output <json>
     python -m tools.fusion score --catalog <json> --output <json>
+    python -m tools.fusion validate --opcode N --funct3 M --funct7 K --reg-class X
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        choices=["discover", "score"],
+        choices=["discover", "score", "validate"],
         help="Command to run",
     )
     parser.add_argument(
@@ -115,6 +116,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--opcode",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Opcode value (hex or decimal, required for validate)",
+    )
+    parser.add_argument(
+        "--funct3",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Funct3 value (hex or decimal, optional)",
+    )
+    parser.add_argument(
+        "--funct7",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Funct7 value (hex or decimal, optional)",
+    )
+    parser.add_argument(
+        "--reg-class",
+        choices=["integer", "float", "vector"],
+        default="integer",
+        help="Register class for the pattern (default: integer)",
+    )
     return parser.parse_args(argv)
 
 
@@ -127,6 +152,30 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     registry = load_isa_registry(args.isa)
+
+    if args.command == "validate":
+        if args.opcode is None:
+            parser.error("--opcode is required for validate command")
+
+        from fusion.scheme_validator import validate_encoding
+        import json
+
+        result = validate_encoding(
+            opcode=args.opcode,
+            funct3=args.funct3,
+            funct7=args.funct7,
+            reg_class=args.reg_class,
+            registry=registry,
+        )
+
+        output = {
+            "passed": result.passed,
+            "conflicts": result.conflicts,
+            "warnings": result.warnings,
+            "suggested_alternatives": result.suggested_alternatives,
+        }
+        print(json.dumps(output, indent=2))
+        return
 
     if args.command == "score":
         if not args.catalog:
