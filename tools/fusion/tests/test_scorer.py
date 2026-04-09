@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from dfg.instruction import ISARegistry, InstructionFormat, RegisterFlow
-from fusion.constraints import ConstraintChecker, Verdict
+from fusion.constraints import ConstraintChecker, ConstraintConfig, Verdict
 from fusion.scorer import Scorer, DEFAULT_WEIGHTS
 
 
@@ -154,3 +154,30 @@ class TestScorePatterns(unittest.TestCase):
         results = self.scorer.score_patterns(patterns, min_score=0.1)
         statuses = [r["hardware"]["status"] for r in results]
         self.assertNotIn("infeasible", statuses)
+
+
+class TestScorerWithConfig(unittest.TestCase):
+    def test_scorer_accepts_config(self):
+        registry = _make_registry()
+        config = ConstraintConfig.defaults()
+        scorer = Scorer(registry, max_frequency=100000, config=config)
+        self.assertIsNotNone(scorer._checker)
+        self.assertEqual(scorer._checker._config, config)
+
+    def test_scorer_default_config(self):
+        registry = _make_registry()
+        scorer = Scorer(registry, max_frequency=100000)
+        self.assertIsNotNone(scorer._checker._config)
+        self.assertTrue(scorer._checker.is_enabled("encoding_32bit"))
+
+    def test_scorer_custom_config_affects_score(self):
+        registry = _make_registry()
+        # All constraints disabled
+        config = ConstraintConfig(enabled={name: False for name in ConstraintConfig.ALL_CONSTRAINTS})
+        scorer = Scorer(registry, max_frequency=100000, config=config)
+        pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]], "total_frequency": 50000,
+                   "occurrence_count": 10}
+        result = scorer.score_pattern(pattern)
+        # With all constraints disabled, should have hw_score = 1.0 (feasible)
+        self.assertEqual(result["score_breakdown"]["hw_score"], 1.0)
