@@ -143,8 +143,9 @@ realistically be fused in silicon.
 
 ## Feature 3: Fusion Scheme Specification Agent Skill
 
-**Status**: Not started
-**Design doc**: TBD (`docs/plans/2026-04-XX-fusion-scheme-skill-design.md`)
+**Status**: Completed
+**Design doc**: `docs/plans/2026-04-09-fusion-scheme-skill-design.md`
+**Implementation plan**: `docs/plans/2026-04-09-fusion-scheme-skill-plan.md`
 **Branch prefix**: `worktree-fusion-scheme`
 
 ### Goal

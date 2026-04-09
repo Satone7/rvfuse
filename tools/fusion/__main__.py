@@ -3,6 +3,7 @@
 Usage:
     python -m tools.fusion discover --dfg-dir <dir> --report <json> --output <json>
     python -m tools.fusion score --catalog <json> --output <json>
+    python -m tools.fusion validate --opcode N --funct3 M --funct7 K --reg-class X
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        choices=["discover", "score"],
+        choices=["discover", "score", "validate"],
         help="Command to run",
     )
     parser.add_argument(
@@ -70,9 +71,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        required=True,
+        required=False,
+        default=None,
         type=Path,
-        help="Output path for pattern catalog JSON",
+        help="Output path for pattern catalog JSON (required for discover and score)",
     )
     parser.add_argument(
         "--top",
@@ -115,6 +117,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--opcode",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Opcode value (hex or decimal, required for validate)",
+    )
+    parser.add_argument(
+        "--funct3",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Funct3 value (hex or decimal, optional)",
+    )
+    parser.add_argument(
+        "--funct7",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="Funct7 value (hex or decimal, optional)",
+    )
+    parser.add_argument(
+        "--reg-class",
+        choices=["integer", "float", "vector"],
+        default="integer",
+        help="Register class for the pattern (default: integer)",
+    )
     return parser.parse_args(argv)
 
 
@@ -128,11 +154,37 @@ def main(argv: list[str] | None = None) -> None:
 
     registry = load_isa_registry(args.isa)
 
+    if args.command == "validate":
+        if args.opcode is None:
+            print("Usage error: --opcode is required for validate command", file=sys.stderr)
+            print("Run 'python -m tools.fusion validate --help' for usage.", file=sys.stderr)
+            sys.exit(2)
+
+        from fusion.scheme_validator import validate_encoding
+        import json
+
+        result = validate_encoding(
+            opcode=args.opcode,
+            funct3=args.funct3,
+            funct7=args.funct7,
+            reg_class=args.reg_class,
+            registry=registry,
+        )
+
+        output = {
+            "passed": result.passed,
+            "conflicts": result.conflicts,
+            "warnings": result.warnings,
+            "suggested_alternatives": result.suggested_alternatives,
+        }
+        print(json.dumps(output, indent=2))
+        return
+
     if args.command == "score":
         if not args.catalog:
-            parser.error("--catalog is required for score command")
+            sys.exit("--catalog is required for score command")
         if not args.output:
-            parser.error("--output is required for score command")
+            sys.exit("--output is required for score command")
 
         from fusion.scorer import score as run_score
 
@@ -165,9 +217,11 @@ def main(argv: list[str] | None = None) -> None:
 
     # Validate discover-specific arguments
     if not args.dfg_dir:
-        parser.error("--dfg-dir is required for discover command")
+        sys.exit("--dfg-dir is required for discover command")
     if not args.report:
-        parser.error("--report is required for discover command")
+        sys.exit("--report is required for discover command")
+    if not args.output:
+        sys.exit("--output is required for discover command")
 
     patterns = mine(
         dfg_dir=args.dfg_dir,
