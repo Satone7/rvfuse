@@ -308,3 +308,48 @@ class TestNewHardwareConstraints(unittest.TestCase):
                    "chain_registers": [["frd", "frs1"]]}
         verdict = self.checker.check(pattern)
         self.assertNotIn("datatype_encoding_space", verdict.violations)
+
+
+class TestConstraintCheckerConfigDriven(unittest.TestCase):
+    """Verify that ConstraintChecker respects ConstraintConfig enabled flags."""
+
+    def setUp(self):
+        self.registry = _make_registry()
+
+    def test_no_constraints_enabled_all_feasible(self):
+        """With all constraints disabled, everything is feasible."""
+        config = ConstraintConfig(enabled={name: False for name in ConstraintConfig.ALL_CONSTRAINTS})
+        checker = ConstraintChecker(self.registry, config=config)
+        pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]]}
+        verdict = checker.check(pattern)
+        self.assertEqual(verdict.status, "feasible")
+
+    def test_selectively_enable_no_load_store(self):
+        """Only no_load_store enabled -> load chain is infeasible."""
+        config = ConstraintConfig(enabled={name: False for name in ConstraintConfig.ALL_CONSTRAINTS})
+        config.enabled["no_load_store"] = True
+        checker = ConstraintChecker(self.registry, config=config)
+        pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]]}
+        verdict = checker.check(pattern)
+        self.assertEqual(verdict.status, "infeasible")
+        self.assertIn("no_load_store", verdict.violations)
+
+    def test_selectively_enable_has_immediate(self):
+        """Only has_immediate enabled -> addi chain is constrained."""
+        config = ConstraintConfig(enabled={name: False for name in ConstraintConfig.ALL_CONSTRAINTS})
+        config.enabled["has_immediate"] = True
+        checker = ConstraintChecker(self.registry, config=config)
+        pattern = {"opcodes": ["addi", "add"], "register_class": "integer",
+                   "chain_registers": [["rd", "rs1"]]}
+        verdict = checker.check(pattern)
+        self.assertEqual(verdict.status, "constrained")
+        self.assertIn("has_immediate", verdict.violations)
+
+    def test_is_enabled_helper(self):
+        config = ConstraintConfig(enabled={"no_load_store": True, "has_immediate": False})
+        checker = ConstraintChecker(self.registry, config=config)
+        self.assertTrue(checker.is_enabled("no_load_store"))
+        self.assertFalse(checker.is_enabled("has_immediate"))
+        self.assertFalse(checker.is_enabled("nonexistent"))

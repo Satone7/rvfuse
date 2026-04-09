@@ -124,6 +124,10 @@ class ConstraintChecker:
         self._registry = registry
         self._config = config if config is not None else ConstraintConfig.defaults()
 
+    def is_enabled(self, name: str) -> bool:
+        """Check whether a constraint is currently enabled."""
+        return self._config.enabled.get(name, False)
+
     def _get_flows(self, opcodes: list[str]) -> list["RegisterFlow | None"]:
         """Get RegisterFlow for all opcodes."""
         return [self._registry.get_flow(op) for op in opcodes]
@@ -254,7 +258,6 @@ class ConstraintChecker:
         reasons: list[str] = []
         hard_violations: list[str] = []
         soft_violations: list[str] = []
-        enabled = self._config.enabled
 
         # --- Look up encodings, check for unknown instructions ----------
         encodings: list = []
@@ -262,7 +265,7 @@ class ConstraintChecker:
         for opcode in opcodes:
             flow = self._registry.get_flow(opcode)
             if flow is None:
-                if enabled.get("unknown_instruction", False):
+                if self.is_enabled("unknown_instruction"):
                     hard_violations.append("unknown_instruction")
                     reasons.append(f"unknown instruction: {opcode}")
                 encodings.append(None)
@@ -271,7 +274,7 @@ class ConstraintChecker:
             flows.append(flow)
             enc = flow.encoding
             encodings.append(enc)
-            if enc is None and enabled.get("missing_encoding", False):
+            if enc is None and self.is_enabled("missing_encoding"):
                 soft_violations.append("missing_encoding")
                 reasons.append(f"missing encoding metadata for: {opcode}")
 
@@ -280,7 +283,7 @@ class ConstraintChecker:
             return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
 
         # --- Check register class compatibility --------------------------------
-        if enabled.get("register_class_mismatch", False):
+        if self.is_enabled("register_class_mismatch"):
             for i, enc in enumerate(encodings):
                 if enc is not None and enc.reg_class != reg_class:
                     hard_violations.append("register_class_mismatch")
@@ -290,7 +293,7 @@ class ConstraintChecker:
                     break  # one is enough
 
         # --- Check for loads/stores -------------------------------------------
-        if enabled.get("no_load_store", False):
+        if self.is_enabled("no_load_store"):
             for i, enc in enumerate(encodings):
                 if enc is not None and (enc.may_load or enc.may_store):
                     kind = "load" if enc.may_load else "store"
@@ -299,7 +302,7 @@ class ConstraintChecker:
                     break
 
         # --- Check for config-register writes (e.g. vsetvli) ------------------
-        if enabled.get("no_config_write", False):
+        if self.is_enabled("no_config_write"):
             for i, flow in enumerate(flows):
                 if flow is None:
                     continue
@@ -316,19 +319,19 @@ class ConstraintChecker:
                     break
 
         # --- New hardware-team constraint checks -------------------------------
-        if enabled.get("encoding_32bit", False):
+        if self.is_enabled("encoding_32bit"):
             result = self._check_encoding_32bit(pattern)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
 
-        if enabled.get("operand_format", False):
+        if self.is_enabled("operand_format"):
             result = self._check_operand_format(pattern)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
 
-        if enabled.get("datatype_encoding_space", False):
+        if self.is_enabled("datatype_encoding_space"):
             result = self._check_datatype_encoding_space(pattern)
             if result is not None:
                 hard_violations.append(result[0])
@@ -339,7 +342,7 @@ class ConstraintChecker:
             return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
 
         # --- Count total unique dst and src operand fields across chain --------
-        if enabled.get("too_many_destinations", False) or enabled.get("too_many_sources", False):
+        if self.is_enabled("too_many_destinations") or self.is_enabled("too_many_sources"):
             all_dst_fields: set[str] = set()
             all_src_fields: set[str] = set()
             for flow in flows:
@@ -351,10 +354,10 @@ class ConstraintChecker:
             num_dst = len(all_dst_fields)
             num_src = len(all_src_fields)
 
-            if num_dst > 1 and enabled.get("too_many_destinations", False):
+            if num_dst > 1 and self.is_enabled("too_many_destinations"):
                 hard_violations.append("too_many_destinations")
                 reasons.append(f"chain has {num_dst} unique destination fields (max 1)")
-            if num_src > 3 and enabled.get("too_many_sources", False):
+            if num_src > 3 and self.is_enabled("too_many_sources"):
                 hard_violations.append("too_many_sources")
                 reasons.append(f"chain has {num_src} unique source fields (max 3)")
 
@@ -362,7 +365,7 @@ class ConstraintChecker:
             return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
 
         # --- Check for immediates (soft) --------------------------------------
-        if enabled.get("has_immediate", False):
+        if self.is_enabled("has_immediate"):
             for i, enc in enumerate(encodings):
                 if enc is not None and enc.has_imm:
                     soft_violations.append("has_immediate")
