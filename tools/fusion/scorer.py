@@ -12,6 +12,7 @@ The final score is the weighted sum of the three sub-scores and lies in
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ from typing import Any
 
 from dfg.instruction import ISARegistry
 from fusion.constraints import ConstraintChecker, Verdict
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Defaults

@@ -85,8 +85,9 @@ execution frequency.
 
 ## Feature 2: Fusion Candidate Scoring & Hardware Constraint Model
 
-**Status**: Not started
-**Design doc**: TBD (`docs/plans/2026-04-XX-fusion-scoring-design.md`)
+**Status**: Completed
+**Design doc**: `docs/plans/2026-04-09-fusion-scoring-design.md`
+**Implementation plan**: `docs/plans/2026-04-09-fusion-scoring-plan.md`
 **Branch prefix**: `worktree-fusion-scoring`
 
 ### Goal
