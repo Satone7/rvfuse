@@ -101,4 +101,111 @@ extract_sysroot() {
     echo "  $(du -sh "${sysroot}" | cut -f1)"
 }
 
+
+# --- Step 2: Build cross-compilation Docker image ---
+build_image() {
+    info "Building cross-compilation Docker image..."
+    DOCKER_BUILDKIT=1 docker build \
+        -t "${DOCKER_IMAGE}" \
+        -f "${SCRIPT_DIR}/Dockerfile" \
+        "${SCRIPT_DIR}"
+    info "Docker image built: ${DOCKER_IMAGE}"
+}
+
+# --- Step 3: Cross-compile ONNX Runtime ---
+cross_compile() {
+    local ort_build="${OUTPUT_DIR}/.build"
+    local ort_install="${OUTPUT_DIR}/onnxruntime"
+
+    if [[ "${FORCE}" != "true" && -d "${ort_install}/lib" ]]; then
+        info "ORT already built at ${ort_install}. Use --force to rebuild."
+        return 0
+    fi
+
+    info "Cross-compiling ONNX Runtime (full build)..."
+    mkdir -p "${ort_build}" "${ort_install}"
+
+    docker run --rm \
+        -v "${LLVM_INSTALL}:/llvm-install:ro" \
+        -v "${ORT_SOURCE}:/onnxruntime:ro" \
+        -v "${EIGEN_SOURCE}:/eigen:ro" \
+        -v "${OUTPUT_DIR}/sysroot:/sysroot:ro" \
+        -v "${ort_build}:/build" \
+        -v "${ort_install}:/install" \
+        -v "${SCRIPT_DIR}/riscv64-linux-clang13.cmake:/toolchain.cmake:ro" \
+        -e LLVM_INSTALL=/llvm-install \
+        -e SYSROOT=/sysroot \
+        -w /build \
+        "${DOCKER_IMAGE}" \
+        bash -c "
+            cmake /onnxruntime/cmake \
+                -DCMAKE_TOOLCHAIN_FILE=/toolchain.cmake \
+                -DCMAKE_INSTALL_PREFIX=/install \
+                -DCMAKE_BUILD_TYPE=Release \
+                -Donnxruntime_BUILD_SHARED_LIB=ON \
+                -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+                -Donnxruntime_DISABLE_RTTI=ON \
+                -DFETCHCONTENT_SOURCE_DIR_EIGEN=/eigen \
+                -DCMAKE_CXX_FLAGS='-Wno-stringop-overflow' \
+                -G Ninja \
+            && ninja -j${JOBS} \
+            && ninja install/strip
+        "
+
+    info "ONNX Runtime cross-compiled to ${ort_install}"
+}
+
+# --- Step 4: Build YOLO runner ---
+build_yolo_runner() {
+    local ort_install="${OUTPUT_DIR}/onnxruntime"
+    local runner_out="${OUTPUT_DIR}/yolo_inference"
+
+    if [[ "${FORCE}" != "true" && -f "${runner_out}" ]]; then
+        info "YOLO runner already built. Use --force to rebuild."
+        return 0
+    fi
+
+    info "Cross-compiling YOLO runner..."
+
+    docker run --rm \
+        -v "${LLVM_INSTALL}:/llvm-install:ro" \
+        -v "${ORT_SOURCE}:/onnxruntime:ro" \
+        -v "${YOLO_RUNNER}:/runner:ro" \
+        -v "${OUTPUT_DIR}/sysroot:/sysroot:ro" \
+        -v "${ort_install}:/onnxruntime-install:ro" \
+        -v "$(dirname "${runner_out}"):/out" \
+        -e LLVM_INSTALL=/llvm-install \
+        -e SYSROOT=/sysroot \
+        "${DOCKER_IMAGE}" \
+        bash -c "
+            /llvm-install/bin/clang++-13 \
+                --target=riscv64-unknown-linux-gnu \
+                --sysroot=/sysroot \
+                -std=c++17 -O2 -g \
+                -I/onnxruntime-install/include \
+                -I/onnxruntime-install/include/onnxruntime/core/session \
+                -I/runner \
+                /runner/yolo_runner.cpp \
+                -o /out/yolo_inference \
+                -L/onnxruntime-install/lib \
+                -lonnxruntime \
+                -Wl,-rpath,'\$ORIGIN/../onnxruntime/lib'
+        "
+
+    info "YOLO runner built: ${runner_out}"
+}
+
+# --- Main flow ---
 extract_sysroot
+build_image
+cross_compile
+build_yolo_runner
+
+info "All done!"
+echo ""
+echo "Artifacts:"
+echo "  ORT:       ${OUTPUT_DIR}/onnxruntime/"
+echo "  Runner:    ${OUTPUT_DIR}/yolo_inference"
+echo "  Sysroot:   ${OUTPUT_DIR}/sysroot/"
+echo ""
+file "${OUTPUT_DIR}/yolo_inference" || true
