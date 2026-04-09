@@ -17,9 +17,9 @@ REPORT_FILE="setup-report.txt"
 readonly MIN_DISK_GB=20
 readonly MIN_GIT_VERSION_MAJOR=2
 readonly MIN_GIT_VERSION_MINOR=30
-readonly TOTAL_STEPS=8  # Steps 0-7
+readonly TOTAL_STEPS=9  # Steps 0-8
 
-# Step names (indexed 0-7)
+# Step names (indexed 0-8)
 readonly -A STEP_NAMES=(
     [0]="Init Submodules"
     [1]="Prepare Model"
@@ -29,6 +29,7 @@ readonly -A STEP_NAMES=(
     [5]="Hotspot Report"
     [6]="DFG Generation"
     [7]="Generate Report"
+    [8]="Fusion Pipeline"
 )
 
 # Step artifact paths (relative to PROJECT_ROOT)
@@ -59,6 +60,10 @@ readonly -a STEP5_ARTIFACTS=(
 )
 # Step 6 (DFG Generation): non-empty output/dfg/ directory — checked specially
 readonly -a STEP7_ARTIFACTS=()  # always runs
+# Step 8 (Fusion Pipeline): fusion_candidates.json
+readonly -a STEP8_ARTIFACTS=(
+    "output/fusion_candidates.json"
+)
 
 # --- Global state ---
 
@@ -105,7 +110,7 @@ Options:
                           Step IDs:
                             0=Init Submodules  1=Prepare Model  2=Build QEMU
                             3=YOLO Build       4=BBV Profiling  5=Hotspot Report
-                            6=DFG Generation   7=Generate Report
+                            6=DFG Generation   7=Generate Report  8=Fusion Pipeline
   --force-all           Re-execute all steps from scratch (deletes artifacts)
   --shallow             Use --depth 1 for submodule clones (Step 0)
   --bbv-interval <N>    BBV sampling interval for Step 4 (default: 100000)
@@ -129,15 +134,15 @@ parse_args() {
                 local force_val="${args[$i]}"
                 IFS=',' read -ra force_nums <<< "$force_val"
                 for num in "${force_nums[@]}"; do
-                    if ! [[ "$num" =~ ^[0-7]$ ]]; then
-                        log_error "Invalid step number: $num (must be 0-7)"
+                    if ! [[ "$num" =~ ^[0-8]$ ]]; then
+                        log_error "Invalid step number: $num (must be 0-8)"
                         return 1
                     fi
                     FORCE_STEPS+=("$num")
                 done
                 ;;
             --force-all)
-                FORCE_STEPS=(0 1 2 3 4 5 6 7)
+                FORCE_STEPS=(0 1 2 3 4 5 6 7 8)
                 ;;
             --shallow)
                 SHALLOW_CLONE=1
@@ -372,6 +377,7 @@ get_artifact_names() {
         5) echo "STEP5_ARTIFACTS" ;;
         6) echo "__dfg__" ;;          # special dir check
         7) echo "STEP7_ARTIFACTS" ;;
+        8) echo "STEP8_ARTIFACTS" ;;
     esac
 }
 
@@ -432,6 +438,12 @@ cleanup_step() {
             ;;
         7)
             # No cleanup for report step
+            ;;
+        8)
+            log_info "Cleaning Step 8 artifacts (fusion output)..."
+            rm -f "${PROJECT_ROOT}/output/fusion_patterns.json"
+            rm -f "${PROJECT_ROOT}/output/fusion_candidates.json"
+            rm -rf "${PROJECT_ROOT}/output/fusion_schemes"
             ;;
     esac
 }
@@ -704,7 +716,7 @@ step7_report() {
         echo "Options: ${SCRIPT_OPTIONS}"
         echo ""
 
-        for i in 0 1 2 3 4 5 6 7; do
+        for i in 0 1 2 3 4 5 6 8; do
             local status="${STEP_STATUS[$i]:-UNKNOWN}"
             local message="${STEP_MESSAGE[$i]:-}"
             local step_line="Step ${i}: ${STEP_NAMES[$i]}"
@@ -726,6 +738,12 @@ step7_report() {
             fi
         done
 
+        # Step 7 (this step) - we know status is PASS if we reach here writing the report
+        local step7_line="Step 7: ${STEP_NAMES[7]}"
+        local padded7
+        padded7="$(printf '%-36s' "$step7_line")"
+        echo "${padded7}[PASS]   report written to ${REPORT_FILE}"
+
         echo ""
         echo "Overall: ${overall}"
     } > "$report_path" || true  # || true prevents set -e from exiting before file check
@@ -740,11 +758,77 @@ step7_report() {
 }
 
 # =============================================================================
+# Step 8: Fusion Pipeline (F1 + F2)
+# =============================================================================
+
+step8_fusion_pipeline() {
+    local step=8
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+
+    local dfg_dir="${PROJECT_ROOT}/output/dfg/json"
+    local hotspot_json="${PROJECT_ROOT}/output/hotspot.json"
+    local patterns_json="${PROJECT_ROOT}/output/fusion_patterns.json"
+    local candidates_json="${PROJECT_ROOT}/output/fusion_candidates.json"
+
+    # Verify dependencies from earlier steps
+    if [[ ! -d "$dfg_dir" ]]; then
+        record_step_result "$step" "FAIL" "output/dfg/json not found — run Step 6 first"
+        return 1
+    fi
+    if [[ ! -f "$hotspot_json" ]]; then
+        record_step_result "$step" "FAIL" "output/hotspot.json not found — run Step 5 first"
+        return 1
+    fi
+
+    # F1: Discover fusion patterns
+    log_info "  Running F1: Pattern Mining..."
+    if ! python3 -m tools.fusion discover \
+        --dfg-dir "$dfg_dir" \
+        --report "$hotspot_json" \
+        --output "$patterns_json" \
+        --no-agent \
+        --top "$TOP_N" \
+        2>&1; then
+        record_step_result "$step" "FAIL" "F1 discover exited with error"
+        return 1
+    fi
+
+    if [[ ! -f "$patterns_json" ]]; then
+        record_step_result "$step" "FAIL" "fusion_patterns.json not created"
+        return 1
+    fi
+
+    # F2: Score and rank candidates
+    log_info "  Running F2: Scoring & Constraints..."
+    if ! python3 -m tools.fusion score \
+        --catalog "$patterns_json" \
+        --output "$candidates_json" \
+        --top "$TOP_N" \
+        2>&1; then
+        record_step_result "$step" "FAIL" "F2 score exited with error"
+        return 1
+    fi
+
+    if [[ ! -f "$candidates_json" ]]; then
+        record_step_result "$step" "FAIL" "fusion_candidates.json not created"
+        return 1
+    fi
+
+    # Summary
+    local pattern_count candidate_count
+    pattern_count="$(python3 -c "import json; print(len(json.load(open('${patterns_json}'))['patterns']))")"
+    candidate_count="$(python3 -c "import json; print(len(json.load(open('${candidates_json}'))['candidates']))")"
+
+    record_step_result "$step" "PASS" "${pattern_count} patterns, ${candidate_count} candidates"
+    return 0
+}
+
+# =============================================================================
 # run_setup() — Main Execution Loop
 # =============================================================================
 
 run_setup() {
-    for step_num in 0 1 2 3 4 5 6 7; do
+    for step_num in 0 1 2 3 4 5 6 7 8; do
         # Step 7 always runs (report generation)
         if (( step_num == 7 )); then
             step7_report
@@ -772,6 +856,7 @@ run_setup() {
             4) step4_bbv_profiling ;;
             5) step5_hotspot_report ;;
             6) step6_dfg_generation ;;
+            8) step8_fusion_pipeline ;;
         esac || true
     done
 }
@@ -785,9 +870,9 @@ main() {
 
     run_setup
 
-    # Determine overall exit code (steps 0-6; step 7 is always report)
+    # Determine overall exit code (steps 0-6,8; step 7 is always report)
     local has_fail=0
-    for i in 0 1 2 3 4 5 6; do
+    for i in 0 1 2 3 4 5 6 8; do
         if [[ "${STEP_STATUS[$i]:-}" == "FAIL" ]]; then
             has_fail=1
             break

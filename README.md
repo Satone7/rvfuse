@@ -11,6 +11,23 @@ The current pipeline:
 2. **Profile** — Run the RISC-V binary under QEMU with the BBV (Basic Block Vector) plugin to collect execution counts
 3. **Analyze** — Map hot addresses back to source code and identify fusion opportunities
 4. **Graph** — Generate Data Flow Graphs (DFG) for hot basic blocks to visualize instruction-level dependencies
+5. **Discover** — Mine fusible instruction patterns from DFG data and score candidates by hardware feasibility
+
+### One-command setup
+
+Run the full pipeline (Steps 0-8) with:
+
+```bash
+./setup.sh
+```
+
+Options:
+- `--shallow` — shallow submodule clone
+- `--bbv-interval N` — BBV sampling interval (default: 100000)
+- `--top N` — top N blocks for analysis (default: 20)
+- `--coverage N` — coverage threshold % (default: 80)
+- `--force <steps>` — re-run specific steps (e.g., `--force 4,6,8`)
+- `--force-all` — re-run everything from scratch
 
 ## Prerequisites
 
@@ -194,6 +211,77 @@ Additional options:
   --coverage 80
 ```
 
+### Step 7: Fusion Pattern Discovery and Scoring (Phase 2)
+
+After generating DFGs for hot basic blocks, the fusion pipeline discovers candidate instruction patterns that could benefit from hardware fusion.
+
+#### F1: Pattern Mining
+
+Discover recurring instruction sequences with RAW dependencies:
+
+```bash
+python3 -m tools.fusion discover \
+  --dfg-dir output/dfg/json \
+  --report output/hotspot.json \
+  --output output/fusion_patterns.json \
+  --top 20 \
+  --no-agent
+```
+
+Options:
+- `--dfg-dir` — directory containing DFG JSON files
+- `--report` — BBV hotspot JSON report for frequency weighting
+- `--output` — output path for pattern catalog
+- `--top N` — limit to top N patterns
+- `--no-agent` — skip Claude agent analysis (use pure miner)
+
+Output: `output/fusion_patterns.json` with pattern catalog including opcodes, register class, and BBV-weighted frequency.
+
+#### F2: Scoring & Constraints
+
+Score and rank patterns by hardware feasibility:
+
+```bash
+python3 -m tools.fusion score \
+  --catalog output/fusion_patterns.json \
+  --output output/fusion_candidates.json \
+  --top 10
+```
+
+Options:
+- `--catalog` — F1 output pattern catalog
+- `--output` — ranked candidate list
+- `--min-score 0.5` — filter low-score candidates
+- `--feasibility-only` — only check hardware constraints, skip scoring
+
+Output: `output/fusion_candidates.json` with scored candidates including:
+- `score` — weighted score (frequency × tightness × hardware)
+- `hardware.status` — `feasible`, `constrained`, or `infeasible`
+- `hardware.reasons` — constraint violation explanations
+
+#### F3: Fusion Scheme Generation
+
+Generate encoding schemes for feasible candidates using the fusion-scheme skill:
+
+```bash
+# Invoke the skill (requires Claude Code)
+/fusion-scheme
+```
+
+Provide a candidate JSON excerpt from `output/fusion_candidates.json`. The skill produces:
+- Encoding layout (opcode, funct3, funct7 assignments)
+- Instruction semantics and register flow
+- Constraint compliance checklist
+
+Validate proposed encodings with the CLI:
+
+```bash
+python3 -m tools.fusion validate \
+  --opcode 0x0B --funct3 2 --funct7 0 --reg-class integer
+```
+
+Output: JSON with `passed`, `conflicts`, and `suggested_alternatives` for encoding space conflicts.
+
 ### Typical hotspot findings
 
 The YOLO inference workload shows hotspots concentrated in matrix multiplication kernels — tight loops of `fmadd.s` (fused multiply-add, single-precision) instructions. These are the primary candidates for RISC-V instruction fusion research.
@@ -219,12 +307,21 @@ RVFuse/
 │   │   ├── __main__.py          # CLI entry point
 │   │   ├── filter.py            # Report-driven BB selection (top-N / coverage)
 │   │   └── tests/
+│   ├── fusion/                  # Fusion pattern discovery (Phase 2)
+│   │   ├── __main__.py          # CLI: discover, score, validate
+│   │   ├── miner.py             # F1: Pattern mining engine
+│   │   ├── scorer.py            # F2: Scoring & constraints
+│   │   ├── scheme_validator.py  # F3: Encoding conflict checker
+│   │   └── tests/
 │   ├── analyze_bbv.py           # BBV hotspot report generator (text + JSON)
 │   └── profile_to_dfg.sh        # End-to-end: BBV analysis → selective DFG
 ├── output/                      # Build artifacts and profiling data
 │   ├── yolo_inference           # RISC-V inference binary
 │   ├── yolo11n.ort              # Optimized ORT format model
 │   ├── sysroot/                 # Minimal RISC-V sysroot for QEMU
+│   ├── dfg/                     # DFG JSON/DOT output
+│   ├── fusion_patterns.json     # F1: Pattern catalog
+│   ├── fusion_candidates.json   # F2: Ranked candidates
 │   └── yolo.bbv.0.*             # BBV profiling output
 ├── third_party/
 │   └── qemu/                    # QEMU submodule (riscv64, with BBV plugin)
