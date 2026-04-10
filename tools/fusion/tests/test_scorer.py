@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from dfg.instruction import ISARegistry, InstructionFormat, RegisterFlow
-from fusion.constraints import ConstraintChecker, Verdict
+from fusion.constraints import ConstraintChecker, ConstraintConfig, Verdict
 from fusion.scorer import Scorer, DEFAULT_WEIGHTS
 
 
@@ -39,7 +39,13 @@ def _make_registry() -> ISARegistry:
 
 class TestFreqScore(unittest.TestCase):
     def setUp(self):
-        self.scorer = Scorer(_make_registry(), max_frequency=100000)
+        self.registry = _make_registry()
+        # Disable new hardware constraints for scoring-only tests
+        config = ConstraintConfig.defaults()
+        config.enabled["encoding_32bit"] = False
+        config.enabled["operand_format"] = False
+        config.enabled["datatype_encoding_space"] = False
+        self.scorer = Scorer(self.registry, max_frequency=100000, config=config)
 
     def test_max_frequency_scores_one(self):
         self.assertAlmostEqual(self.scorer._freq_score(100000), 1.0, places=5)
@@ -89,7 +95,13 @@ class TestHwScore(unittest.TestCase):
 
 class TestScorePattern(unittest.TestCase):
     def setUp(self):
-        self.scorer = Scorer(_make_registry(), max_frequency=100000)
+        self.registry = _make_registry()
+        # Disable new hardware constraints for scoring-only tests
+        config = ConstraintConfig.defaults()
+        config.enabled["encoding_32bit"] = False
+        config.enabled["operand_format"] = False
+        config.enabled["datatype_encoding_space"] = False
+        self.scorer = Scorer(self.registry, max_frequency=100000, config=config)
 
     def test_feasible_has_positive_score(self):
         pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",
@@ -101,9 +113,16 @@ class TestScorePattern(unittest.TestCase):
         self.assertIn("hardware", result)
 
     def test_infeasible_zero_hw(self):
+        # This test specifically verifies infeasibility from load-store constraint
+        config = ConstraintConfig.defaults()
+        config.enabled["no_load_store"] = True  # Enable load-store check
+        config.enabled["encoding_32bit"] = False
+        config.enabled["operand_format"] = False
+        config.enabled["datatype_encoding_space"] = False
+        scorer = Scorer(self.registry, max_frequency=100000, config=config)
         pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float",
                    "chain_registers": [["frd", "frs1"]], "total_frequency": 50000, "occurrence_count": 10}
-        result = self.scorer.score_pattern(pattern)
+        result = scorer.score_pattern(pattern)
         self.assertAlmostEqual(result["score_breakdown"]["hw_score"], 0.0)
 
     def test_high_frequency_ranks_higher(self):
@@ -115,8 +134,13 @@ class TestScorePattern(unittest.TestCase):
                           self.scorer.score_pattern(p_low)["score"])
 
     def test_custom_weights(self):
-        scorer = Scorer(_make_registry(), max_frequency=100000,
-                        weights={"frequency": 1.0, "tightness": 0.0, "hardware": 0.0})
+        config = ConstraintConfig.defaults()
+        config.enabled["encoding_32bit"] = False
+        config.enabled["operand_format"] = False
+        config.enabled["datatype_encoding_space"] = False
+        scorer = Scorer(self.registry, max_frequency=100000,
+                        weights={"frequency": 1.0, "tightness": 0.0, "hardware": 0.0},
+                        config=config)
         pattern = {"opcodes": ["fadd.s", "fmul.s"], "register_class": "float",
                    "chain_registers": [["frd", "frs1"]], "total_frequency": 50000, "occurrence_count": 10}
         result = scorer.score_pattern(pattern)
@@ -125,7 +149,13 @@ class TestScorePattern(unittest.TestCase):
 
 class TestScorePatterns(unittest.TestCase):
     def setUp(self):
-        self.scorer = Scorer(_make_registry(), max_frequency=100000)
+        self.registry = _make_registry()
+        # Disable new hardware constraints for scoring-only tests
+        config = ConstraintConfig.defaults()
+        config.enabled["encoding_32bit"] = False
+        config.enabled["operand_format"] = False
+        config.enabled["datatype_encoding_space"] = False
+        self.scorer = Scorer(self.registry, max_frequency=100000, config=config)
 
     def test_batch_sorted_descending(self):
         patterns = [
@@ -154,3 +184,30 @@ class TestScorePatterns(unittest.TestCase):
         results = self.scorer.score_patterns(patterns, min_score=0.1)
         statuses = [r["hardware"]["status"] for r in results]
         self.assertNotIn("infeasible", statuses)
+
+
+class TestScorerWithConfig(unittest.TestCase):
+    def test_scorer_accepts_config(self):
+        registry = _make_registry()
+        config = ConstraintConfig.defaults()
+        scorer = Scorer(registry, max_frequency=100000, config=config)
+        self.assertIsNotNone(scorer._checker)
+        self.assertEqual(scorer._checker._config, config)
+
+    def test_scorer_default_config(self):
+        registry = _make_registry()
+        scorer = Scorer(registry, max_frequency=100000)
+        self.assertIsNotNone(scorer._checker._config)
+        self.assertTrue(scorer._checker.is_enabled("encoding_32bit"))
+
+    def test_scorer_custom_config_affects_score(self):
+        registry = _make_registry()
+        # All constraints disabled
+        config = ConstraintConfig(enabled={name: False for name in ConstraintConfig.ALL_CONSTRAINTS})
+        scorer = Scorer(registry, max_frequency=100000, config=config)
+        pattern = {"opcodes": ["flw", "fmul.s"], "register_class": "float",
+                   "chain_registers": [["frd", "frs1"]], "total_frequency": 50000,
+                   "occurrence_count": 10}
+        result = scorer.score_pattern(pattern)
+        # With all constraints disabled, should have hw_score = 1.0 (feasible)
+        self.assertEqual(result["score_breakdown"]["hw_score"], 1.0)

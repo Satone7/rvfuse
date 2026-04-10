@@ -1,0 +1,15 @@
+{
+  "constraints": {
+    "encoding_32bit": true,
+    "operand_format": true,
+    "datatype_encoding_space": true,
+    "no_load_store": false,
+    "register_class_mismatch": false,
+    "no_config_write": false,
+    "unknown_instruction": false,
+    "too_many_destinations": false,
+    "too_many_sources": false,
+    "has_immediate": false,
+    "missing_encoding": false
+  }
+}

@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dfg.instruction import ISARegistry
 
+from fusion.constraints import ConstraintConfig
 from fusion.miner import mine
 
 
@@ -45,6 +46,31 @@ def load_isa_registry(extensions: str) -> ISARegistry:
     return registry
 
 
+def _build_constraint_config(args: argparse.Namespace) -> ConstraintConfig:
+    """Build ConstraintConfig from CLI args.
+
+    Priority: --enable/disable flags > --constraints-config file > defaults
+    """
+    config = ConstraintConfig.defaults()
+
+    if args.constraints_config:
+        config = ConstraintConfig.from_file(args.constraints_config)
+
+    for name in (args.enable_constraint or []):
+        if name in ConstraintConfig.ALL_CONSTRAINTS:
+            config.enabled[name] = True
+        else:
+            logging.warning("Unknown constraint '%s' in --enable-constraint", name)
+
+    for name in (args.disable_constraint or []):
+        if name in ConstraintConfig.ALL_CONSTRAINTS:
+            config.enabled[name] = False
+        else:
+            logging.warning("Unknown constraint '%s' in --disable-constraint", name)
+
+    return config
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="tools.fusion",
@@ -52,7 +78,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
+        nargs="?",
         choices=["discover", "score", "validate"],
+        default=None,
         help="Command to run",
     )
     parser.add_argument(
@@ -141,6 +169,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="integer",
         help="Register class for the pattern (default: integer)",
     )
+    parser.add_argument(
+        "--constraints-config",
+        type=Path,
+        default=None,
+        help="Path to JSON file with constraint enable/disable config",
+    )
+    parser.add_argument(
+        "--enable-constraint",
+        action="append",
+        default=None,
+        help="Enable a specific constraint (repeatable)",
+    )
+    parser.add_argument(
+        "--disable-constraint",
+        action="append",
+        default=None,
+        help="Disable a specific constraint (repeatable)",
+    )
+    parser.add_argument(
+        "--list-constraints",
+        action="store_true",
+        default=False,
+        help="List all constraints with their default status and descriptions",
+    )
     return parser.parse_args(argv)
 
 
@@ -153,6 +205,21 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     registry = load_isa_registry(args.isa)
+
+    # Handle --list-constraints
+    if args.list_constraints:
+        config = _build_constraint_config(args)
+        print("\nConstraint Configuration:")
+        print("-" * 70)
+        for name, meta in ConstraintConfig.ALL_CONSTRAINTS.items():
+            category, default, desc = meta
+            status = "ON" if config.enabled[name] else "OFF"
+            print(f"{name:30} {category:5} {status:3}  {desc}")
+        print("-" * 70)
+        return
+
+    if args.command is None:
+        sys.exit("error: a command is required (discover, score, validate). Run with --help for usage.")
 
     if args.command == "validate":
         if args.opcode is None:
@@ -188,6 +255,8 @@ def main(argv: list[str] | None = None) -> None:
 
         from fusion.scorer import score as run_score
 
+        config = _build_constraint_config(args)
+
         weights = None
         if args.weight_freq is not None or args.weight_tight is not None or args.weight_hw is not None:
             weights = {
@@ -199,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
         candidates = run_score(
             catalog_path=args.catalog, registry=registry, output_path=args.output,
             top=args.top, min_score=args.min_score, weights=weights,
+            config=config,
             feasibility_only=args.feasibility_only,
         )
 

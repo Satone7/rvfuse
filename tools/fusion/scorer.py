@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from dfg.instruction import ISARegistry
-from fusion.constraints import ConstraintChecker, Verdict
+from fusion.constraints import ConstraintChecker, ConstraintConfig, Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +52,12 @@ class Scorer:
         registry: ISARegistry,
         max_frequency: int = 1,
         weights: dict[str, float] | None = None,
+        config: ConstraintConfig | None = None,
     ) -> None:
         self._registry = registry
         self._max_frequency = max(1, max_frequency)
         self._weights = weights if weights is not None else dict(DEFAULT_WEIGHTS)
-        self._checker = ConstraintChecker(registry)
+        self._checker = ConstraintChecker(registry, config=config)
 
     # -- sub-scores -----------------------------------------------------------
 
@@ -214,6 +215,7 @@ def score(
     top: int | None = None,
     min_score: float = 0.0,
     weights: dict[str, float] | None = None,
+    config: ConstraintConfig | None = None,
     feasibility_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Load a pattern catalog JSON, score all patterns, write results.
@@ -225,6 +227,7 @@ def score(
         top: Keep only the top N patterns.
         min_score: Discard patterns scoring below this threshold.
         weights: Optional custom scoring weights.
+        config: Optional constraint configuration.
         feasibility_only: Only check constraints, skip scoring.
 
     Returns:
@@ -243,7 +246,7 @@ def score(
     max_freq = max(p.get("total_frequency", 0) for p in patterns)
 
     if feasibility_only:
-        checker = ConstraintChecker(registry)
+        checker = ConstraintChecker(registry, config=config)
         results = []
         for p in patterns:
             verdict = checker.check(p)
@@ -269,7 +272,7 @@ def score(
         if top is not None:
             results = results[:top]
     else:
-        scorer = Scorer(registry, max_frequency=max_freq, weights=weights)
+        scorer = Scorer(registry, max_frequency=max_freq, weights=weights, config=config)
         results = scorer.score_patterns(patterns, top=top, min_score=min_score)
 
     if output_path is not None:
