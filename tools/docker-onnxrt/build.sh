@@ -208,6 +208,7 @@ cross_compile_onnxrt() {
                 -DCMAKE_C_FLAGS='-march=${march}' \
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -G Ninja \
+            && sed -i 's/ONNX_UNUSED = \\/ONNX_UNUSED(/g; s/      OpSchema(#name, __FILE__, __LINE__)/      OpSchema(#name, __FILE__, __LINE__))/' /build/_deps/onnx-src/onnx/defs/schema.h \
             && ninja -j${JOBS} \
             && ninja install/strip
         "
