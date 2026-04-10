@@ -16,7 +16,7 @@ DEMO_SRC="${WORKSPACE}/tools/bbv/demo.c"
 DEMO_ELF="${WORKSPACE}/tools/bbv/demo.elf"
 BBV_OUT="${WORKSPACE}/tools/bbv/bbv.out"
 QEMU_BIN="${QEMU_DIR}/build/qemu-riscv64"
-PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/bbv.so"
+PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/libbbv.so"
 CUSTOM_LIBBBV_SO="${WORKSPACE}/tools/bbv/libbbv.so"
 
 echo "========================================"

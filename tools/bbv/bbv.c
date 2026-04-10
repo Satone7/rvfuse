@@ -31,6 +31,22 @@ static FILE *disas_file;
 static struct qemu_plugin_scoreboard *vcpus;
 static uint64_t interval = 100000000;
 
+static void free_bb(void *data)
+{
+    qemu_plugin_scoreboard_free(((Bb *)data)->count);
+    g_free(data);
+}
+
+static qemu_plugin_u64 count_u64(void)
+{
+    return qemu_plugin_scoreboard_u64_in_struct(vcpus, Vcpu, count);
+}
+
+static qemu_plugin_u64 bb_count_u64(Bb *bb)
+{
+    return qemu_plugin_scoreboard_u64(bb->count);
+}
+
 static void plugin_flush(void)
 {
     for (int i = 0; i < qemu_plugin_num_vcpus(); i++) {
@@ -81,22 +97,6 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
         fclose(disas_file);
     }
     qemu_plugin_scoreboard_free(vcpus);
-}
-
-static void free_bb(void *data)
-{
-    qemu_plugin_scoreboard_free(((Bb *)data)->count);
-    g_free(data);
-}
-
-static qemu_plugin_u64 count_u64(void)
-{
-    return qemu_plugin_scoreboard_u64_in_struct(vcpus, Vcpu, count);
-}
-
-static qemu_plugin_u64 bb_count_u64(Bb *bb)
-{
-    return qemu_plugin_scoreboard_u64(bb->count);
 }
 
 static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index)
