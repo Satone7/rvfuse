@@ -208,6 +208,29 @@ class Scorer:
 # CLI helper
 # ---------------------------------------------------------------------------
 
+def _write_results(
+    output_path: str | Path | None,
+    patterns: list[dict],
+    results: list[dict],
+) -> None:
+    """Write scored results to JSON if an output path is provided."""
+    if output_path is None:
+        return
+    from datetime import datetime, timezone
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "source_pattern_count": len(patterns),
+        "candidate_count": len(results),
+        "candidates": results,
+    }
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2)
+        f.write("\n")
+
+
 def score(
     catalog_path: str | Path,
     registry: ISARegistry,
@@ -233,14 +256,16 @@ def score(
     Returns:
         The list of scored result dicts.
     """
-    from datetime import datetime, timezone
-
     catalog_path = Path(catalog_path)
     with open(catalog_path) as f:
         catalog = json.load(f)
 
     patterns = catalog.get("patterns", [])
     if not patterns:
+        results = []
+        if output_path is not None:
+            _write_results(output_path, patterns, results)
+        logger.info("Scored 0 patterns -> 0 candidates")
         return []
 
     max_freq = max(p.get("total_frequency", 0) for p in patterns)
@@ -275,18 +300,7 @@ def score(
         scorer = Scorer(registry, max_frequency=max_freq, weights=weights, config=config)
         results = scorer.score_patterns(patterns, top=top, min_score=min_score)
 
-    if output_path is not None:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output = {
-            "generated": datetime.now(timezone.utc).isoformat(),
-            "source_pattern_count": len(patterns),
-            "candidate_count": len(results),
-            "candidates": results,
-        }
-        with open(output_path, "w") as f:
-            json.dump(output, f, indent=2)
-            f.write("\n")
+    _write_results(output_path, patterns, results)
 
     logger.info(
         "Scored %d patterns -> %d candidates (top=%s, min_score=%s)",
