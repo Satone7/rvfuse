@@ -94,6 +94,82 @@ class TestDefaultRuleVInstructions(unittest.TestCase):
         self.assertEqual(llvm_name_to_mnemonic("VREDSUM_VS"), "vredsum.vs")
 
 
+class TestIExtensionFiltering(unittest.TestCase):
+    """Test _has_extension(entry, 'I') filtering logic."""
+
+    def test_base_instruction_no_predicates_included(self):
+        """A base instruction with no predicates should be included in I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [],
+        }
+        self.assertTrue(_has_extension(entry, "I"))
+
+    def test_isrv64_only_included(self):
+        """An instruction with only IsRV64 should be included in I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "IsRV64"}],
+        }
+        self.assertTrue(_has_extension(entry, "I"))
+
+    def test_hasstdextf_excluded(self):
+        """An instruction with HasStdExtF should be excluded from I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "HasStdExtF"}],
+        }
+        self.assertFalse(_has_extension(entry, "I"))
+
+    def test_hasvinstructions_excluded(self):
+        """An instruction with HasVInstructions should be excluded from I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "HasVInstructions"}],
+        }
+        self.assertFalse(_has_extension(entry, "I"))
+
+
+class TestMZmmulExtension(unittest.TestCase):
+    """Test M_ZMMUL extension predicate."""
+
+    def test_m_zmmul_in_extension_predicates(self):
+        from dfg.gen_isadesc import EXTENSION_PREDICATES
+        self.assertIn("M_ZMMUL", EXTENSION_PREDICATES)
+        self.assertEqual(
+            EXTENSION_PREDICATES["M_ZMMUL"], {"HasStdExtZmmul"}
+        )
+
+
+class TestAnonymousPrefixFiltering(unittest.TestCase):
+    """Test anonymous prefix in SKIP_PREFIXES."""
+
+    def test_anonymous_in_skip_prefixes(self):
+        from dfg.gen_isadesc import SKIP_PREFIXES
+        self.assertIn("anonymous", SKIP_PREFIXES)
+
+    def test_anonymous_name_excluded(self):
+        from dfg.gen_isadesc import _should_include
+        self.assertFalse(_should_include("anonymous_12345"))
+
+    def test_normal_name_included(self):
+        from dfg.gen_isadesc import _should_include
+        self.assertTrue(_should_include("ADD"))
+
+
+class TestIExtensionInPredicates(unittest.TestCase):
+    """Test that I extension is present in EXTENSION_PREDICATES."""
+
+    def test_i_in_extension_predicates(self):
+        from dfg.gen_isadesc import EXTENSION_PREDICATES
+        self.assertIn("I", EXTENSION_PREDICATES)
+        self.assertEqual(EXTENSION_PREDICATES["I"], set())
+
+
 class TestRv64vModule(unittest.TestCase):
     def test_build_registry_loads(self):
         from dfg.instruction import ISARegistry
