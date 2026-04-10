@@ -124,13 +124,11 @@ OPERAND_TO_POSITION: dict[str, str] = {
 # must satisfy.  All listed predicates must be present for an instruction to
 # be included.
 EXTENSION_PREDICATES: dict[str, set[str]] = {
+    "I": set(),  # Base ISA: no required predicates
     "F": {"HasStdExtF"},
     "M": {"HasStdExtM"},
-    "V": {"HasStdExtV"},
-    # Future extensions can be added here:
-    # "D": {"HasStdExtD"},
-    # "C": {"HasStdExtC"},
-    # "A": {"HasStdExtA"},
+    "M_ZMMUL": {"HasStdExtZmmul"},
+    "V": {"HasVInstructions"},
 }
 
 # Instructions that also carry any of these predicates are excluded from the
@@ -138,7 +136,7 @@ EXTENSION_PREDICATES: dict[str, set[str]] = {
 # This prevents F from pulling in vector-FP instructions that are already
 # covered by the V descriptor.
 EXTENSION_EXCLUDED_PREDICATES: dict[str, set[str]] = {
-    "F": {"HasStdExtV"},
+    "F": {"HasVInstructions"},
 }
 
 # LLVM def names that override the exclusion -- these are included even if they
@@ -148,8 +146,10 @@ EXTENSION_EXCLUSION_OVERRIDES: dict[str, set[str]] = {
 }
 
 EXTENSION_REG_CLASS: dict[str, str] = {
+    "I": "integer",
     "F": "float",
     "M": "integer",
+    "M_ZMMUL": "integer",
     "V": "vector",
 }
 
@@ -172,6 +172,27 @@ def _has_extension(entry: dict, ext: str, name: str = "") -> bool:
     pred_names = {p.get("def", "") for p in preds if isinstance(p, dict)}
     if not required.issubset(pred_names):
         return False
+
+    # I extension: must NOT have any extension-specific predicates
+    if ext == "I":
+        _I_EXCLUDE_PREDS = {
+            "HasStdExtF", "HasStdExtD", "HasStdExtM", "HasStdExtZmmul",
+            "HasStdExtV", "HasStdExtC", "HasStdExtA", "HasStdExtB",
+            "HasVInstructions", "HasStdExtZfinx", "HasStdExtZdinx",
+            "HasStdExtZbkb", "HasStdExtZbs", "HasStdExtZba",
+            "HasStdExtZbb", "HasStdExtZbc", "HasStdExtZknd",
+            "HasStdExtZkne", "HasStdExtZknh", "HasStdExtZksed",
+            "HasStdExtZksh", "HasStdExtZfh", "HasStdExtZfhmin",
+            "HasTHeadBa", "HasTHeadBb", "HasTHeadBs", "HasTHeadCMO",
+            "HasTHeadCondMov", "HasTHeadFmIdx", "HasTHeadMac",
+            "HasTHeadMemIdx", "HasTHeadMemPair", "HasTHeadSync",
+            "HasStdExtZcb",
+        }
+        if pred_names & _I_EXCLUDE_PREDS:
+            return False
+        # Also exclude IsRV64-only check: include it, but nothing else
+        if pred_names - {"IsRV64"}:
+            return False
 
     # Exclude instructions that carry predicates from a different extension
     # (e.g. skip vector-FP instructions when generating F descriptor),
@@ -329,6 +350,7 @@ SKIP_PREFIXES = (
     "Pseudo",
     "SDT_",
     "Select_",
+    "anonymous",
 )
 
 

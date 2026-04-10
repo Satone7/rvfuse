@@ -9,7 +9,7 @@ class TestVExtensionPredicate(unittest.TestCase):
         from dfg.gen_isadesc import _has_extension
         entry = {
             "!superclasses": ["Instruction"],
-            "Predicates": [{"def": "HasStdExtV"}],
+            "Predicates": [{"def": "HasVInstructions"}],
         }
         self.assertTrue(_has_extension(entry, "V"))
 
@@ -24,7 +24,7 @@ class TestVExtensionPredicate(unittest.TestCase):
     def test_v_in_extension_predicates(self):
         from dfg.gen_isadesc import EXTENSION_PREDICATES
         self.assertIn("V", EXTENSION_PREDICATES)
-        self.assertEqual(EXTENSION_PREDICATES["V"], {"HasStdExtV"})
+        self.assertEqual(EXTENSION_PREDICATES["V"], {"HasVInstructions"})
 
 
 class TestVShouldInclude(unittest.TestCase):
