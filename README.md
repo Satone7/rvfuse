@@ -100,6 +100,8 @@ After this step:
 ```
 output/
 ├── yolo_inference          # RISC-V ELF binary (dynamically linked, ~1 MB)
+├── yolo_preprocess         # Preprocess test binary (FFmpeg only, no ORT)
+├── yolo_postprocess        # Postprocess test binary (no ORT/FFmpeg)
 ├── yolo11n.ort             # ORT format model
 ├── test.jpg
 └── sysroot/                # Minimal RISC-V sysroot for QEMU
@@ -114,41 +116,50 @@ output/
 
 ### Step 4: Run BBV profiling
 
+Use `--target` to select which binary to profile:
+
 ```bash
+# Inference (default)
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/bbv.so,interval=100000,outfile=output/yolo.bbv \
-  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 1
+  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=100000,outfile=output/yolo.bbv \
+  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 10
+
+# Preprocess (video decode → resize → normalize)
+# Generate test video if not present: ffmpeg -f lavfi -i testsrc=d=5 -vf "scale=640:480" -y output/test_video.mp4
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/bbv_pre \
+  ./output/yolo_preprocess ./output/test_video.mp4 10
+
+# Postprocess (YOLO output parsing → NMS → draw)
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/bbv_post \
+  ./output/yolo_postprocess --synthetic ./output/test.jpg
 ```
 
-Flags:
+Or use the setup orchestrator:
+
+```bash
+./setup.sh --target preprocess
+./setup.sh --target postprocess
+```
+
+**Profiling flags:**
 - `-L output/sysroot` — tells QEMU where to find the RISC-V dynamic linker and shared libraries
 - `-plugin ...,interval=N` — sample basic block vectors every N instructions (lower = more detail, larger output)
-- The trailing `1` — run 1 inference iteration (add more for longer profiling)
 
-Expected output:
-
-```
-Model: ./output/yolo11n.ort
-Image: ./output/test.jpg
-Iterations: 1 (1 warm-up + 0 measured)
-Loading model...
-Preprocessing image...
-Running inference...
-  [1/1] (warm-up)
-Output shape: [1, 84, 8400]
-Top 5 detections:
-  [0] box=(-6.4,11.0,11.1,12.1) conf=34.324 cls=40
-  ...
-Done.
-```
-
-BBV output files generated:
+BBV output files generated (per target):
 
 ```
 output/
-├── yolo.bbv.0.bb      # Basic block execution counts (indexed by BB ID)
-└── yolo.bbv.0.disas    # Disassembly of each basic block (BB ID → address)
+├── yolo.bbv.0.bb       # inference: BBV counts
+├── yolo.bbv.0.disas     # inference: disassembly
+├── bbv_pre.0.bb         # preprocess: BBV counts
+├── bbv_pre.0.disas       # preprocess: disassembly
+├── bbv_post.0.bb        # postprocess: BBV counts
+└── bbv_post.0.disas      # postprocess: disassembly
 ```
 
 ### Step 5: Generate hotspot report
@@ -284,7 +295,42 @@ Output: JSON with `passed`, `conflicts`, and `suggested_alternatives` for encodi
 
 ### Typical hotspot findings
 
-The YOLO inference workload shows hotspots concentrated in matrix multiplication kernels — tight loops of `fmadd.s` (fused multiply-add, single-precision) instructions. These are the primary candidates for RISC-V instruction fusion research.
+**Inference (`--target inference`):** The YOLO inference workload shows hotspots concentrated in matrix multiplication kernels — tight loops of `fmadd.s` (fused multiply-add, single-precision) instructions. These are the primary candidates for RISC-V instruction fusion research.
+
+**Preprocess (`--target preprocess`):** The video decode + resize + normalize workload is dominated by FFmpeg's `sws_scale` (85% of time). Hot instruction patterns include `mulw + addw` (bilinear interpolation MAC, 7.2% of pairs), `add + add` (address calculation), and `lh + lh` / `lw + lw` (pixel data loading). The `fcvt.s.w + fdiv.s` pattern appears in the `/255.0` normalization loop.
+
+**Postprocess (`--target postprocess`):** The YCbCr→RGB color conversion and JPEG decode workload is dominated by `addw + addw` (10%) and `mulw + addw` (7.4%) pairs. The `slliw + addw` pattern (fixed-point multiplication decomposition) and `not + srai + andi` chain (saturation clamp to 0-255) are also prominent. These are the primary candidates for instruction fusion in image post-processing pipelines.
+
+## Test Cases
+
+Three standalone RISC-V binaries are built in Step 3, each testing a different stage of the YOLO pipeline:
+
+| Binary | Stage | Dependencies | Input |
+|--------|-------|-------------|-------|
+| `yolo_inference` | ONNX Runtime inference | ORT + stb_image | `.ort` model + `.jpg` image |
+| `yolo_preprocess` | Video decode → resize → normalize | FFmpeg (libavcodec/libavformat/libswscale) | `.mp4` video |
+| `yolo_postprocess` | YOLO output parse → NMS → draw boxes | stb_image only | `--synthetic` mode or `.bin` output file |
+
+### yolo_preprocess — Video preprocessing pipeline
+
+Tests FFmpeg video decode → RGB conversion → resize to 640×640 → NCHW float32 normalization. No ORT dependency.
+
+```bash
+# Quick test (x86 or RISC-V)
+qemu-riscv64-static -L output/sysroot ./output/yolo_preprocess ./output/test_video.mp4 5
+
+# Output per frame:
+# Frame 1/5: 640x480 → 640x640 | decode 0.00s rgb 0.01s resize 0.01s norm 0.01s
+#   Tensor: shape=[1,3,640,640] min=0.000 max=1.000 mean=0.456
+```
+
+### yolo_postprocess — YOLO output post-processing
+
+Parses YOLO output → NMS → draws detection boxes on the original image → saves as PPM. Uses `--synthetic` mode with hardcoded realistic detections (person, bus, bicycle, car) for drawing verification:
+
+```bash
+qemu-riscv64-static -L output/sysroot ./output/yolo_postprocess --synthetic ./output/test.jpg
+```
 
 ## Project Structure
 
@@ -302,6 +348,8 @@ RVFuse/
 │   │       └── eigen/           # libeigen 3.4.0
 │   ├── yolo_runner/
 │   │   ├── yolo_runner.cpp      # YOLO inference runner (ONNX Runtime C++ API)
+│   │   ├── yolo_preprocess.cpp  # Preprocess test: FFmpeg decode + resize + normalize
+│   │   ├── yolo_postprocess.cpp # Postprocess test: YOLO parse + NMS + draw
 │   │   └── stb_image.h          # Header-only image loader
 │   ├── dfg/                     # Data Flow Graph generation
 │   │   ├── __main__.py          # CLI entry point
