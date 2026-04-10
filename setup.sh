@@ -587,19 +587,30 @@ step4_bbv_profiling() {
     local step=4
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} (target=${TARGET}) ==="
 
-    # Step 4 depends on Step 3 (yolo_inference binary). If Step 3 was skipped
+    # Step 4 depends on Step 3 (target binary). If Step 3 was skipped
     # due to LLVM 22 toolchain adaptation, Step 4 cannot run.
-    if [[ ! -e "${PROJECT_ROOT}/output/yolo_inference" ]]; then
-        log_warn "Step 4 requires yolo_inference from Step 3 — skipped."
-        record_step_result "$step" "SKIP" "depends on Step 3 (ONNX Runtime build)"
+    case "$TARGET" in
+        inference)
+            local required_bin="${PROJECT_ROOT}/output/yolo_inference"
+            local required_msg="depends on Step 3 (ONNX Runtime build)"
+            ;;
+        preprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            required_msg="depends on Step 3 (preprocess build)"
+            ;;
+        postprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            required_msg="depends on Step 3 (postprocess build)"
+            ;;
+    esac
+    if [[ ! -e "$required_bin" ]]; then
+        log_warn "Step 4 requires $(basename "$required_bin") from Step 3 — skipped."
+        record_step_result "$step" "SKIP" "$required_msg"
         return 0
     fi
 
     local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
     local plugin_so="${PROJECT_ROOT}/tools/bbv/libbbv.so"
-    local inference_bin="${PROJECT_ROOT}/output/yolo_inference"
-    local ort_model="${PROJECT_ROOT}/output/yolo11n.ort"
-    local test_image="${PROJECT_ROOT}/output/test.jpg"
     local sysroot="${PROJECT_ROOT}/output/sysroot"
     local bbv_outfile="${PROJECT_ROOT}/output/yolo.bbv"
 
