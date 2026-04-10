@@ -165,6 +165,17 @@ def _has_extension(entry: dict, ext: str, name: str = "") -> bool:
     if not isinstance(superclasses, list) or "Instruction" not in superclasses:
         return False
 
+    # Exclude pseudo instructions (some don't start with "Pseudo" prefix)
+    if "Pseudo" in superclasses or "PseudoInstExpansion" in superclasses:
+        return False
+
+    # Exclude compressed (16-bit) instructions — their Inst array is < 32 bits
+    # and doesn't follow standard RISC-V encoding layout.  Only filter when
+    # the Inst field is actually present (some test fixtures omit it).
+    inst = entry.get("Inst")
+    if isinstance(inst, list) and len(inst) > 0 and len(inst) < 32:
+        return False
+
     preds = entry.get("Predicates", [])
     if not isinstance(preds, list):
         return False
