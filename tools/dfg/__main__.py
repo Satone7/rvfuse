@@ -372,8 +372,8 @@ def load_isa_registry(extensions: str) -> ISARegistry:
     a warning and are skipped.
     """
     registry = ISARegistry()
-    for ext in extensions.split(","):
-        ext = ext.strip().upper()
+    parsed_exts = {e.strip().upper() for e in extensions.split(",")}
+    for ext in parsed_exts:
         if ext in _ISA_MODULES:
             module_path, func_name = _ISA_MODULES[ext]
             mod = importlib.import_module(module_path)
@@ -382,6 +382,13 @@ def load_isa_registry(extensions: str) -> ISARegistry:
             logger.info("Loaded ISA extension: %s (%d mnemonics)", ext, len(registry._flows))
         else:
             logger.warning("Unknown ISA extension '%s' -- skipping", ext)
+
+    # After loading all requested extensions, also load I pseudo-instructions
+    if "I" in parsed_exts:
+        from dfg.isadesc.rv64i_pseudo import build_registry as build_i_pseudo
+        build_i_pseudo(registry)
+        logger.info("Loaded I pseudo-instructions (%d total mnemonics)", len(registry._flows))
+
     return registry
 
 

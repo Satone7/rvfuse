@@ -9,7 +9,7 @@ class TestVExtensionPredicate(unittest.TestCase):
         from dfg.gen_isadesc import _has_extension
         entry = {
             "!superclasses": ["Instruction"],
-            "Predicates": [{"def": "HasStdExtV"}],
+            "Predicates": [{"def": "HasVInstructions"}],
         }
         self.assertTrue(_has_extension(entry, "V"))
 
@@ -24,7 +24,7 @@ class TestVExtensionPredicate(unittest.TestCase):
     def test_v_in_extension_predicates(self):
         from dfg.gen_isadesc import EXTENSION_PREDICATES
         self.assertIn("V", EXTENSION_PREDICATES)
-        self.assertEqual(EXTENSION_PREDICATES["V"], {"HasStdExtV"})
+        self.assertEqual(EXTENSION_PREDICATES["V"], {"HasVInstructions"})
 
 
 class TestVShouldInclude(unittest.TestCase):
@@ -94,6 +94,82 @@ class TestDefaultRuleVInstructions(unittest.TestCase):
         self.assertEqual(llvm_name_to_mnemonic("VREDSUM_VS"), "vredsum.vs")
 
 
+class TestIExtensionFiltering(unittest.TestCase):
+    """Test _has_extension(entry, 'I') filtering logic."""
+
+    def test_base_instruction_no_predicates_included(self):
+        """A base instruction with no predicates should be included in I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [],
+        }
+        self.assertTrue(_has_extension(entry, "I"))
+
+    def test_isrv64_only_included(self):
+        """An instruction with only IsRV64 should be included in I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "IsRV64"}],
+        }
+        self.assertTrue(_has_extension(entry, "I"))
+
+    def test_hasstdextf_excluded(self):
+        """An instruction with HasStdExtF should be excluded from I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "HasStdExtF"}],
+        }
+        self.assertFalse(_has_extension(entry, "I"))
+
+    def test_hasvinstructions_excluded(self):
+        """An instruction with HasVInstructions should be excluded from I."""
+        from dfg.gen_isadesc import _has_extension
+        entry = {
+            "!superclasses": ["Instruction"],
+            "Predicates": [{"def": "HasVInstructions"}],
+        }
+        self.assertFalse(_has_extension(entry, "I"))
+
+
+class TestMZmmulExtension(unittest.TestCase):
+    """Test M_ZMMUL extension predicate."""
+
+    def test_m_zmmul_in_extension_predicates(self):
+        from dfg.gen_isadesc import EXTENSION_PREDICATES
+        self.assertIn("M_ZMMUL", EXTENSION_PREDICATES)
+        self.assertEqual(
+            EXTENSION_PREDICATES["M_ZMMUL"], {"HasStdExtZmmul"}
+        )
+
+
+class TestAnonymousPrefixFiltering(unittest.TestCase):
+    """Test anonymous prefix in SKIP_PREFIXES."""
+
+    def test_anonymous_in_skip_prefixes(self):
+        from dfg.gen_isadesc import SKIP_PREFIXES
+        self.assertIn("anonymous", SKIP_PREFIXES)
+
+    def test_anonymous_name_excluded(self):
+        from dfg.gen_isadesc import _should_include
+        self.assertFalse(_should_include("anonymous_12345"))
+
+    def test_normal_name_included(self):
+        from dfg.gen_isadesc import _should_include
+        self.assertTrue(_should_include("ADD"))
+
+
+class TestIExtensionInPredicates(unittest.TestCase):
+    """Test that I extension is present in EXTENSION_PREDICATES."""
+
+    def test_i_in_extension_predicates(self):
+        from dfg.gen_isadesc import EXTENSION_PREDICATES
+        self.assertIn("I", EXTENSION_PREDICATES)
+        self.assertEqual(EXTENSION_PREDICATES["I"], set())
+
+
 class TestRv64vModule(unittest.TestCase):
     def test_build_registry_loads(self):
         from dfg.instruction import ISARegistry
@@ -114,18 +190,72 @@ class TestRv64vModule(unittest.TestCase):
         self.assertTrue(any("vred" in m for m in reg._flows))
 
     def test_vfmv_f_s_in_both_v_and_f(self):
-        """VFMV_F_S and VFMV_S_F have both HasStdExtV and HasStdExtF
-        predicates, so they appear in both rv64v.py and rv64f.py.  The V
-        descriptor provides the vector-aware flow (tracks VR source/dest),
-        while the F descriptor provides the scalar-float perspective."""
+        """VFMV_F_S and VFMV_S_F have 'no pred' in LLVM 22, so they are not
+        matched by either HasVInstructions or HasStdExtF and no longer appear
+        in either extension."""
         from dfg.instruction import ISARegistry
         from dfg.isadesc.rv64v import build_registry
         from dfg.isadesc.rv64f import build_registry as build_f
         reg_v = ISARegistry()
         build_registry(reg_v)
-        # These are present in the V registry (vector-aware variant)
-        self.assertTrue(reg_v.is_known("vfmv.f.s"))
-        self.assertTrue(reg_v.is_known("vfmv.s.f"))
+        reg_f = ISARegistry()
+        build_f(reg_f)
+        # Neither extension contains these in LLVM 22
+        self.assertFalse(reg_v.is_known("vfmv.f.s"))
+        self.assertFalse(reg_v.is_known("vfmv.s.f"))
+        self.assertFalse(reg_f.is_known("vfmv.f.s"))
+        self.assertFalse(reg_f.is_known("vfmv.s.f"))
+
+
+class TestOpcodeExtraction(unittest.TestCase):
+    """Verify opcodes are extracted from Inst field, not missing Opcode field."""
+
+    def test_rv64i_add_opcode(self):
+        """ADD should have opcode 0x33, not 0x00."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        for mnemonic, flow in ALL_RV64I:
+            if mnemonic == "add":
+                self.assertEqual(flow.encoding.opcode, 0x33)
+                return
+        self.fail("add not found in ALL_RV64I")
+
+    def test_rv64i_addi_opcode(self):
+        """ADDI should have opcode 0x13."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        for mnemonic, flow in ALL_RV64I:
+            if mnemonic == "addi":
+                self.assertEqual(flow.encoding.opcode, 0x13)
+                return
+        self.fail("addi not found in ALL_RV64I")
+
+    def test_no_zero_opcodes_in_rv64v(self):
+        """No V instruction should have opcode 0x00."""
+        from dfg.isadesc.rv64v import ALL_RV64V
+        zero_opcodes = [m for m, f in ALL_RV64V if f.encoding.opcode == 0x00]
+        self.assertEqual(zero_opcodes, [], f"V instructions with opcode 0x00: {zero_opcodes[:10]}")
+
+    def test_auto_gen_rv64i_minimum_count(self):
+        """Auto-generated rv64i.py should have at least 40 instructions."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        self.assertGreaterEqual(len(ALL_RV64I), 40)
+
+
+class TestPseudoInstructionGuards(unittest.TestCase):
+    """Guard tests for pseudo-instruction completeness."""
+
+    def test_rv64i_pseudo_count(self):
+        """rv64i_pseudo.py should have at least 25 pseudo-instructions."""
+        from dfg.isadesc.rv64i_pseudo import ALL_RV64I_PSEUDO
+        self.assertGreaterEqual(len(ALL_RV64I_PSEUDO), 25)
+
+    def test_all_pseudos_register(self):
+        """Every pseudo-instruction should be loadable in a registry."""
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64i_pseudo import ALL_RV64I_PSEUDO, build_registry
+        reg = ISARegistry()
+        build_registry(reg)
+        for mnemonic, _ in ALL_RV64I_PSEUDO:
+            self.assertTrue(reg.is_known(mnemonic), f"pseudo '{mnemonic}' not registered")
 
 
 if __name__ == "__main__":

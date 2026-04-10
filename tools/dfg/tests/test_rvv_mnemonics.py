@@ -1,6 +1,6 @@
 """Tests for RVV mnemonic mapping.
 
-Loads riscv_instrs.json, filters HasStdExtV + non-Pseudo + Instruction entries,
+Loads riscv_instrs.json, filters HasVInstructions + non-Pseudo + Instruction entries,
 and verifies that all mnemonics are correctly derived.
 """
 from __future__ import annotations
@@ -45,12 +45,12 @@ def _load_v_instructions(json_path: Path) -> list[tuple[str, str]]:
         superclasses = entry.get("!superclasses", [])
         if not isinstance(superclasses, list) or "Instruction" not in superclasses:
             continue
-        # Must have HasStdExtV predicate
+        # Must have HasVInstructions predicate
         preds = entry.get("Predicates", [])
         if not isinstance(preds, list):
             continue
         pred_names = {p if isinstance(p, str) else p.get("def", "") for p in preds}
-        if "HasStdExtV" not in pred_names:
+        if "HasVInstructions" not in pred_names:
             continue
         # Must not be Pseudo
         is_pseudo = name.startswith("Pseudo")

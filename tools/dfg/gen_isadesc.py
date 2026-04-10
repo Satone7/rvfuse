@@ -124,13 +124,11 @@ OPERAND_TO_POSITION: dict[str, str] = {
 # must satisfy.  All listed predicates must be present for an instruction to
 # be included.
 EXTENSION_PREDICATES: dict[str, set[str]] = {
+    "I": set(),  # Base ISA: no required predicates
     "F": {"HasStdExtF"},
     "M": {"HasStdExtM"},
-    "V": {"HasStdExtV"},
-    # Future extensions can be added here:
-    # "D": {"HasStdExtD"},
-    # "C": {"HasStdExtC"},
-    # "A": {"HasStdExtA"},
+    "M_ZMMUL": {"HasStdExtZmmul"},
+    "V": {"HasVInstructions"},
 }
 
 # Instructions that also carry any of these predicates are excluded from the
@@ -138,7 +136,7 @@ EXTENSION_PREDICATES: dict[str, set[str]] = {
 # This prevents F from pulling in vector-FP instructions that are already
 # covered by the V descriptor.
 EXTENSION_EXCLUDED_PREDICATES: dict[str, set[str]] = {
-    "F": {"HasStdExtV"},
+    "F": {"HasVInstructions"},
 }
 
 # LLVM def names that override the exclusion -- these are included even if they
@@ -148,8 +146,10 @@ EXTENSION_EXCLUSION_OVERRIDES: dict[str, set[str]] = {
 }
 
 EXTENSION_REG_CLASS: dict[str, str] = {
+    "I": "integer",
     "F": "float",
     "M": "integer",
+    "M_ZMMUL": "integer",
     "V": "vector",
 }
 
@@ -165,6 +165,17 @@ def _has_extension(entry: dict, ext: str, name: str = "") -> bool:
     if not isinstance(superclasses, list) or "Instruction" not in superclasses:
         return False
 
+    # Exclude pseudo instructions (some don't start with "Pseudo" prefix)
+    if "Pseudo" in superclasses or "PseudoInstExpansion" in superclasses:
+        return False
+
+    # Exclude compressed (16-bit) instructions — their Inst array is < 32 bits
+    # and doesn't follow standard RISC-V encoding layout.  Only filter when
+    # the Inst field is actually present (some test fixtures omit it).
+    inst = entry.get("Inst")
+    if isinstance(inst, list) and len(inst) > 0 and len(inst) < 32:
+        return False
+
     preds = entry.get("Predicates", [])
     if not isinstance(preds, list):
         return False
@@ -172,6 +183,27 @@ def _has_extension(entry: dict, ext: str, name: str = "") -> bool:
     pred_names = {p.get("def", "") for p in preds if isinstance(p, dict)}
     if not required.issubset(pred_names):
         return False
+
+    # I extension: must NOT have any extension-specific predicates
+    if ext == "I":
+        _I_EXCLUDE_PREDS = {
+            "HasStdExtF", "HasStdExtD", "HasStdExtM", "HasStdExtZmmul",
+            "HasStdExtV", "HasStdExtC", "HasStdExtA", "HasStdExtB",
+            "HasVInstructions", "HasStdExtZfinx", "HasStdExtZdinx",
+            "HasStdExtZbkb", "HasStdExtZbs", "HasStdExtZba",
+            "HasStdExtZbb", "HasStdExtZbc", "HasStdExtZknd",
+            "HasStdExtZkne", "HasStdExtZknh", "HasStdExtZksed",
+            "HasStdExtZksh", "HasStdExtZfh", "HasStdExtZfhmin",
+            "HasTHeadBa", "HasTHeadBb", "HasTHeadBs", "HasTHeadCMO",
+            "HasTHeadCondMov", "HasTHeadFmIdx", "HasTHeadMac",
+            "HasTHeadMemIdx", "HasTHeadMemPair", "HasTHeadSync",
+            "HasStdExtZcb",
+        }
+        if pred_names & _I_EXCLUDE_PREDS:
+            return False
+        # Also exclude IsRV64-only check: include it, but nothing else
+        if pred_names - {"IsRV64"}:
+            return False
 
     # Exclude instructions that carry predicates from a different extension
     # (e.g. skip vector-FP instructions when generating F descriptor),
@@ -235,6 +267,14 @@ def _extract_flow(entry: dict) -> tuple[list[str], list[str]]:
                 continue
             src.append(prefix + pos_name)
 
+    # Branch-format fixup: when there are no output operands but two GPR
+    # inputs (rs1, rs2), the parser in _extract_registers will assign the
+    # first register token to "rd" and the second to "rs1" positionally
+    # (since the third token is an immediate and gets skipped).  Remap so
+    # src positions match what the parser produces.
+    if not dst and len(src) == 2 and src == ["rs1", "rs2"]:
+        src = ["rd", "rs1"]
+
     return dst, src
 
 
@@ -244,6 +284,10 @@ def _extract_encoding(entry: dict, reg_class: str) -> InstructionFormat:
     Parses the Inst array (LSB-first) to determine which fields are present,
     the instruction format type, and fixed encoding bits (opcode, funct3,
     funct7).
+
+    The Inst array contains either integers (fixed bits) or dicts with a 'var'
+    key naming the variable field (e.g. 'rs2', 'imm12', 'shamt').  We use these
+    var names to distinguish register fields from immediate fields.
     """
     inst = entry.get("Inst", [])
     if len(inst) < 32:
@@ -262,54 +306,114 @@ def _extract_encoding(entry: dict, reg_class: str) -> InstructionFormat:
     def has_var_field(start: int, width: int) -> bool:
         return any(bv(inst[start + i]) is None for i in range(width))
 
-    # Opcode: the Opcode field is stored in reverse order
-    opcode_bits = entry.get("Opcode", [0] * 7)
-    opcode = int("".join(str(b) for b in reversed(opcode_bits)), 2)
+    def field_var_name(start: int, width: int) -> str | None:
+        """Return the var name for a contiguous field, or None if mixed/fixed."""
+        names = set()
+        for i in range(width):
+            el = inst[start + i]
+            if isinstance(el, int):
+                return None  # fixed bit in this range
+            name = el.get("var", "") if isinstance(el, dict) else ""
+            names.add(name)
+        if len(names) == 1:
+            return names.pop()
+        return None  # mixed variable names (e.g. rs2 + imm12 in S-type)
+
+    # Opcode: bits [0:7] of the Inst array (LSB-first, already in binary)
+    opcode = extract_field(0, 7)
+    if opcode is None:
+        opcode = 0
 
     funct3 = extract_field(12, 3)
     funct7 = extract_field(25, 7)
 
-    has_rd = has_var_field(7, 5)
-    has_rs1 = has_var_field(15, 5)
-    has_rs2 = has_var_field(20, 5)
+    # Determine has_rd / has_rs1 by checking var names, not just variability.
+    # This correctly handles cases like auipc where bits 15-19 are imm20,
+    # not rs1, and compressed instructions with mixed var names.
+    _REG_VARS = {"rd", "rs1", "rs2", "vs1", "vs2", "vs3", "vd"}
+    rd_var = field_var_name(7, 5)
+    has_rd = rd_var in _REG_VARS
+    rs1_var = field_var_name(15, 5)
+    has_rs1 = rs1_var in _REG_VARS
 
     may_load = bool(entry.get("mayLoad", 0))
     may_store = bool(entry.get("mayStore", 0))
 
+    # Determine if bits 20-24 are actually rs2 or an immediate.
+    # The var name tells us: "rs2" or "vs2" → register, anything else → imm.
+    rs2_var = field_var_name(20, 5)
+    has_rs2 = rs2_var in ("rs2", "vs2")
+
     # R4 format: only for 4-operand FP instructions (opcode 0x43 MADD,
     # 0x47 MSUB, 0x4b NMSUB, 0x4f NMADD).  Bits 27-31 are rs3 only in
-    # this context; for I/S formats those same bit positions are part of
-    # the immediate.
+    # this context.
     _R4_OPCODES = {0x43, 0x47, 0x4b, 0x4f}
     has_rs3 = opcode in _R4_OPCODES and has_var_field(27, 5)
 
     # Determine has_imm and imm_bits.
-    # The positional heuristic (no rs2/rs3 at bits 20-24/27-31) correctly
-    # identifies I-type immediates for base integer/FP instructions, but
-    # misclassifies V-extension VI-format ops (e.g. vadd.vi has simm5 at bits
-    # 15-19 that looks like rs1) and load/store ops whose upper immediate bits
-    # overlap the rs2 position.  Handle load/store explicitly first.
     has_imm = False
     imm_bits = 0
 
+    # Check for any variable bits in the immediate region (bits 20-31)
+    # that are NOT rs2/rs3.  If rs2 occupies bits 20-24, check bits 25-31
+    # for immediate content.
     if may_load or may_store:
         has_imm = True
         imm_bits = 12
     elif not has_rs2 and not has_rs3:
-        # Standard I-type immediate (bits 20-31)
+        # No rs2 at bits 20-24 → these bits plus 25-31 are all immediate
+        # (I-type: 12-bit immediate at bits 20-31)
         has_imm = True
         imm_bits = 12
+    elif has_rs2 and not has_rs3:
+        # rs2 at 20-24, check if bits 25-31 are an immediate (not funct7)
+        if funct7 is None:
+            # Variable bits in 25-31 that aren't a single funct7 → immediate
+            # (B-type, S-type upper imm, etc.)
+            has_imm = True
+            imm_bits = 7  # upper immediate bits 25-31
+
+    # Determine format type from opcode + flags.
+    # RISC-V opcode → format mapping:
+    #   0x33, 0x3b           → R-type (ALU reg-reg)
+    #   0x13, 0x1b           → I-type (ALU immediate)
+    #   0x03, 0x07           → I-type (loads)
+    #   0x67                 → I-type (jalr)
+    #   0x73                 → I-type (system)
+    #   0x23, 0x27           → S-type (stores)
+    #   0x63                 → B-type (branches)
+    #   0x6f                 → J-type (jal)
+    #   0x37, 0x17           → U-type (lui/auipc)
+    #   0x53                 → R-type or R4-type (FP)
+    #   0x57                 → V-type (vector — treat as R)
+    _I_OPCODES = {0x03, 0x07, 0x13, 0x1b, 0x67, 0x73}
+    _S_OPCODES = {0x23, 0x27}
+    _B_OPCODES = {0x63}
+    _J_OPCODES = {0x6f}
+    _U_OPCODES = {0x17, 0x37}
+    _V_OPCODES = {0x57}
 
     if has_rs3:
         format_type = "R4"
-    elif may_store:
+    elif opcode in _V_OPCODES:
+        format_type = "V"
+    elif may_store or opcode in _S_OPCODES:
         format_type = "S"
-    elif may_load:
+    elif may_load or opcode in _I_OPCODES:
         format_type = "I"
-    elif has_imm:
-        format_type = "I"
+    elif opcode in _B_OPCODES:
+        format_type = "B"
+    elif opcode in _J_OPCODES:
+        format_type = "J"
+    elif opcode in _U_OPCODES:
+        format_type = "U"
     else:
         format_type = "R"
+
+    # For I/J/U/B/S formats, set has_imm and imm_bits based on format
+    if format_type in ("I", "J", "U", "B", "S"):
+        has_imm = True
+        imm_bits = {"I": 12, "S": 12, "B": 12, "J": 20, "U": 20}[format_type]
 
     return InstructionFormat(
         format_type=format_type, opcode=opcode, funct3=funct3, funct7=funct7,
@@ -329,6 +433,7 @@ SKIP_PREFIXES = (
     "Pseudo",
     "SDT_",
     "Select_",
+    "anonymous",
 )
 
 

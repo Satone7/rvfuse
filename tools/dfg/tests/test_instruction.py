@@ -126,9 +126,11 @@ class TestRV64IInstructions(unittest.TestCase):
     def setUp(self) -> None:
         from dfg.instruction import ISARegistry
         from dfg.isadesc.rv64i import build_registry
+        from dfg.isadesc.rv64i_pseudo import build_registry as build_pseudo_registry
 
         self.registry = ISARegistry()
         build_registry(self.registry)
+        build_pseudo_registry(self.registry)
 
     def _resolve(self, mnemonic: str, operands: str) -> ResolvedFlow:
         flow = self.registry.get_flow(mnemonic)
@@ -373,6 +375,47 @@ class TestRV64IInstructions(unittest.TestCase):
 
     def test_ecall(self) -> None:
         r = self._resolve("ecall", "")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, [])
+
+    # --- Previously missing pseudo-instructions ---
+    def test_snez(self) -> None:
+        r = self._resolve("snez", "a0,a1")
+        self.assertEqual(r.dst_regs, ["a0"])
+        self.assertEqual(r.src_regs, ["a1"])
+
+    def test_bgtz(self) -> None:
+        r = self._resolve("bgtz", "a0,0x100")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, ["a0"])
+
+    def test_blez(self) -> None:
+        r = self._resolve("blez", "a0,0x100")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, ["a0"])
+
+    def test_bgt(self) -> None:
+        r = self._resolve("bgt", "a0,a1,0x100")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, ["a0", "a1"])
+
+    def test_ble(self) -> None:
+        r = self._resolve("ble", "a0,a1,0x100")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, ["a0", "a1"])
+
+    def test_ebreak(self) -> None:
+        r = self._resolve("ebreak", "")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, [])
+
+    def test_fence(self) -> None:
+        r = self._resolve("fence", "iorw,iorw")
+        self.assertEqual(r.dst_regs, [])
+        self.assertEqual(r.src_regs, [])
+
+    def test_fence_i(self) -> None:
+        r = self._resolve("fence.i", "")
         self.assertEqual(r.dst_regs, [])
         self.assertEqual(r.src_regs, [])
 

@@ -110,14 +110,15 @@ verify() {
 import json
 with open('$OUTPUT') as f:
     data = json.load(f)
+expected = ['ADD', 'ADDI', 'SUB', 'LW', 'LD', 'SW', 'SD', 'BEQ', 'JAL', 'FLW', 'FSW', 'FMADD_S', 'FADD_S', 'FMUL_S', 'FEQ_S', 'MUL', 'DIV', 'VSETVLI', 'VADD_VV']
 missing = []
-for name in ['FLW', 'FSW', 'FMADD_S', 'FADD_S', 'FMUL_S', 'FEQ_S', 'MUL', 'DIV']:
+for name in expected:
     if name not in data:
         missing.append(name)
 if missing:
     print(f'MISSING: {missing}')
     raise SystemExit(1)
-print(f'All 8 key instructions found in {len(data)} total records')
+print(f'All {len(expected)} key instructions found in {len(data)} total records')
 "
     info "Verification passed."
 }
@@ -147,8 +148,13 @@ main() {
 
     echo ""
     info "Done. To regenerate ISA descriptors:"
-    echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext F -o tools/dfg/isadesc/rv64f.py"
+    echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext I -o tools/dfg/isadesc/rv64i.py"
     echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext M -o tools/dfg/isadesc/rv64m.py"
+    echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext M_ZMMUL -o tools/dfg/isadesc/rv64zmmul.py  (optional)"
+    echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext F -o tools/dfg/isadesc/rv64f.py"
+    echo "  python3 tools/dfg/gen_isadesc.py tools/dfg/riscv_instrs.json --ext V -o tools/dfg/isadesc/rv64v.py"
+    echo ""
+    info "Note: I pseudo-instructions are in rv64i_pseudo.py (hand-written, not auto-generated)"
 }
 
 main "$@"
