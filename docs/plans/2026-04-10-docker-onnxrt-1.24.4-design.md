@@ -149,6 +149,7 @@ RUN mkdir -p /onnxruntime/build-output \
 
 ## 验证清单
 
+- [x] build.sh 脚本和 Dockerfile 已创建
 - [ ] build.sh 成功克隆 ORT v1.24.4 和 Eigen 到 vendor/
 - [ ] Docker build 成功完成，无错误
 - [ ] 镜像中存在 /onnxruntime/build-output/libonnxruntime.so*
