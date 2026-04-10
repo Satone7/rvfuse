@@ -172,7 +172,10 @@ cross_compile_onnxrt() {
     fi
 
     info "Cross-compiling ONNX Runtime (full build, target=${TARGET})..."
-    rm -rf "${ort_build}" 2>/dev/null || { warn "Build directory owned by root, using sudo to clean up..."; sudo rm -rf "${ort_build}"; } || true
+    # Clean build directory (may contain root-owned files from previous Docker runs)
+    if [[ -d "${ort_build}" ]]; then
+        docker run --rm -v "${ort_build}:/build" ubuntu:22.04 bash -c 'rm -rf /build/* /build/.* 2>/dev/null || true'
+    fi
     mkdir -p "${ort_build}" "${ort_install}"
 
     # Determine march based on target
