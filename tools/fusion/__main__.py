@@ -110,6 +110,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=20,
         help="Number of top patterns to include (default: 20)",
     )
+    parser.add_argument(
+        "--max-nodes",
+        type=int,
+        default=8,
+        dest="max_nodes",
+        help="Maximum subgraph size to enumerate (default: 8)",
+    )
+    parser.add_argument(
+        "--min-size",
+        type=int,
+        default=2,
+        dest="min_size",
+        help="Minimum subgraph size to include in output (default: 2)",
+    )
     parser.add_argument("--catalog", type=Path, default=None,
         help="Path to Feature 1 pattern catalog JSON (required for score)")
     parser.add_argument("--min-score", type=float, default=0.0,
@@ -299,6 +313,8 @@ def main(argv: list[str] | None = None) -> None:
         registry=registry,
         output_path=args.output,
         top=args.top,
+        max_nodes=args.max_nodes,
+        min_size=args.min_size,
     )
 
     # Agent analysis
@@ -314,8 +330,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\nFusion Pattern Mining Results")
     print(f"  Patterns found: {len(patterns)}")
     if patterns:
-        print(f"  Top pattern: {' → '.join(patterns[0]['opcodes'])} "
-              f"(frequency: {patterns[0]['total_frequency']:,})")
+        top = patterns[0]
+        top_ops = " + ".join(mn for layer in top.get("topology", []) for mn in layer)
+        print(f"  Top pattern: {top_ops} "
+              f"(frequency: {top['total_frequency']:,}, size: {top['size']})")
     print(f"  Output: {args.output}")
 
 

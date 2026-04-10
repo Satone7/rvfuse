@@ -179,7 +179,7 @@ class TestConstraintCheckerConstrained(unittest.TestCase):
 class TestConstraintConfigDefaults(unittest.TestCase):
     def test_defaults_has_all_constraints(self):
         config = ConstraintConfig.defaults()
-        self.assertEqual(len(config.enabled), 11)
+        self.assertEqual(len(config.enabled), 13)
 
     def test_defaults_new_constraints_enabled(self):
         config = ConstraintConfig.defaults()

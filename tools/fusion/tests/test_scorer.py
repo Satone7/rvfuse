@@ -69,17 +69,18 @@ class TestTightScore(unittest.TestCase):
         self.scorer = Scorer(_make_registry())
 
     def test_full_density_single_chain(self):
-        score = self.scorer._tight_score(chain_registers=[["frd", "frs1"]], length=2)
+        score = self.scorer._tight_score(edges=[{"src": "frs1", "dst": "frd"}], size=2)
         self.assertAlmostEqual(score, 1.0, places=5)
 
     def test_no_edges_zero_density(self):
-        score = self.scorer._tight_score(chain_registers=[], length=2)
+        score = self.scorer._tight_score(edges=[], size=2)
         self.assertAlmostEqual(score, 0.0, places=5)
 
     def test_three_instr_chain_capped(self):
+        # 3-node chain with 2 edges: density=2/3, factor=1.2 => 0.8
         score = self.scorer._tight_score(
-            chain_registers=[["frd", "frs1"], ["frd", "frs1"]], length=3)
-        self.assertAlmostEqual(score, 1.0, places=5)
+            edges=[{"src": "frs1", "dst": "frd"}, {"src": "frd", "dst": "fr2"}], size=3)
+        self.assertAlmostEqual(score, 0.8, places=5)
 
 
 class TestHwScore(unittest.TestCase):

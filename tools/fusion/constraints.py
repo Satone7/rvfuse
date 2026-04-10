@@ -42,6 +42,8 @@ class ConstraintConfig:
         "too_many_sources":        ("hard", False, "唯一源字段数 > 3"),
         "has_immediate":           ("soft", False, "链中包含立即数操作数"),
         "missing_encoding":        ("soft", False, "指令缺少 InstructionFormat 元数据"),
+        "max_nodes":             ("hard", False, "子图节点数超过硬件可实现的融合上限"),
+        "no_control_flow":       ("hard", False, "子图包含控制流指令（分支/跳转）"),
     }
 
     @classmethod
@@ -339,6 +341,31 @@ class ConstraintChecker:
             if num_src > 3 and self.is_enabled("too_many_sources"):
                 hard_violations.append("too_many_sources")
                 reasons.append(f"chain has {num_src} unique source fields (max 3)")
+
+        if hard_violations:
+            return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
+
+        # --- Check subgraph size limit ---
+        if self.is_enabled("max_nodes"):
+            num_nodes = len(opcodes)
+            max_allowed = 4  # Conservative default for ISA extension design
+            if num_nodes > max_allowed:
+                hard_violations.append("max_nodes")
+                reasons.append(f"subgraph has {num_nodes} nodes (max {max_allowed})")
+
+        # --- Check for control flow instructions ---
+        if self.is_enabled("no_control_flow"):
+            _CONTROL_FLOW = frozenset({
+                "beq", "bne", "blt", "bge", "bltu", "bgeu",
+                "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
+                "jal", "jalr", "j", "jr", "call", "ret",
+                "bgtu",
+            })
+            for i, opcode in enumerate(opcodes):
+                if opcode in _CONTROL_FLOW:
+                    hard_violations.append("no_control_flow")
+                    reasons.append(f"{opcode} is a control flow instruction")
+                    break
 
         if hard_violations:
             return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
