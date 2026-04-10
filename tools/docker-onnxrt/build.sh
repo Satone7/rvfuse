@@ -127,6 +127,25 @@ extract_sysroot() {
             fi
         done
     done
+    # Fix absolute symlinks that break inside Docker (mounted at /sysroot).
+    # Ubuntu packages use absolute paths like /lib/riscv64-linux-gnu/libm.so.6
+    # which resolve to the HOST filesystem, not the sysroot.
+    info "Fixing absolute symlinks in sysroot..."
+    local sl_dir="${sysroot}/usr/lib/riscv64-linux-gnu"
+    for link in "${sl_dir}"/*.so; do
+        [ -L "$link" ] || continue
+        local target
+        target=$(readlink "$link")
+        if [[ "$target" == /* ]]; then
+            # Convert absolute /lib/... to relative ../../lib/...
+            local rel_target="../../${target#/}"
+            local link_name
+            link_name=$(basename "$link")
+            ln -sf "$rel_target" "$link"
+            echo "  Fixed: ${link_name} -> ${target} => ${rel_target}"
+        fi
+    done
+
     find "${sysroot}" -name "libm.a" -delete 2>/dev/null || true
     info "Sysroot extracted to ${sysroot}"
 }
