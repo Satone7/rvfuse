@@ -1,0 +1,14 @@
+{
+  "bb_id": 10,
+  "vaddr": "0xA000",
+  "source": "script",
+  "nodes": [
+    {"index": 0, "address": "0xA000", "mnemonic": "flw", "operands": "ft4,0(a5)"},
+    {"index": 1, "address": "0xA004", "mnemonic": "flw", "operands": "fa6,0(s0)"},
+    {"index": 2, "address": "0xA008", "mnemonic": "fmadd.s", "operands": "dyn,fa5,fa6,ft4,fa5"}
+  ],
+  "edges": [
+    {"src": 0, "dst": 2, "register": "ft4"},
+    {"src": 1, "dst": 2, "register": "fa6"}
+  ]
+}
