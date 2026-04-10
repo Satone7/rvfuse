@@ -46,6 +46,7 @@ setup-report.txt
 
 # Pre-cloned vendor sources for Docker builds
 tools/docker-onnxrt/vendor/
+tools/docker-onnxrt-1.24.4/vendor/
 
 # ONNX Runtime + YOLO build artifacts
 output/*
