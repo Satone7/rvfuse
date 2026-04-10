@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
         AVFrame* frame = nullptr;
         while (true) {
             ret = av_read_frame(inFmtCtx, pkt);
-            if (ret < 0) goto done;
+            if (ret < 0) { av_packet_unref(pkt); goto done; }
             if (pkt->stream_index != streamIdx) {
                 av_packet_unref(pkt);
                 continue;
@@ -108,6 +108,7 @@ int main(int argc, char* argv[]) {
             if (ret == 0) break;
             av_frame_free(&frame);
             if (ret == AVERROR(EAGAIN)) continue;
+            av_packet_unref(pkt);
             goto done;
         }
 

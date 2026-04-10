@@ -126,6 +126,7 @@ Use `--target` to select which binary to profile:
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 10
 
 # Preprocess (video decode → resize → normalize)
+# Generate test video if not present: ffmpeg -f lavfi -i testsrc=d=5 -vf "scale=640:480" -y output/test_video.mp4
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
   -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/bbv_pre \

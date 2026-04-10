@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/onnxruntime/build \
         --minimal_build \
         --build_shared_lib \
         --disable_rtti \
-        --skip_submodule_sync \
+        --skip_submodule_sync `# submodules not needed for minimal build` \
         --allow_running_as_root \
         --parallel 8 \
         --cmake_extra_defines \
