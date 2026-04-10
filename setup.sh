@@ -46,14 +46,25 @@ readonly -a STEP1_ARTIFACTS=(
 )
 # shellcheck disable=SC2034
 readonly -a STEP2_ARTIFACTS=(
-    "third_party/qemu/build/contrib/plugins/bbv.so"
+    "third_party/qemu/build/contrib/plugins/libbbv.so"
+    "tools/bbv/libbbv.so"
 )
+# Step 3 artifacts depend on target — checked specially in step_artifacts_exist
 # shellcheck disable=SC2034
-readonly -a STEP3_ARTIFACTS=(
+readonly -a STEP3_ARTIFACTS_INFERENCE=(
     "output/yolo_inference"
     "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
 )
-# Step 4 (BBV Profiling): glob output/yolo.bbv.*.bb — checked specially
+# shellcheck disable=SC2034
+readonly -a STEP3_ARTIFACTS_PREPROCESS=(
+    "output/yolo_preprocess"
+    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+)
+# shellcheck disable=SC2034
+readonly -a STEP3_ARTIFACTS_POSTPROCESS=(
+    "output/yolo_postprocess"
+    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+)
 # shellcheck disable=SC2034
 readonly -a STEP5_ARTIFACTS=(
     "output/hotspot.json"
@@ -72,6 +83,7 @@ declare -g SHALLOW_CLONE=0
 declare -g BBV_INTERVAL=100000
 declare -g TOP_N=20
 declare -g COVERAGE_PCT=80
+declare -g TARGET="inference"  # inference | preprocess | postprocess
 declare -ga FORCE_STEPS=()
 
 # Per-step result tracking (indexed 0-7)
@@ -103,7 +115,7 @@ log_error() {
 
 print_usage() {
     cat <<'EOF'
-usage: setup.sh [--force <steps>] [--force-all] [--shallow] [--bbv-interval <N>] [--top <N>] [--coverage <N>] [--help]
+usage: setup.sh [--force <steps>] [--force-all] [--shallow] [--target <T>] [--bbv-interval <N>] [--top <N>] [--coverage <N>] [--help]
 
 Options:
   --force <steps>       Re-execute specified steps (comma-separated, e.g., "2" or "3,5")
@@ -113,6 +125,10 @@ Options:
                             6=DFG Generation   7=Generate Report  8=Fusion Pipeline
   --force-all           Re-execute all steps from scratch (deletes artifacts)
   --shallow             Use --depth 1 for submodule clones (Step 0)
+  --target <T>          Target binary for BBV profiling (default: inference)
+                          inference  — YOLO inference runner (ORT)
+                          preprocess — Video decode + resize + normalize
+                          postprocess— YOLO output parsing + NMS + draw
   --bbv-interval <N>    BBV sampling interval for Step 4 (default: 100000)
   --top <N>             Top N blocks for Steps 5-6 (default: 20)
   --coverage <N>        Coverage threshold % for Steps 5-6 (default: 80)
@@ -146,6 +162,19 @@ parse_args() {
                 ;;
             --shallow)
                 SHALLOW_CLONE=1
+                ;;
+            --target)
+                (( i++ )) || true
+                if (( i >= ${#args[@]} )); then
+                    log_error "--target requires a value (inference|preprocess|postprocess)"
+                    return 1
+                fi
+                local target_val="${args[$i]}"
+                if [[ "$target_val" != "inference" && "$target_val" != "preprocess" && "$target_val" != "postprocess" ]]; then
+                    log_error "Invalid target: $target_val (must be inference|preprocess|postprocess)"
+                    return 1
+                fi
+                TARGET="$target_val"
                 ;;
             --bbv-interval)
                 (( i++ )) || true
@@ -200,6 +229,9 @@ parse_args() {
     local -a opt_parts=()
     if (( ${#FORCE_STEPS[@]} > 0 )); then
         opt_parts+=("force=${FORCE_STEPS[*]}")
+    fi
+    if [[ "$TARGET" != "inference" ]]; then
+        opt_parts+=("target=${TARGET}")
     fi
     if (( SHALLOW_CLONE == 1 )); then
         opt_parts+=("shallow")
@@ -316,15 +348,19 @@ check_artifacts() {
     return 0
 }
 
-# Step 4 special check: glob for output/yolo.bbv.*.bb
+# Step 4 special check: glob based on target
 check_bbv_artifacts() {
+    local pattern
+    case "$TARGET" in
+        inference)   pattern="yolo.bbv.*.bb" ;;
+        preprocess)  pattern="bbv_pre.*.bb" ;;
+        postprocess) pattern="bbv_post.*.bb" ;;
+    esac
     local bbv_files
-    bbv_files=( "${PROJECT_ROOT}"/output/yolo.bbv.*.bb )
-    # If glob didn't match, bash returns the literal pattern
+    bbv_files=( "${PROJECT_ROOT}"/output/${pattern} )
     if [[ ! -e "${bbv_files[0]}" ]]; then
         return 1
     fi
-    # Check at least one .bb file is non-empty
     for f in "${bbv_files[@]}"; do
         if [[ -s "$f" ]]; then
             return 0
@@ -372,8 +408,8 @@ get_artifact_names() {
         0) echo "STEP0_ARTIFACTS" ;;
         1) echo "STEP1_ARTIFACTS" ;;
         2) echo "STEP2_ARTIFACTS" ;;
-        3) echo "STEP3_ARTIFACTS" ;;
-        4) echo "__bbv__" ;;          # special glob check
+        3) echo "STEP3_ARTIFACTS_${TARGET^^}" ;;
+        4) echo "__bbv__" ;;          # special target-based check
         5) echo "STEP5_ARTIFACTS" ;;
         6) echo "__dfg__" ;;          # special dir check
         7) echo "STEP7_ARTIFACTS" ;;
@@ -422,11 +458,15 @@ cleanup_step() {
         3)
             log_info "Cleaning Step 3 artifacts (YOLO build)..."
             rm -f "${PROJECT_ROOT}/output/yolo_inference"
+            rm -f "${PROJECT_ROOT}/output/yolo_preprocess"
+            rm -f "${PROJECT_ROOT}/output/yolo_postprocess"
             rm -rf "${PROJECT_ROOT}/output/sysroot"
             ;;
         4)
             log_info "Cleaning Step 4 artifacts (BBV output)..."
             rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+            rm -f "${PROJECT_ROOT}"/output/bbv_pre.*
+            rm -f "${PROJECT_ROOT}"/output/bbv_post.*
             ;;
         5)
             log_info "Cleaning Step 5 artifacts (hotspot report)..."
@@ -516,7 +556,7 @@ step2_build_qemu() {
         return 1
     fi
 
-    record_step_result "$step" "PASS" "bbv.so built"
+    record_step_result "$step" "PASS" "QEMU + official and custom libbbv.so built"
     return 0
 }
 
@@ -528,12 +568,14 @@ step3_docker_build() {
     local step=3
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    if ! bash "${PROJECT_ROOT}/tools/docker-onnxrt/build.sh" 2>&1; then
-        record_step_result "$step" "FAIL" "tools/docker-onnxrt/build.sh exited with error"
-        return 1
-    fi
-
-    record_step_result "$step" "PASS" "yolo_inference + sysroot ready"
+    # TODO: ONNX Runtime Docker build needs adaptation for LLVM 22 toolchain.
+    # The docker-onnxrt build.sh and Dockerfile were written for the previous
+    # toolchain setup. After the LLVM toolchain migration, the ONNX Runtime
+    # build (CMake config, compiler flags, sysroot extraction) needs to be
+    # updated to use tools/docker-llvm/ instead.
+    log_warn "Step 3 ONNX Runtime build requires LLVM 22 toolchain adaptation."
+    log_warn "Skipping — run './tools/docker-onnxrt/build.sh' manually after adaptation."
+    record_step_result "$step" "SKIP" "LLVM 22 toolchain adaptation needed"
     return 0
 }
 
@@ -543,18 +585,57 @@ step3_docker_build() {
 
 step4_bbv_profiling() {
     local step=4
-    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} (target=${TARGET}) ==="
+
+    # Step 4 depends on Step 3 (target binary). If Step 3 was skipped
+    # due to LLVM 22 toolchain adaptation, Step 4 cannot run.
+    case "$TARGET" in
+        inference)
+            local required_bin="${PROJECT_ROOT}/output/yolo_inference"
+            local required_msg="depends on Step 3 (ONNX Runtime build)"
+            ;;
+        preprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            required_msg="depends on Step 3 (preprocess build)"
+            ;;
+        postprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            required_msg="depends on Step 3 (postprocess build)"
+            ;;
+    esac
+    if [[ ! -e "$required_bin" ]]; then
+        log_warn "Step 4 requires $(basename "$required_bin") from Step 3 — skipped."
+        record_step_result "$step" "SKIP" "$required_msg"
+        return 0
+    fi
 
     local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
-    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/bbv.so"
-    local inference_bin="${PROJECT_ROOT}/output/yolo_inference"
-    local ort_model="${PROJECT_ROOT}/output/yolo11n.ort"
-    local test_image="${PROJECT_ROOT}/output/test.jpg"
+    local plugin_so="${PROJECT_ROOT}/tools/bbv/libbbv.so"
     local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local bbv_outfile="${PROJECT_ROOT}/output/yolo.bbv"
 
-    # Verify dependencies from earlier steps
+    local target_bin="" target_args=()
+
+    case "$TARGET" in
+        inference)
+            target_bin="${PROJECT_ROOT}/output/yolo_inference"
+            target_args=("${PROJECT_ROOT}/output/yolo11n.ort" "${PROJECT_ROOT}/output/test.jpg" "10")
+            ;;
+        preprocess)
+            target_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            target_args=("${PROJECT_ROOT}/output/test_video.mp4" "10")
+            bbv_outfile="${PROJECT_ROOT}/output/bbv_pre"
+            ;;
+        postprocess)
+            target_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            target_args=("--synthetic" "${PROJECT_ROOT}/output/test.jpg")
+            bbv_outfile="${PROJECT_ROOT}/output/bbv_post"
+            ;;
+    esac
+
+    # Verify dependencies
     local missing_deps=()
-    for dep in "$qemu_bin" "$plugin_so" "$inference_bin" "$ort_model" "$test_image"; do
+    for dep in "$qemu_bin" "$plugin_so" "$target_bin"; do
         if [[ ! -e "$dep" ]]; then
             missing_deps+=("$(basename "$dep")")
         fi
@@ -568,21 +649,21 @@ step4_bbv_profiling() {
         return 1
     fi
 
-    # Clean old BBV output
-    rm -f "${PROJECT_ROOT}"/output/yolo.bbv.*
+    # Clean old BBV output for this target
+    rm -f "${bbv_outfile}"*
 
-    log_info "  Running QEMU BBV profiling (interval=${BBV_INTERVAL})..."
+    log_info "  Running QEMU BBV profiling: $(basename "$target_bin") (interval=${BBV_INTERVAL})..."
     if ! "${qemu_bin}" \
         -L "${sysroot}" \
-        -plugin "${plugin_so}",interval="${BBV_INTERVAL}",outfile="${PROJECT_ROOT}/output/yolo.bbv" \
-        "${inference_bin}" "${ort_model}" "${test_image}" 10 \
+        -plugin "${plugin_so}",interval="${BBV_INTERVAL}",outfile="${bbv_outfile}" \
+        "${target_bin}" "${target_args[@]}" \
         2>&1; then
         record_step_result "$step" "FAIL" "qemu-riscv64 profiling exited with error"
         return 1
     fi
 
     # Verify BBV output was created
-    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    local bbv_files=("${bbv_outfile}"*.bb)
     if [[ ! -e "${bbv_files[0]}" ]]; then
         record_step_result "$step" "FAIL" "no BBV output files generated"
         return 1
@@ -602,20 +683,38 @@ step5_hotspot_report() {
     local step=5
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    # Find BBV and disas files
-    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    # Select BBV file and ELF based on target
+    local bbv_pattern elf_bin json_output
+    case "$TARGET" in
+        inference)
+            bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+            json_output="${PROJECT_ROOT}/output/hotspot.json"
+            ;;
+        preprocess)
+            bbv_pattern="${PROJECT_ROOT}/output/bbv_pre.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            json_output="${PROJECT_ROOT}/output/bbv_pre_report.json"
+            ;;
+        postprocess)
+            bbv_pattern="${PROJECT_ROOT}/output/bbv_post.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            json_output="${PROJECT_ROOT}/output/bbv_post_report.json"
+            ;;
+    esac
+
+    # Find BBV file
+    local bbv_files=(${bbv_pattern})
     if [[ ! -e "${bbv_files[0]}" ]]; then
         record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
         return 1
     fi
     local bbv_file="${bbv_files[0]}"
 
-    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
     local sysroot="${PROJECT_ROOT}/output/sysroot"
-    local json_output="${PROJECT_ROOT}/output/hotspot.json"
 
     if [[ ! -f "$elf_bin" ]]; then
-        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        record_step_result "$step" "FAIL" "$(basename "$elf_bin") not found — run Step 3 first"
         return 1
     fi
 
@@ -654,19 +753,37 @@ step6_dfg_generation() {
     local step=6
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    # Find BBV and disas files
-    local bbv_files=("${PROJECT_ROOT}"/output/yolo.bbv.*.bb)
+    # Select BBV file and ELF based on target
+    local bbv_pattern elf_bin dfg_dir
+    case "$TARGET" in
+        inference)
+            bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+            dfg_dir="${PROJECT_ROOT}/output/dfg"
+            ;;
+        preprocess)
+            bbv_pattern="${PROJECT_ROOT}/output/bbv_pre.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            dfg_dir="${PROJECT_ROOT}/output/dfg_pre"
+            ;;
+        postprocess)
+            bbv_pattern="${PROJECT_ROOT}/output/bbv_post.*.bb"
+            elf_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            dfg_dir="${PROJECT_ROOT}/output/dfg_post"
+            ;;
+    esac
+
+    local bbv_files=(${bbv_pattern})
     if [[ ! -e "${bbv_files[0]}" ]]; then
         record_step_result "$step" "FAIL" "no BBV output files found — run Step 4 first"
         return 1
     fi
     local bbv_file="${bbv_files[0]}"
 
-    local elf_bin="${PROJECT_ROOT}/output/yolo_inference"
     local sysroot="${PROJECT_ROOT}/output/sysroot"
 
     if [[ ! -f "$elf_bin" ]]; then
-        record_step_result "$step" "FAIL" "output/yolo_inference not found — run Step 3 first"
+        record_step_result "$step" "FAIL" "$(basename "$elf_bin") not found — run Step 3 first"
         return 1
     fi
 
@@ -675,6 +792,7 @@ step6_dfg_generation() {
         "--bbv" "$bbv_file"
         "--elf" "$elf_bin"
         "--top" "$TOP_N"
+        "--output-dir" "$dfg_dir"
     )
     if [[ -d "$sysroot" ]]; then
         dfg_args+=("--sysroot" "$sysroot")
@@ -689,13 +807,13 @@ step6_dfg_generation() {
         return 1
     fi
 
-    # Verify dfg/ directory has content
-    if ! check_dfg_artifacts; then
-        record_step_result "$step" "FAIL" "dfg/ directory is empty after DFG generation"
+    # Verify dfg directory has content
+    if [[ ! -d "$dfg_dir" ]] || (( $(find "$dfg_dir" -type f 2>/dev/null | wc -l) == 0 )); then
+        record_step_result "$step" "FAIL" "DFG directory is empty after generation"
         return 1
     fi
 
-    record_step_result "$step" "PASS" "dfg/ generated"
+    record_step_result "$step" "PASS" "$(basename "$dfg_dir")/ generated"
     return 0
 }
 
