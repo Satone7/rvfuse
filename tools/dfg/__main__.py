@@ -382,6 +382,13 @@ def load_isa_registry(extensions: str) -> ISARegistry:
             logger.info("Loaded ISA extension: %s (%d mnemonics)", ext, len(registry._flows))
         else:
             logger.warning("Unknown ISA extension '%s' -- skipping", ext)
+
+    # After loading all requested extensions, also load I pseudo-instructions
+    if "I" in extensions:
+        from dfg.isadesc.rv64i_pseudo import build_registry as build_i_pseudo
+        build_i_pseudo(registry)
+        logger.info("Loaded I pseudo-instructions (%d total mnemonics)", len(registry._flows))
+
     return registry
 
 
