@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_DIR="${PROJECT_ROOT}/output/c920-ort"
-VENDOR_DIR="${PROJECT_ROOT}/tools/docker-onnxrt/vendor"
+VENDOR_DIR="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 ORT_SOURCE="${VENDOR_DIR}/onnxruntime"
 EIGEN_SOURCE="${VENDOR_DIR}/eigen"
@@ -43,7 +43,7 @@ check_prerequisites() {
     docker info &>/dev/null || error "Docker daemon not running."
 
     [ -d "${LLVM_INSTALL}/bin" ] || error "LLVM install not found at ${LLVM_INSTALL}"
-    [ -d "${ORT_SOURCE}/cmake" ] || error "ORT source not found at ${ORT_SOURCE}. Run tools/docker-onnxrt/build.sh first or clone manually."
+    [ -d "${ORT_SOURCE}/cmake" ] || error "ORT source not found at ${ORT_SOURCE}. Run tools/rv64gcv-onnxrt/build.sh first or clone manually."
     [ -d "${EIGEN_SOURCE}" ]     || error "Eigen not found at ${EIGEN_SOURCE}"
     [ -f "${YOLO_RUNNER}/yolo_runner.cpp" ] || error "YOLO runner not found at ${YOLO_RUNNER}"
 

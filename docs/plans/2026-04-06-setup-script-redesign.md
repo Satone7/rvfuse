@@ -23,7 +23,7 @@ A single `setup.sh` (~300-400 lines) that delegates actual work to existing scri
 | 0 | Init Submodules | `git submodule update --init [--depth 1]` | `third_party/qemu/.git`, `third_party/llvm-project/.git` | `git submodule deinit -f` + remove dirs |
 | 1 | Prepare Model | `./prepare_model.sh` | `output/yolo11n.ort`, `output/test.jpg` | Remove `output/yolo11n.onnx`, `output/yolo11n.ort`, `output/test.jpg` |
 | 2 | Build QEMU | `./verify_bbv.sh --force-rebuild` | `third_party/qemu/build/contrib/plugins/libbbv.so` | Remove `third_party/qemu/build/` |
-| 3 | Docker Build | `./tools/docker-onnxrt/build.sh` | `output/yolo_inference`, `output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1` | Remove `output/yolo_inference`, `output/sysroot/` |
+| 3 | Docker Build | `./tools/rv64gcv-onnxrt/build.sh` | `output/yolo_inference`, `output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1` | Remove `output/yolo_inference`, `output/sysroot/` |
 | 4 | BBV Profiling | Run QEMU with BBV plugin directly | `output/yolo.bbv.*.bb` (glob) | Remove `output/yolo.bbv.*` |
 | 5 | Hotspot Report | `python3 tools/analyze_bbv.py --json-output ...` | `output/hotspot.json` | Remove `output/hotspot.json` |
 | 6 | DFG Generation | `python3 -m tools.dfg ...` | `dfg/` directory (non-empty) | Remove `dfg/` |
@@ -103,7 +103,7 @@ Overall: FAIL
 - `.gitignore` — remove `tests/setup/test_helper/` entry
 
 ### Keep unchanged
-- `prepare_model.sh`, `verify_bbv.sh`, `tools/docker-onnxrt/build.sh`
+- `prepare_model.sh`, `verify_bbv.sh`, `tools/rv64gcv-onnxrt/build.sh`
 - `tools/profile_to_dfg.sh`, `tools/analyze_bbv.py`, `tools/dfg/`
 
 ## Testing

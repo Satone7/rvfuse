@@ -62,8 +62,8 @@ git submodule update --remote
 # Build QEMU with BBV plugin support (first time only)
 ./verify_bbv.sh
 
-# Docker build ONNX Runtime + YOLO runner for RISC-V
-./tools/docker-onnxrt/build.sh
+# Cross-compile ONNX Runtime + YOLO runner for RISC-V (rv64gcv)
+./tools/rv64gcv-onnxrt/build.sh
 
 # Run BBV profiling on the YOLO binary (dynamically linked, needs sysroot)
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
@@ -134,7 +134,7 @@ RVFuse/
 │   │   ├── gen_isadesc.py # llvm-tblgen ISA descriptor generator
 │   │   ├── isadesc/       # ISA extension descriptors (I, F, M)
 │   │   └── tests/         # Unit tests (~1300 lines)
-│   ├── docker-onnxrt/     # Docker RISC-V native build
+│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner (rv64gcv)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
 │   └── yolo_runner/       # YOLO inference C++ runner
 ├── tests/                 # Integration tests

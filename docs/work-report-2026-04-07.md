@@ -63,7 +63,7 @@ RVFuse/
 │   │   ├── gen_isadesc.py # llvm-tblgen ISA描述生成器
 │   │   ├── isadesc/       # ISA描述模块(RV64I/F/M)
 │   │   └── tests/         # 单元测试(~1300行)
-│   ├── docker-onnxrt/     # Docker RISC-V原生构建
+│   ├── rv64gcv-onnxrt/     # RISC-V交叉编译 (LLVM 22)
 │   └── yolo_runner/       # YOLO推理C++ Runner
 └── third_party/           # Git Submodules
     ├── qemu/              # Xuantie QEMU
@@ -101,7 +101,7 @@ RVFuse/
 - **职责**：通过 Docker 容器进行 RISC-V 原生交叉编译，
   生成 YOLO 推理可执行文件和 sysroot
 - **产出物**：`output/yolo_inference`、`output/sysroot/`
-- **脚本**：`tools/docker-onnxrt/build.sh`
+- **脚本**：`tools/rv64gcv-onnxrt/build.sh`
 
 ## Step 4: BBV 采样 (BBV Profiling)
 
