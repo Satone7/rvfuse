@@ -9,31 +9,17 @@ Implements a three-tier verdict model:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Literal
 
 from dfg.instruction import ISARegistry
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
-# Violation categories
-# ---------------------------------------------------------------------------
-
-_HARD_VIOLATIONS: frozenset[str] = frozenset({
-    "no_load_store",           # chain contains a load or store instruction
-    "register_class_mismatch", # instruction encoding reg_class != pattern reg_class
-    "no_config_write",         # chain contains a config-register-writing instruction (e.g. vsetvli)
-    "unknown_instruction",     # opcode not found in the ISA registry
-    "too_many_destinations",   # total unique dst fields across chain > 1
-    "too_many_sources",        # total unique src fields across chain > 3
-})
-
-_SOFT_VIOLATIONS: frozenset[str] = frozenset({
-    "has_immediate",           # at least one instruction in the chain carries an immediate
-    "missing_encoding",        # at least one instruction has no InstructionFormat metadata
-})
-
-# Known config-register-writing instructions (vsetvli, vsetivli, vsetvl).
+# Config-register-writing detection (vsetvli, vsetivli, vsetvl).
 # Detected by opcode 0x57 (OP-V) + funct3 0x7.
 _CONFIG_FUNCT3 = frozenset({0x07})
 
@@ -74,7 +60,9 @@ class ConstraintConfig:
         config = cls.defaults()
         constraints = data.get("constraints", {})
         for name, value in constraints.items():
-            if name in cls.ALL_CONSTRAINTS and isinstance(value, bool):
+            if name not in cls.ALL_CONSTRAINTS:
+                logger.warning("unknown constraint name in config file: %s", name)
+            elif isinstance(value, bool):
                 config.enabled[name] = value
         return config
 
@@ -128,23 +116,14 @@ class ConstraintChecker:
         """Check whether a constraint is currently enabled."""
         return self._config.enabled.get(name, False)
 
-    def _get_flows(self, opcodes: list[str]) -> list["RegisterFlow | None"]:
-        """Get RegisterFlow for all opcodes."""
-        return [self._registry.get_flow(op) for op in opcodes]
-
-    def _get_encodings(self, opcodes: list[str]) -> list["InstructionFormat | None"]:
-        """Get InstructionFormat for all opcodes."""
-        flows = self._get_flows(opcodes)
-        return [flow.encoding if flow else None for flow in flows]
-
-    def _check_encoding_32bit(self, pattern: dict) -> tuple[str, str] | None:
+    def _check_encoding_32bit(
+        self, opcodes: list[str], encodings: list,
+    ) -> tuple[str, str] | None:
         """Check that all instructions use 32-bit encoding (not compressed).
 
         Compressed instructions have opcode low 2 bits in {0x00, 0x01, 0x02}.
         Returns (violation_name, reason) tuple if violated, else None.
         """
-        opcodes: list[str] = pattern["opcodes"]
-        encodings = self._get_encodings(opcodes)
         for opcode, enc in zip(opcodes, encodings):
             if enc is None:
                 continue
@@ -154,7 +133,13 @@ class ConstraintChecker:
                 return ("encoding_32bit", f"{opcode} is a compressed instruction (opcode 0x{enc.opcode:02x})")
         return None
 
-    def _check_operand_format(self, pattern: dict) -> tuple[str, str] | None:
+    def _check_operand_format(
+        self,
+        opcodes: list[str],
+        chain_registers: list[list[str]],
+        flows: list,
+        encodings: list,
+    ) -> tuple[str, str] | None:
         """Check fused encoding operand format.
 
         Mode A: 3 external sources + 1 destination (no immediate)
@@ -164,12 +149,6 @@ class ConstraintChecker:
         Uses chain_registers to identify internal registers.
         Returns (violation_name, reason) tuple if violated, else None.
         """
-        opcodes: list[str] = pattern["opcodes"]
-        chain_registers: list[list[str]] = pattern.get("chain_registers", [])
-
-        flows = self._get_flows(opcodes)
-        encodings = self._get_encodings(opcodes)
-
         # Collect all internal (chain-through) registers
         internal_regs: set[str] = set()
         for chain in chain_registers:
@@ -214,7 +193,9 @@ class ConstraintChecker:
 
         return None
 
-    def _check_datatype_encoding_space(self, pattern: dict) -> tuple[str, str] | None:
+    def _check_datatype_encoding_space(
+        self, opcodes: list[str], encodings: list,
+    ) -> tuple[str, str] | None:
         """Check if chain involves multiple data types requiring encoding space.
 
         Float instructions: opcode 0x53
@@ -222,9 +203,6 @@ class ConstraintChecker:
 
         Returns (violation_name, reason) tuple if violated, else None.
         """
-        opcodes: list[str] = pattern["opcodes"]
-        encodings = self._get_encodings(opcodes)
-
         has_float = False
         has_vector = False
 
@@ -320,19 +298,20 @@ class ConstraintChecker:
 
         # --- New hardware-team constraint checks -------------------------------
         if self.is_enabled("encoding_32bit"):
-            result = self._check_encoding_32bit(pattern)
+            result = self._check_encoding_32bit(opcodes, encodings)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
 
         if self.is_enabled("operand_format"):
-            result = self._check_operand_format(pattern)
+            chain_registers: list[list[str]] = pattern.get("chain_registers", [])
+            result = self._check_operand_format(opcodes, chain_registers, flows, encodings)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
 
         if self.is_enabled("datatype_encoding_space"):
-            result = self._check_datatype_encoding_space(pattern)
+            result = self._check_datatype_encoding_space(opcodes, encodings)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
