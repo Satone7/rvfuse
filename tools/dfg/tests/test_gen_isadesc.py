@@ -207,5 +207,56 @@ class TestRv64vModule(unittest.TestCase):
         self.assertFalse(reg_f.is_known("vfmv.s.f"))
 
 
+class TestOpcodeExtraction(unittest.TestCase):
+    """Verify opcodes are extracted from Inst field, not missing Opcode field."""
+
+    def test_rv64i_add_opcode(self):
+        """ADD should have opcode 0x33, not 0x00."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        for mnemonic, flow in ALL_RV64I:
+            if mnemonic == "add":
+                self.assertEqual(flow.encoding.opcode, 0x33)
+                return
+        self.fail("add not found in ALL_RV64I")
+
+    def test_rv64i_addi_opcode(self):
+        """ADDI should have opcode 0x13."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        for mnemonic, flow in ALL_RV64I:
+            if mnemonic == "addi":
+                self.assertEqual(flow.encoding.opcode, 0x13)
+                return
+        self.fail("addi not found in ALL_RV64I")
+
+    def test_no_zero_opcodes_in_rv64v(self):
+        """No V instruction should have opcode 0x00."""
+        from dfg.isadesc.rv64v import ALL_RV64V
+        zero_opcodes = [m for m, f in ALL_RV64V if f.encoding.opcode == 0x00]
+        self.assertEqual(zero_opcodes, [], f"V instructions with opcode 0x00: {zero_opcodes[:10]}")
+
+    def test_auto_gen_rv64i_minimum_count(self):
+        """Auto-generated rv64i.py should have at least 40 instructions."""
+        from dfg.isadesc.rv64i import ALL_RV64I
+        self.assertGreaterEqual(len(ALL_RV64I), 40)
+
+
+class TestPseudoInstructionGuards(unittest.TestCase):
+    """Guard tests for pseudo-instruction completeness."""
+
+    def test_rv64i_pseudo_count(self):
+        """rv64i_pseudo.py should have at least 25 pseudo-instructions."""
+        from dfg.isadesc.rv64i_pseudo import ALL_RV64I_PSEUDO
+        self.assertGreaterEqual(len(ALL_RV64I_PSEUDO), 25)
+
+    def test_all_pseudos_register(self):
+        """Every pseudo-instruction should be loadable in a registry."""
+        from dfg.instruction import ISARegistry
+        from dfg.isadesc.rv64i_pseudo import ALL_RV64I_PSEUDO, build_registry
+        reg = ISARegistry()
+        build_registry(reg)
+        for mnemonic, _ in ALL_RV64I_PSEUDO:
+            self.assertTrue(reg.is_known(mnemonic), f"pseudo '{mnemonic}' not registered")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -291,9 +291,10 @@ def _extract_encoding(entry: dict, reg_class: str) -> InstructionFormat:
     def has_var_field(start: int, width: int) -> bool:
         return any(bv(inst[start + i]) is None for i in range(width))
 
-    # Opcode: the Opcode field is stored in reverse order
-    opcode_bits = entry.get("Opcode", [0] * 7)
-    opcode = int("".join(str(b) for b in reversed(opcode_bits)), 2)
+    # Opcode: bits [0:7] of the Inst array (LSB-first, already in binary)
+    opcode = extract_field(0, 7)
+    if opcode is None:
+        opcode = 0
 
     funct3 = extract_field(12, 3)
     funct7 = extract_field(25, 7)

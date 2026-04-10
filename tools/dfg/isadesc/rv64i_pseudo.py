@@ -59,8 +59,8 @@ ALL_RV64I_PSEUDO: list[tuple[str, RegisterFlow]] = [
     ("negw", RegisterFlow(["rd"], ["rs1"], encoding=_ef("R", 0x3b, 0x0, 0x20))),
     # seqz rd, rs  ->  sltiu rd, rs, 1
     ("seqz", RegisterFlow(["rd"], ["rs1"], encoding=_ef("I", 0x13, 0x3, has_rs2=False, has_imm=True, imm_bits=12))),
-    # snez rd, rs  ->  sltu rd, x0, rs
-    ("snez", RegisterFlow(["rd"], ["rs1"], encoding=_ef("I", 0x13, 0x7, has_rs2=False, has_imm=True, imm_bits=12))),
+    # snez rd, rs  ->  sltu rd, x0, rs  (R-type, opcode 0x33, funct3 0x3)
+    ("snez", RegisterFlow(["rd"], ["rs1"], encoding=_ef("R", 0x33, 0x3, 0x00))),
     # sltz rd, rs  ->  slt rd, rs, x0
     ("sltz", RegisterFlow(["rd"], ["rs1"], encoding=_ef("I", 0x13, 0x2, has_rs2=False, has_imm=True, imm_bits=12))),
     # sgtz rd, rs  ->  slt rd, x0, rs
@@ -79,6 +79,22 @@ ALL_RV64I_PSEUDO: list[tuple[str, RegisterFlow]] = [
     ("bnez", RegisterFlow([], ["rd"], encoding=_ef("B", 0x63, 0x1, has_rd=False, has_rs2=False, has_imm=True, imm_bits=12))),
     # beqz rs1, offset  ->  beq rs1, x0, 0
     ("beqz", RegisterFlow([], ["rd"], encoding=_ef("B", 0x63, 0x0, has_rd=False, has_rs2=False, has_imm=True, imm_bits=12))),
+    # bgtz rs, offset  ->  blt x0, rs, offset
+    ("bgtz", RegisterFlow([], ["rd"], encoding=_ef("B", 0x63, 0x4, has_rd=False, has_rs2=False, has_imm=True, imm_bits=12))),
+    # blez rs, offset  ->  bge x0, rs, offset
+    ("blez", RegisterFlow([], ["rd"], encoding=_ef("B", 0x63, 0x5, has_rd=False, has_rs2=False, has_imm=True, imm_bits=12))),
+    # ble rs1, rs2, offset  ->  bge rs2, rs1, offset
+    ("ble",  RegisterFlow([], ["rd", "rs1"], encoding=_ef("B", 0x63, 0x5, has_rd=False, has_imm=True, imm_bits=12))),
+    # bgtu rs1, rs2, offset  ->  bltu rs2, rs1, offset
+    ("bgtu", RegisterFlow([], ["rd", "rs1"], encoding=_ef("B", 0x63, 0x6, has_rd=False, has_imm=True, imm_bits=12))),
+    # bleu rs1, rs2, offset  ->  bgeu rs2, rs1, offset
+    ("bleu", RegisterFlow([], ["rd", "rs1"], encoding=_ef("B", 0x63, 0x7, has_rd=False, has_imm=True, imm_bits=12))),
+    # ebreak -> environment breakpoint (system instruction, no registers)
+    ("ebreak", RegisterFlow([], [], encoding=_ef("I", 0x73, 0x0, has_rd=False, has_rs1=False, has_rs2=False))),
+    # fence pred, succ -> ordering barrier (has fencearg operands, no GPR)
+    ("fence", RegisterFlow([], [], encoding=_ef("I", 0x0f, 0x0, has_rd=False, has_rs2=False, has_imm=True, imm_bits=4))),
+    # fence.i -> instruction fence (no registers)
+    ("fence.i", RegisterFlow([], [], encoding=_ef("I", 0x0f, 0x1, has_rd=False, has_rs1=False, has_rs2=False))),
 ]
 
 
