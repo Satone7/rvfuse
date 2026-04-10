@@ -189,6 +189,7 @@ cross_compile_onnxrt() {
         -v "${ort_build}:/build" \
         -v "${ort_install}:/install" \
         -v "${SCRIPT_DIR}/riscv64-linux-toolchain.cmake:/toolchain.cmake:ro" \
+        -v "${SCRIPT_DIR}/patch_onnx_schema.py:/patch_onnx_schema.py:ro" \
         -e LLVM_INSTALL=/llvm-install \
         -e SYSROOT=/sysroot \
         -e GCC_BIN_DIR=/riscv64-gcc-bin \
@@ -208,15 +209,7 @@ cross_compile_onnxrt() {
                 -DCMAKE_C_FLAGS='-march=${march}' \
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -G Ninja \
-            && python3 -c '
-import pathlib
-p = pathlib.Path("/build/_deps/onnx-src/onnx/defs/schema.h")
-t = p.read_text()
-t = t.replace(
-    "ONNX_UNUSED = \\\n      OpSchema(#name, __FILE__, __LINE__)",
-    "ONNX_UNUSED(\n      OpSchema(#name, __FILE__, __LINE__))")
-p.write_text(t)
-' \
+            && python3 /patch_onnx_schema.py \
             && ninja -j${JOBS} \
             && ninja install/strip
         "
