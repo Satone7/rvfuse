@@ -1,0 +1,65 @@
+From 027786025afb137ee925e1f37cc671264097c599 Mon Sep 17 00:00:00 2001
+From: Trae Bot <bot@trae.ai>
+Date: Wed, 1 Apr 2026 07:06:07 +0000
+Subject: [PATCH 2/3] feat(plugins): output basic block assembly instructions
+ to .disas file in bbv plugin
+
+---
+ contrib/plugins/bbv.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/contrib/plugins/bbv.c b/contrib/plugins/bbv.c
+index a1c749fe3b..ef21fc76d8 100644
+--- a/contrib/plugins/bbv.c
++++ b/contrib/plugins/bbv.c
+@@ -26,6 +26,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
+ static GHashTable *bbs;
+ static GRWLock bbs_lock;
+ static char *filename;
++static FILE *disas_file;
+ static struct qemu_plugin_scoreboard *vcpus;
+ static uint64_t interval = 100000000;
+ 
+@@ -42,6 +43,9 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
+ 
+     g_hash_table_unref(bbs);
+     g_free(filename);
++    if (disas_file) {
++        fclose(disas_file);
++    }
+     qemu_plugin_scoreboard_free(vcpus);
+ }
+ 
+@@ -121,6 +125,19 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+         bb->count = qemu_plugin_scoreboard_new(sizeof(uint64_t));
+         bb->index = g_hash_table_size(bbs) + 1;
+         g_hash_table_replace(bbs, &bb->vaddr, bb);
++
++        if (disas_file) {
++            fprintf(disas_file, "BB %u (vaddr: 0x%" PRIx64 ", %" PRIu64 " insns):\n",
++                    bb->index, bb->vaddr, n_insns);
++            for (size_t i = 0; i < n_insns; i++) {
++                struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
++                uint64_t insn_vaddr = qemu_plugin_insn_vaddr(insn);
++                char *disas = qemu_plugin_insn_disas(insn);
++                fprintf(disas_file, "  0x%" PRIx64 ": %s\n", insn_vaddr, disas ? disas : "unknown");
++                g_free(disas);
++            }
++            fprintf(disas_file, "\n");
++        }
+     }
+     g_rw_lock_writer_unlock(&bbs_lock);
+ 
+@@ -157,6 +174,9 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
+         return -1;
+     }
+ 
++    g_autofree gchar *disas_filename = g_strdup_printf("%s.disas", filename);
++    disas_file = fopen(disas_filename, "w");
++
+     bbs = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, free_bb);
+     vcpus = qemu_plugin_scoreboard_new(sizeof(Vcpu));
+     qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
+-- 
+2.34.1
+

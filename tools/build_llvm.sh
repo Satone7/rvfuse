@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# build_llvm.sh — Build LLVM as a RISC-V cross-compiler.
+# build_llvm.sh — Build LLVM 22 as a RISC-V cross-compiler.
 #
-# Compiles third_party/llvm-project with RISC-V target support including
-# the V (vector) extension for auto-vectorization. Produces clang, lld,
-# compiler-rt under third_party/llvm-install/.
+# Compiles third_party/llvm-project (LLVM 22) with RISC-V target support
+# including the V (vector) extension for RVV 1.0 auto-vectorization.
+# Produces clang, lld, and related tools under third_party/llvm-install/.
+#
+# LLVM 22 notes:
+#   - RVV 1.0 is fully supported (no -menable-experimental-extensions needed)
+#   - -march=rv64gcv enables full auto-vectorization for RISC-V Vector
+#   - Both clang and clang-scan-deps are built by default
 #
 # Usage:
 #   ./tools/build_llvm.sh              # build (incremental)
@@ -54,7 +59,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Build LLVM as a RISC-V cross-compiler with V extension support.
+Build LLVM 22 as a RISC-V cross-compiler with RVV 1.0 vector support.
 
 Options:
   --clean       Remove build directory before building
@@ -134,7 +139,7 @@ cmake_configure() {
         return 0
     fi
 
-    step "Configuring LLVM (CMake)"
+    step "Configuring LLVM 22 (CMake)"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
@@ -160,7 +165,7 @@ cmake_configure() {
 # Step 4: Build
 # ---------------------------------------------------------------------------
 build() {
-    step "Building LLVM (RISCV + V) with $JOBS jobs"
+    step "Building LLVM 22 (RISCV + RVV 1.0) with $JOBS jobs"
     cd "$BUILD_DIR"
 
     ninja -j "$JOBS"
@@ -206,8 +211,9 @@ verify() {
     step "Verifying toolchain"
 
     # Version check
-    info "Clang version:"
-    "$CLANG" --version | head -1
+    local VERSION
+    VERSION=$("$CLANG" --version | head -1)
+    info "$VERSION"
 
     # Verify RISCV target is supported
     if "$CLANG" --print-targets | grep -q "riscv64"; then
@@ -236,7 +242,7 @@ TESTEOF
         if "$BIN_DIR/llvm-readobj" -h "$TEST_OBJ" 2>/dev/null | grep -q "RISC-V"; then
             info "ELF format (RISC-V): OK"
         else
-            warn "Could not verify ELF format (llvm-readelf may not be built yet)"
+            warn "Could not verify ELF format (llvm-readobj may not be built yet)"
         fi
     else
         error "Compile test failed!"
@@ -244,18 +250,51 @@ TESTEOF
         exit 1
     fi
 
-    # Compile test — RVV (V extension for auto-vectorization)
+    # Compile test — RVV 1.0 (V extension, no experimental flag needed in LLVM 22)
     if "$CLANG" --target=riscv64-unknown-linux-gnu \
          -march=rv64gcv \
          -c "$TEST_SRC" -o "$TEST_OBJ" 2>/dev/null; then
-        info "Compile test (rv64gcv / V extension): OK"
+        info "Compile test (rv64gcv / RVV 1.0): OK"
     else
-        error "Compile test (rv64gcv) failed!"
+        error "Compile test (rv64gcv) failed! RVV 1.0 should be fully supported in LLVM 22."
         rm -f "$TEST_SRC" "$TEST_OBJ"
         exit 1
     fi
 
     rm -f "$TEST_SRC" "$TEST_OBJ"
+
+    # Auto-vectorization capability test
+    step "Verifying RVV auto-vectorization capability"
+    local VEC_SRC
+    VEC_SRC=$(mktemp /tmp/rvfuse_vec_test_XXXXXX.c)
+    local VEC_ASM
+    VEC_ASM=$(mktemp /tmp/rvfuse_vec_test_XXXXXX.s)
+
+    cat > "$VEC_SRC" <<'VECEOF'
+void vadd(float *a, float *b, float *c, int n) {
+    for (int i = 0; i < n; i++) {
+        c[i] = a[i] + b[i];
+    }
+}
+VECEOF
+
+    if "$CLANG" --target=riscv64-unknown-linux-gnu \
+         -march=rv64gcv \
+         -O3 -ffast-math \
+         -mllvm -riscv-v-vector-bits-min=128 \
+         -S "$VEC_SRC" -o "$VEC_ASM" 2>/dev/null; then
+        # Check for RVV vector instructions (vadd, vfadd, vle, vse, vsetvli, etc.)
+        if grep -qE '(vfadd|vadd|vle|vse|vl1re|vs1r|vsetivli|vsetvli)[.[:space:]]' "$VEC_ASM"; then
+            info "RVV auto-vectorization: OK (vector instructions detected)"
+        else
+            warn "No RVV vector instructions found in assembly output"
+            warn "This may be normal for small loop bodies — check compiler flags if vectorization is expected"
+        fi
+    else
+        warn "Auto-vectorization test compilation failed"
+    fi
+
+    rm -f "$VEC_SRC" "$VEC_ASM"
 
     echo ""
     info "All verifications passed!"
@@ -267,7 +306,7 @@ TESTEOF
 summary() {
     echo ""
     echo "============================================="
-    info "LLVM RISC-V Cross-Compiler Ready"
+    info "LLVM 22 RISC-V Cross-Compiler Ready"
     echo "============================================="
     echo ""
     echo "  Build dir:   $BUILD_DIR/bin/"
@@ -276,8 +315,11 @@ summary() {
     fi
     echo ""
     echo "  Supported march options:"
-    echo "    rv64gc    RV64IMAFDC (base + float + compressed)"
-    echo "    rv64gcv   RV64IMAFDCV (with vector extension for auto-vectorization)"
+    echo "    rv64gc     RV64IMAFDC (base + float + compressed)"
+    echo "    rv64gcv    RV64IMAFDCV (with RVV 1.0 vector extension)"
+    echo ""
+    echo "  RVV auto-vectorization:"
+    echo "    clang -O3 -march=rv64gcv -ffast-math source.c"
     echo ""
     echo "  Usage:"
     echo "    $BUILD_DIR/bin/clang --target=riscv64 -march=rv64gcv -c foo.c"
@@ -296,7 +338,7 @@ summary() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    echo "=== LLVM RISC-V Cross-Compiler Build ==="
+    echo "=== LLVM 22 RISC-V Cross-Compiler Build ==="
     echo "  Source:     $LLVM_SRC"
     echo "  Build dir:  $BUILD_DIR"
     echo "  Install:    $INSTALL_DIR"
