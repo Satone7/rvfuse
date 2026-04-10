@@ -6,7 +6,7 @@ set -euo pipefail
 # =============================================================================
 #
 # Thin orchestrator that delegates actual work to existing scripts:
-#   prepare_model.sh, verify_bbv.sh, tools/docker-onnxrt/build.sh,
+#   prepare_model.sh, verify_bbv.sh, tools/rv64gcv-onnxrt/build.sh,
 #   tools/profile_to_dfg.sh
 #
 # Supports artifact-based skip detection and --force with cleanup.
@@ -24,7 +24,7 @@ readonly -A STEP_NAMES=(
     [0]="Init Submodules"
     [1]="Prepare Model"
     [2]="Build QEMU"
-    [3]="YOLO Build"
+    [3]="Cross-compile ORT"
     [4]="BBV Profiling"
     [5]="Hotspot Report"
     [6]="DFG Generation"
@@ -52,18 +52,18 @@ readonly -a STEP2_ARTIFACTS=(
 # Step 3 artifacts depend on target — checked specially in step_artifacts_exist
 # shellcheck disable=SC2034
 readonly -a STEP3_ARTIFACTS_INFERENCE=(
-    "output/yolo_inference"
-    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+    "output/cross-ort/yolo_inference"
+    "output/cross-ort/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
 )
 # shellcheck disable=SC2034
 readonly -a STEP3_ARTIFACTS_PREPROCESS=(
-    "output/yolo_preprocess"
-    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+    "output/cross-ort/yolo_preprocess"
+    "output/cross-ort/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
 )
 # shellcheck disable=SC2034
 readonly -a STEP3_ARTIFACTS_POSTPROCESS=(
-    "output/yolo_postprocess"
-    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+    "output/cross-ort/yolo_postprocess"
+    "output/cross-ort/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
 )
 # shellcheck disable=SC2034
 readonly -a STEP5_ARTIFACTS=(
@@ -305,7 +305,7 @@ check_prerequisites() {
 
     # Check Docker (for Step 3)
     if ! command -v docker &>/dev/null; then
-        log_warn "Docker is not installed. Step 3 (Docker Build) will fail."
+        log_warn "Docker is not installed. Step 3 sysroot extraction requires Docker."
     else
         log_info "Docker: $(docker --version 2>&1) (ok)"
     fi
@@ -456,11 +456,11 @@ cleanup_step() {
             rm -rf "${PROJECT_ROOT}/third_party/qemu/build"
             ;;
         3)
-            log_info "Cleaning Step 3 artifacts (YOLO build)..."
-            rm -f "${PROJECT_ROOT}/output/yolo_inference"
-            rm -f "${PROJECT_ROOT}/output/yolo_preprocess"
-            rm -f "${PROJECT_ROOT}/output/yolo_postprocess"
-            rm -rf "${PROJECT_ROOT}/output/sysroot"
+            log_info "Cleaning Step 3 artifacts (cross-compile ORT)..."
+            rm -f "${PROJECT_ROOT}/output/cross-ort/yolo_inference"
+            rm -f "${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
+            rm -f "${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
+            rm -rf "${PROJECT_ROOT}/output/cross-ort/sysroot"
             ;;
         4)
             log_info "Cleaning Step 4 artifacts (BBV output)..."
@@ -561,21 +561,26 @@ step2_build_qemu() {
 }
 
 # =============================================================================
-# Step 3: Docker Build
+# Step 3: Cross-compile ORT + YOLO runner
 # =============================================================================
 
-step3_docker_build() {
+step3_cross_compile() {
     local step=3
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    # TODO: ONNX Runtime Docker build needs adaptation for LLVM 22 toolchain.
-    # The docker-onnxrt build.sh and Dockerfile were written for the previous
-    # toolchain setup. After the LLVM toolchain migration, the ONNX Runtime
-    # build (CMake config, compiler flags, sysroot extraction) needs to be
-    # updated to use tools/docker-llvm/ instead.
-    log_warn "Step 3 ONNX Runtime build requires LLVM 22 toolchain adaptation."
-    log_warn "Skipping — run './tools/docker-onnxrt/build.sh' manually after adaptation."
-    record_step_result "$step" "SKIP" "LLVM 22 toolchain adaptation needed"
+    local build_script="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/build.sh"
+    local build_args=()
+
+    if is_step_forced "$step"; then
+        build_args+=("--force")
+    fi
+
+    if ! bash "${build_script}" "${build_args[@]}" 2>&1; then
+        record_step_result "$step" "FAIL" "tools/rv64gcv-onnxrt/build.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "ORT + YOLO runner cross-compiled"
     return 0
 }
 
@@ -591,15 +596,15 @@ step4_bbv_profiling() {
     # due to LLVM 22 toolchain adaptation, Step 4 cannot run.
     case "$TARGET" in
         inference)
-            local required_bin="${PROJECT_ROOT}/output/yolo_inference"
+            local required_bin="${PROJECT_ROOT}/output/cross-ort/yolo_inference"
             local required_msg="depends on Step 3 (ONNX Runtime build)"
             ;;
         preprocess)
-            required_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            required_bin="${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
             required_msg="depends on Step 3 (preprocess build)"
             ;;
         postprocess)
-            required_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            required_bin="${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
             required_msg="depends on Step 3 (postprocess build)"
             ;;
     esac
@@ -611,23 +616,23 @@ step4_bbv_profiling() {
 
     local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
     local plugin_so="${PROJECT_ROOT}/tools/bbv/libbbv.so"
-    local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local sysroot="${PROJECT_ROOT}/output/cross-ort/sysroot"
     local bbv_outfile="${PROJECT_ROOT}/output/yolo.bbv"
 
     local target_bin="" target_args=()
 
     case "$TARGET" in
         inference)
-            target_bin="${PROJECT_ROOT}/output/yolo_inference"
+            target_bin="${PROJECT_ROOT}/output/cross-ort/yolo_inference"
             target_args=("${PROJECT_ROOT}/output/yolo11n.ort" "${PROJECT_ROOT}/output/test.jpg" "10")
             ;;
         preprocess)
-            target_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            target_bin="${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
             target_args=("${PROJECT_ROOT}/output/test_video.mp4" "10")
             bbv_outfile="${PROJECT_ROOT}/output/bbv_pre"
             ;;
         postprocess)
-            target_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            target_bin="${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
             target_args=("--synthetic" "${PROJECT_ROOT}/output/test.jpg")
             bbv_outfile="${PROJECT_ROOT}/output/bbv_post"
             ;;
@@ -688,17 +693,17 @@ step5_hotspot_report() {
     case "$TARGET" in
         inference)
             bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_inference"
             json_output="${PROJECT_ROOT}/output/hotspot.json"
             ;;
         preprocess)
             bbv_pattern="${PROJECT_ROOT}/output/bbv_pre.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
             json_output="${PROJECT_ROOT}/output/bbv_pre_report.json"
             ;;
         postprocess)
             bbv_pattern="${PROJECT_ROOT}/output/bbv_post.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
             json_output="${PROJECT_ROOT}/output/bbv_post_report.json"
             ;;
     esac
@@ -711,7 +716,7 @@ step5_hotspot_report() {
     fi
     local bbv_file="${bbv_files[0]}"
 
-    local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local sysroot="${PROJECT_ROOT}/output/cross-ort/sysroot"
 
     if [[ ! -f "$elf_bin" ]]; then
         record_step_result "$step" "FAIL" "$(basename "$elf_bin") not found — run Step 3 first"
@@ -758,17 +763,17 @@ step6_dfg_generation() {
     case "$TARGET" in
         inference)
             bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_inference"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_inference"
             dfg_dir="${PROJECT_ROOT}/output/dfg"
             ;;
         preprocess)
             bbv_pattern="${PROJECT_ROOT}/output/bbv_pre.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
             dfg_dir="${PROJECT_ROOT}/output/dfg_pre"
             ;;
         postprocess)
             bbv_pattern="${PROJECT_ROOT}/output/bbv_post.*.bb"
-            elf_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            elf_bin="${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
             dfg_dir="${PROJECT_ROOT}/output/dfg_post"
             ;;
     esac
@@ -780,7 +785,7 @@ step6_dfg_generation() {
     fi
     local bbv_file="${bbv_files[0]}"
 
-    local sysroot="${PROJECT_ROOT}/output/sysroot"
+    local sysroot="${PROJECT_ROOT}/output/cross-ort/sysroot"
 
     if [[ ! -f "$elf_bin" ]]; then
         record_step_result "$step" "FAIL" "$(basename "$elf_bin") not found — run Step 3 first"
@@ -970,7 +975,7 @@ run_setup() {
             0) step0_init_submodules ;;
             1) step1_prepare_model ;;
             2) step2_build_qemu ;;
-            3) step3_docker_build ;;
+            3) step3_cross_compile ;;
             4) step4_bbv_profiling ;;
             5) step5_hotspot_report ;;
             6) step6_dfg_generation ;;

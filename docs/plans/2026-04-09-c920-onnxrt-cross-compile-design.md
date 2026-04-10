@@ -6,7 +6,7 @@
 
 ## Problem
 
-The project currently builds ONNX Runtime natively inside a `riscv64/ubuntu` Docker container using QEMU emulation (tools/docker-onnxrt/), which takes 2-6 hours due to emulation overhead. A cross-compiled build using the pre-built LLVM 13 toolchain can dramatically reduce build time while producing identical RISC-V binaries.
+The project currently builds ONNX Runtime natively inside a `riscv64/ubuntu` Docker container using QEMU emulation (tools/rv64gcv-onnxrt/), which takes 2-6 hours due to emulation overhead. A cross-compiled build using the pre-built LLVM 13 toolchain can dramatically reduce build time while producing identical RISC-V binaries.
 
 Additionally, the current build uses `--minimal_build` which excludes many ORT features. Phase 2 fusion candidate discovery may benefit from a full ONNX Runtime build for accurate cycle-level profiling.
 
@@ -44,7 +44,7 @@ Use an x86_64 Ubuntu 22.04 Docker container with the pre-built LLVM 13 toolchain
 This approach was chosen because:
 - ONNX Runtime full build requires many dependencies (protobuf, flatbuffers, abseil, etc.)
 - Container-based dependency management keeps the host clean
-- Consistent with the existing docker-onnxrt pattern in the project
+- Consistent with the existing rv64gcv-onnxrt pattern in the project
 
 ### Dockerfile
 
@@ -56,8 +56,8 @@ Installed packages:
 
 Mounted volumes:
 - `third_party/llvm-install/` → toolchain
-- `tools/docker-onnxrt/vendor/onnxruntime/` → ORT source
-- `tools/docker-onnxrt/vendor/eigen/` → Eigen (FETCHCONTENT_SOURCE_DIR)
+- `tools/rv64gcv-onnxrt/vendor/onnxruntime/` → ORT source
+- `tools/rv64gcv-onnxrt/vendor/eigen/` → Eigen (FETCHCONTENT_SOURCE_DIR)
 - `tools/yolo_runner/` → YOLO runner source
 
 ### Build Script Flow (`build.sh`)
@@ -66,7 +66,7 @@ Mounted volumes:
 Step 0: Prerequisites check
   - Docker available
   - third_party/llvm-install/ exists
-  - tools/docker-onnxrt/vendor/onnxruntime/ exists
+  - tools/rv64gcv-onnxrt/vendor/onnxruntime/ exists
 
 Step 1: Extract riscv64 sysroot
   - docker run riscv64/ubuntu:22.04 to install extra deps
@@ -131,9 +131,9 @@ LLVM 13 has no pre-built RISC-V compiler-rt/libunwind/libcxxabi. Instead:
 - Use `-libc++` from the sysroot (if available) or the host GCC's libstdc++
 - If missing runtime libs cause issues, fall back to selectively building only what's needed from compiler-rt
 
-### Key Differences from Existing docker-onnxrt Build
+### Key Differences from Existing rv64gcv-onnxrt Build
 
-| Aspect | docker-onnxrt (native) | c920-onnxrt (cross) |
+| Aspect | rv64gcv-onnxrt (native) | c920-onnxrt (cross) |
 |--------|----------------------|---------------------|
 | Compilation | Native (QEMU emulation) | Cross (LLVM 13) |
 | Build type | Minimal | Full |

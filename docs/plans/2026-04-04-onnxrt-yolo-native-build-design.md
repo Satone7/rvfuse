@@ -160,7 +160,7 @@ interval=10000,outfile=output/yolo.bbv \
 ```
 rvfuse/
 ├── tools/
-│   ├── docker-onnxrt/
+│   ├── rv64gcv-onnxrt/
 │   │   ├── Dockerfile          # 三阶段 RISC-V 原生构建
 │   │   └── build.sh            # docker build 入口脚本
 │   ├── yolo_runner/
@@ -186,7 +186,7 @@ rvfuse/
 ./verify_bbv.sh
 
 # 步骤 2: Docker 原生编译 ONNX Runtime + YOLO runner
-./tools/docker-onnxrt/build.sh
+./tools/rv64gcv-onnxrt/build.sh
 
 # 步骤 3: 运行 BBV 分析
 qemu-riscv64 \

@@ -179,7 +179,7 @@ RVFuse/
 │   ├── analyze_bbv.py     # BBV hotspot analysis (464 lines)
 │   ├── profile_to_dfg.sh  # End-to-end profiling → DFG pipeline
 │   ├── dfg/               # DFG generation engine (~3400 lines)
-│   ├── docker-onnxrt/     # Docker RISC-V native build
+│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
 │   └── yolo_runner/       # YOLO inference C++ runner
 ├── tests/                 # Integration tests

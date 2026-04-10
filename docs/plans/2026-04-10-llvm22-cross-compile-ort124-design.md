@@ -9,7 +9,7 @@ Cross-compile ONNX Runtime v1.24.4 (full build) for rv64gcv on the host machine 
 
 ## Scope
 
-- Create a self-contained build pipeline under `tools/cross-compile-ort/`
+- Create a self-contained build pipeline under `tools/rv64gcv-onnxrt/`
 - Upgrade ORT from v1.17.3 to v1.24.4
 - Use lld as the linker (no GCC cross-compiler dependency)
 - Docker is used only for sysroot extraction from `riscv64/ubuntu:24.04`
@@ -24,7 +24,7 @@ Rationale: Eliminates GCC cross-compiler dependency; lld 22 has mature RISC-V su
 ## Architecture
 
 ```
-tools/cross-compile-ort/
+tools/rv64gcv-onnxrt/
 ├── build.sh                      # Main build script (sysroot + ORT compile)
 └── riscv64-linux-toolchain.cmake  # CMake toolchain file
 ```
@@ -70,7 +70,7 @@ Key settings:
 
 ```bash
 cmake <ort-source>/cmake \
-    -DCMAKE_TOOLCHAIN_FILE=tools/cross-compile-ort/riscv64-linux-toolchain.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake \
     -DCMAKE_INSTALL_PREFIX=output/cross-ort \
     -DCMAKE_BUILD_TYPE=Release \
     -Donnxruntime_BUILD_SHARED_LIB=ON \
@@ -87,8 +87,8 @@ Full build (no `--minimal_build` flag).
 
 ## Source Management
 
-- ORT source: `tools/docker-onnxrt/vendor/onnxruntime/` (auto-clone v1.24.4 shallow + submodules if missing)
-- Eigen: `tools/docker-onnxrt/vendor/eigen/` (version 3.4.0, auto-clone if missing)
+- ORT source: `tools/rv64gcv-onnxrt/vendor/onnxruntime/` (auto-clone v1.24.4 shallow + submodules if missing)
+- Eigen: `tools/rv64gcv-onnxrt/vendor/eigen/` (version 3.4.0, auto-clone if missing)
 - LLVM toolchain: `third_party/llvm-install/` (symlinked from main repo)
 
 ## Differences from c920-onnxrt

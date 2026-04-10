@@ -87,36 +87,35 @@ tools/bbv/
 └── libbbv.so                                  # Custom BBV plugin (used by pipeline)
 ```
 
-### Step 3: Build ONNX Runtime + YOLO runner for RISC-V
+### Step 3: Cross-compile ONNX Runtime + YOLO runner for RISC-V
 
 ```bash
-./tools/docker-onnxrt/build.sh
+./tools/rv64gcv-onnxrt/build.sh
 ```
 
 This script:
-1. **Pre-clones** `onnxruntime` and `eigen` source trees to `tools/docker-onnxrt/vendor/` on the host (skips if already present)
-2. **Builds** a Docker image targeting `riscv64/ubuntu:24.04` — ONNX Runtime is compiled natively under QEMU emulation inside the container
-3. **Extracts** the `yolo_inference` binary and a minimal sysroot from the container
+1. **Clones** `onnxruntime` (v1.24.4) and `eigen` (3.4.0) source trees to `tools/rv64gcv-onnxrt/vendor/` (skips if already present)
+2. **Extracts** a riscv64 sysroot from a Docker container (requires Docker)
+3. **Cross-compiles** ONNX Runtime using LLVM 22 + lld targeting rv64gcv
+4. **Cross-compiles** the YOLO inference runner against the built ORT
 
-Expected duration: 2–6 hours (QEMU emulation makes compilation slow). Subsequent runs use BuildKit cache and are much faster (~1 minute).
+Expected duration: 10–30 minutes (host cross-compilation). Docker is required only for sysroot extraction.
 
 After this step:
 
 ```
-output/
+output/cross-ort/
 ├── yolo_inference          # RISC-V ELF binary (dynamically linked, ~1 MB)
-├── yolo_preprocess         # Preprocess test binary (FFmpeg only, no ORT)
-├── yolo_postprocess        # Postprocess test binary (no ORT/FFmpeg)
-├── yolo11n.ort             # ORT format model
-├── test.jpg
+├── lib/
+│   └── libonnxruntime.so.1.24.4  # ONNX Runtime (~15 MB)
+├── include/                # ORT headers
 └── sysroot/                # Minimal RISC-V sysroot for QEMU
     └── lib/riscv64-linux-gnu/
-        ├── ld-linux-riscv64-lp64d.so.1  # Dynamic linker
+        ├── ld-linux-riscv64-lp64d.so.1
         ├── libc.so.6
         ├── libstdc++.so.6
         ├── libm.so.6
-        ├── libgcc_s.so.1
-        └── libonnxruntime.so.1.17.3  # ONNX Runtime (~8 MB)
+        └── libgcc_s.so.1
 ```
 
 ### Step 4: Run BBV profiling
@@ -345,11 +344,11 @@ RVFuse/
 │   └── plans/                   # Design + implementation plans per feature
 ├── memory/                      # Ground-rules and project governance
 ├── tools/
-│   ├── docker-onnxrt/
-│   │   ├── Dockerfile           # Multi-stage Docker build for RISC-V
-│   │   ├── build.sh             # Orchestrate build + sysroot extraction
+│   ├── rv64gcv-onnxrt/
+│   │   ├── build.sh             # Cross-compile ORT + YOLO runner (rv64gcv)
+│   │   ├── riscv64-linux-toolchain.cmake  # CMake toolchain
 │   │   └── vendor/              # Pre-cloned source trees (gitignored)
-│   │       ├── onnxruntime/     # microsoft/onnxruntime v1.17.3
+│   │       ├── onnxruntime/     # microsoft/onnxruntime v1.24.4
 │   │       └── eigen/           # libeigen 3.4.0
 │   ├── yolo_runner/
 │   │   ├── yolo_runner.cpp      # YOLO inference runner (ONNX Runtime C++ API)
@@ -386,7 +385,7 @@ RVFuse/
 | Dependency | Source | Purpose |
 |------------|--------|---------|
 | QEMU | `third_party/qemu/` | RISC-V emulation + BBV profiling plugin |
-| ONNX Runtime | microsoft/onnxruntime v1.17.3 | Neural network inference engine |
+| ONNX Runtime | microsoft/onnxruntime v1.24.4 | Neural network inference engine |
 | Eigen | libeigen 3.4.0 | Linear algebra (ONNX Runtime dependency) |
 | LLVM | `third_party/llvm-project/` | RISC-V toolchain (future phases) |
 

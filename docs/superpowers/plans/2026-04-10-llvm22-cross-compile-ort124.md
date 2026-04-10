@@ -14,15 +14,15 @@
 
 | File | Responsibility |
 |------|----------------|
-| `tools/cross-compile-ort/riscv64-linux-toolchain.cmake` | CMake toolchain: target triple, sysroot, march flags, lld linker |
-| `tools/cross-compile-ort/build.sh` | Build orchestrator: prerequisites, sysroot export, source clone, cmake, ninja, install |
+| `tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake` | CMake toolchain: target triple, sysroot, march flags, lld linker |
+| `tools/rv64gcv-onnxrt/build.sh` | Build orchestrator: prerequisites, sysroot export, source clone, cmake, ninja, install |
 
 ---
 
 ### Task 1: Create the CMake toolchain file
 
 **Files:**
-- Create: `tools/cross-compile-ort/riscv64-linux-toolchain.cmake`
+- Create: `tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake`
 
 Reference: `tools/c920-onnxrt/riscv64-linux-toolchain.cmake` (existing pattern). Key changes: replace `-B/riscv64-gcc-bin -Wl,-Bdynamic` with `-fuse-ld=lld`.
 
@@ -65,8 +65,8 @@ SET(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 - [ ] **Step 2: Commit**
 
 ```bash
-git add tools/cross-compile-ort/riscv64-linux-toolchain.cmake
-git commit -m "feat(cross-compile-ort): add CMake toolchain file for rv64gcv"
+git add tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake
+git commit -m "feat(rv64gcv-onnxrt): add CMake toolchain file for rv64gcv"
 ```
 
 ---
@@ -74,7 +74,7 @@ git commit -m "feat(cross-compile-ort): add CMake toolchain file for rv64gcv"
 ### Task 2: Create the build script — scaffolding + prerequisites
 
 **Files:**
-- Create: `tools/cross-compile-ort/build.sh`
+- Create: `tools/rv64gcv-onnxrt/build.sh`
 
 Reference: `tools/c920-onnxrt/build.sh` (structure, colors, argument parsing). Adapt: remove Docker build step, remove YOLO runner step, change Ubuntu to 24.04, use lld.
 
@@ -87,7 +87,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_DIR="${PROJECT_ROOT}/output/cross-ort"
-VENDOR_DIR="${PROJECT_ROOT}/tools/docker-onnxrt/vendor"
+VENDOR_DIR="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 ORT_SOURCE="${VENDOR_DIR}/onnxruntime"
 EIGEN_SOURCE="${VENDOR_DIR}/eigen"
@@ -146,8 +146,8 @@ check_prerequisites
 - [ ] **Step 2: Commit**
 
 ```bash
-git add tools/cross-compile-ort/build.sh
-git commit -m "feat(cross-compile-ort): add build script scaffolding with prerequisites"
+git add tools/rv64gcv-onnxrt/build.sh
+git commit -m "feat(rv64gcv-onnxrt): add build script scaffolding with prerequisites"
 ```
 
 ---
@@ -155,9 +155,9 @@ git commit -m "feat(cross-compile-ort): add build script scaffolding with prereq
 ### Task 3: Add source cloning logic
 
 **Files:**
-- Modify: `tools/cross-compile-ort/build.sh`
+- Modify: `tools/rv64gcv-onnxrt/build.sh`
 
-Append after the `check_prerequisites` call. Reference: `tools/docker-onnxrt/build.sh:14-47` (clone_if_missing + submodule fetch).
+Append after the `check_prerequisites` call. Reference: `tools/rv64gcv-onnxrt/build.sh:14-47` (clone_if_missing + submodule fetch).
 
 - [ ] **Step 1: Append source cloning functions and call**
 
@@ -212,8 +212,8 @@ clone_sources
 - [ ] **Step 2: Commit**
 
 ```bash
-git add tools/cross-compile-ort/build.sh
-git commit -m "feat(cross-compile-ort): add ORT v1.24.4 and Eigen source cloning"
+git add tools/rv64gcv-onnxrt/build.sh
+git commit -m "feat(rv64gcv-onnxrt): add ORT v1.24.4 and Eigen source cloning"
 ```
 
 ---
@@ -221,7 +221,7 @@ git commit -m "feat(cross-compile-ort): add ORT v1.24.4 and Eigen source cloning
 ### Task 4: Add sysroot extraction logic
 
 **Files:**
-- Modify: `tools/cross-compile-ort/build.sh`
+- Modify: `tools/rv64gcv-onnxrt/build.sh`
 
 Append after the `clone_sources` call. Reference: `tools/c920-onnxrt/build.sh:56-141` (sysroot extraction). Key changes: Ubuntu 24.04, `libstdc++-12-dev`, remove GCC-ld specific symlinks.
 
@@ -316,8 +316,8 @@ extract_sysroot
 - [ ] **Step 2: Commit**
 
 ```bash
-git add tools/cross-compile-ort/build.sh
-git commit -m "feat(cross-compile-ort): add sysroot extraction from Ubuntu 24.04"
+git add tools/rv64gcv-onnxrt/build.sh
+git commit -m "feat(rv64gcv-onnxrt): add sysroot extraction from Ubuntu 24.04"
 ```
 
 ---
@@ -325,7 +325,7 @@ git commit -m "feat(cross-compile-ort): add sysroot extraction from Ubuntu 24.04
 ### Task 5: Add cmake build and install logic
 
 **Files:**
-- Modify: `tools/cross-compile-ort/build.sh`
+- Modify: `tools/rv64gcv-onnxrt/build.sh`
 
 Append after the `extract_sysroot` call. This is the main build step — cmake configure + ninja build + ninja install/strip, all running directly on the host (no `docker run`).
 
@@ -397,9 +397,9 @@ file "${OUTPUT_DIR}/onnxruntime/lib/libonnxruntime.so" || true
 - [ ] **Step 2: Make the script executable and commit**
 
 ```bash
-chmod +x tools/cross-compile-ort/build.sh
-git add tools/cross-compile-ort/build.sh
-git commit -m "feat(cross-compile-ort): add cmake cross-compile and install steps"
+chmod +x tools/rv64gcv-onnxrt/build.sh
+git add tools/rv64gcv-onnxrt/build.sh
+git commit -m "feat(rv64gcv-onnxrt): add cmake cross-compile and install steps"
 ```
 
 ---
@@ -429,7 +429,7 @@ Note: Do NOT commit this symlink — it's local to the worktree. The main repo h
 - [ ] **Step 2: Run the full build**
 
 ```bash
-./tools/cross-compile-ort/build.sh -j$(nproc)
+./tools/rv64gcv-onnxrt/build.sh -j$(nproc)
 ```
 
 Expected: The script runs through all three steps (source clone, sysroot extraction, cmake build). The final output should show:
@@ -462,5 +462,5 @@ If the build succeeded without modifications, no commit is needed. If you had to
 
 ```bash
 git add -A
-git commit -m "fix(cross-compile-ort): fixes from initial build validation"
+git commit -m "fix(rv64gcv-onnxrt): fixes from initial build validation"
 ```

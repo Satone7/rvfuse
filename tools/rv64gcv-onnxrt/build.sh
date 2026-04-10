@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_DIR="${PROJECT_ROOT}/output/cross-ort"
-VENDOR_DIR="${PROJECT_ROOT}/tools/docker-onnxrt/vendor"
+VENDOR_DIR="${SCRIPT_DIR}/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 ORT_SOURCE="${VENDOR_DIR}/onnxruntime"
 EIGEN_SOURCE="${VENDOR_DIR}/eigen"
@@ -248,11 +248,52 @@ cross_compile() {
 
 cross_compile
 
+# --- Step 4: Cross-compile YOLO runner ---
+build_yolo_runner() {
+    local ort_install="${OUTPUT_DIR}"
+    local runner_src="${PROJECT_ROOT}/tools/yolo_runner"
+    local runner_out="${OUTPUT_DIR}/yolo_inference"
+    local sysroot="${OUTPUT_DIR}/sysroot"
+
+    if [[ "${FORCE}" != "true" && -f "${runner_out}" ]]; then
+        info "YOLO runner already built at ${runner_out}. Use --force to rebuild."
+        return 0
+    fi
+
+    [ -f "${runner_src}/yolo_runner.cpp" ] || error "YOLO runner source not found at ${runner_src}"
+    [ -d "${ort_install}/lib" ] || error "ORT not built at ${ort_install}. Run without --skip-sysroot."
+    [ -d "${sysroot}/usr" ] || error "Sysroot not found at ${sysroot}. Run without --skip-sysroot."
+
+    info "Cross-compiling YOLO runner..."
+
+    "${LLVM_INSTALL}/bin/clang++" \
+        --target=riscv64-unknown-linux-gnu \
+        --sysroot="${sysroot}" \
+        -isystem "${sysroot}/usr/include/riscv64-linux-gnu" \
+        -std=c++17 -O2 -g \
+        -fuse-ld=lld \
+        -I"${ort_install}/include/onnxruntime" \
+        -I"${ort_install}/include/onnxruntime/core/session" \
+        -I"${runner_src}" \
+        "${runner_src}/yolo_runner.cpp" \
+        -o "${runner_out}" \
+        -L"${ort_install}/lib" \
+        -lonnxruntime \
+        -Wl,-rpath,'$ORIGIN/../lib'
+
+    info "YOLO runner built: ${runner_out}"
+    file "${runner_out}"
+}
+
+build_yolo_runner
+
 # --- Done ---
 info "All done!"
 echo ""
 echo "Artifacts:"
-echo "  ORT:     ${OUTPUT_DIR}/"
+echo "  ORT:     ${OUTPUT_DIR}/lib/libonnxruntime.so"
 echo "  Sysroot: ${OUTPUT_DIR}/sysroot/"
+echo "  Runner:  ${OUTPUT_DIR}/yolo_inference"
 echo ""
 file "${OUTPUT_DIR}/lib/libonnxruntime.so" || true
+file "${OUTPUT_DIR}/yolo_inference" || true
