@@ -20,8 +20,9 @@ PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/libbbv.so"
 CUSTOM_LIBBBV_SO="${WORKSPACE}/tools/bbv/libbbv.so"
 
 echo "========================================"
-echo "1. Verify Demo test program"
+echo "1. Prepare Demo test program"
 echo "========================================"
+
 if [ ! -f "${DEMO_SRC}" ]; then
     echo "demo.c not found, creating..."
     cat << 'EOF' > "${DEMO_SRC}"
@@ -45,13 +46,20 @@ void _start() {
 EOF
 fi
 
-if [ -f "${DEMO_ELF}" ]; then
-    echo "[OK] Demo compiled: ${DEMO_ELF}"
-else
-    echo "[SKIP] Demo binary not found at ${DEMO_ELF}"
-    echo "       Compile demo.c with a RISC-V toolchain to verify BBV output, e.g.:"
-    echo "       riscv64-unknown-clang -nostdlib -mno-relax -o demo.elf demo.c"
+echo "Compiling demo.elf with Docker LLVM toolchain..."
+RISCV_CLANG="${WORKSPACE}/tools/docker-llvm/riscv-clang"
+if [ ! -f "${RISCV_CLANG}" ]; then
+    echo "[SKIP] Docker LLVM riscv-clang not found: ${RISCV_CLANG}"
     DEMO_AVAILABLE=false
+else
+    if "${RISCV_CLANG}" -nostdlib -march=rv64imafdc -mabi=lp64d -fuse-ld=lld \
+            -o tools/bbv/demo.elf tools/bbv/demo.c 2>/dev/null; then
+        echo "[OK] Demo compiled: ${DEMO_ELF}"
+        DEMO_AVAILABLE=true
+    else
+        echo "[SKIP] Demo compilation failed (Docker may not be running)"
+        DEMO_AVAILABLE=false
+    fi
 fi
 echo ""
 
