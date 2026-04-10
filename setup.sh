@@ -46,7 +46,8 @@ readonly -a STEP1_ARTIFACTS=(
 )
 # shellcheck disable=SC2034
 readonly -a STEP2_ARTIFACTS=(
-    "third_party/qemu/build/contrib/plugins/bbv.so"
+    "third_party/qemu/build/contrib/plugins/libbbv.so"
+    "tools/bbv/libbbv.so"
 )
 # Step 3 artifacts depend on target — checked specially in step_artifacts_exist
 # shellcheck disable=SC2034
@@ -555,7 +556,7 @@ step2_build_qemu() {
         return 1
     fi
 
-    record_step_result "$step" "PASS" "bbv.so built"
+    record_step_result "$step" "PASS" "QEMU + official and custom libbbv.so built"
     return 0
 }
 
@@ -567,12 +568,14 @@ step3_docker_build() {
     local step=3
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    if ! bash "${PROJECT_ROOT}/tools/docker-onnxrt/build.sh" 2>&1; then
-        record_step_result "$step" "FAIL" "tools/docker-onnxrt/build.sh exited with error"
-        return 1
-    fi
-
-    record_step_result "$step" "PASS" "yolo_inference + sysroot ready"
+    # TODO: ONNX Runtime Docker build needs adaptation for LLVM 22 toolchain.
+    # The docker-onnxrt build.sh and Dockerfile were written for the previous
+    # toolchain setup. After the LLVM toolchain migration, the ONNX Runtime
+    # build (CMake config, compiler flags, sysroot extraction) needs to be
+    # updated to use tools/docker-llvm/ instead.
+    log_warn "Step 3 ONNX Runtime build requires LLVM 22 toolchain adaptation."
+    log_warn "Skipping — run './tools/docker-onnxrt/build.sh' manually after adaptation."
+    record_step_result "$step" "SKIP" "LLVM 22 toolchain adaptation needed"
     return 0
 }
 
@@ -584,8 +587,30 @@ step4_bbv_profiling() {
     local step=4
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} (target=${TARGET}) ==="
 
+    # Step 4 depends on Step 3 (target binary). If Step 3 was skipped
+    # due to LLVM 22 toolchain adaptation, Step 4 cannot run.
+    case "$TARGET" in
+        inference)
+            local required_bin="${PROJECT_ROOT}/output/yolo_inference"
+            local required_msg="depends on Step 3 (ONNX Runtime build)"
+            ;;
+        preprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_preprocess"
+            required_msg="depends on Step 3 (preprocess build)"
+            ;;
+        postprocess)
+            required_bin="${PROJECT_ROOT}/output/yolo_postprocess"
+            required_msg="depends on Step 3 (postprocess build)"
+            ;;
+    esac
+    if [[ ! -e "$required_bin" ]]; then
+        log_warn "Step 4 requires $(basename "$required_bin") from Step 3 — skipped."
+        record_step_result "$step" "SKIP" "$required_msg"
+        return 0
+    fi
+
     local qemu_bin="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
-    local plugin_so="${PROJECT_ROOT}/third_party/qemu/build/contrib/plugins/libbbv.so"
+    local plugin_so="${PROJECT_ROOT}/tools/bbv/libbbv.so"
     local sysroot="${PROJECT_ROOT}/output/sysroot"
     local bbv_outfile="${PROJECT_ROOT}/output/yolo.bbv"
 

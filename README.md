@@ -74,12 +74,17 @@ output/
 ./verify_bbv.sh
 ```
 
-This initializes the QEMU submodule, configures it for `riscv64-linux-user` with plugin support, and compiles both QEMU and the BBV plugin. After this step:
+This initializes the QEMU submodule, configures it for `riscv64-linux-user` with plugin support, and compiles QEMU, the official BBV plugin, and our custom BBV plugin (with `.disas` output and exit flush). After this step:
 
 ```
 third_party/qemu/build/
 ├── qemu-riscv64                              # QEMU RISC-V user-mode emulator
-└── contrib/plugins/bbv.so                     # BBV profiling plugin
+└── contrib/plugins/libbbv.so                  # Official BBV plugin (baseline)
+
+tools/bbv/
+├── bbv.c                                      # Custom BBV plugin source
+├── Makefile                                   # Independent build
+└── libbbv.so                                  # Custom BBV plugin (used by pipeline)
 ```
 
 ### Step 3: Build ONNX Runtime + YOLO runner for RISC-V
@@ -122,20 +127,20 @@ Use `--target` to select which binary to profile:
 # Inference (default)
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=100000,outfile=output/yolo.bbv \
-  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 10
+  -plugin ./tools/bbv/libbbv.so,interval=100000,outfile=output/yolo.bbv \
+  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 1
 
 # Preprocess (video decode → resize → normalize)
 # Generate test video if not present: ffmpeg -f lavfi -i testsrc=d=5 -vf "scale=640:480" -y output/test_video.mp4
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/bbv_pre \
+  -plugin ./tools/bbv/libbbv.so,interval=10000,outfile=output/bbv_pre \
   ./output/yolo_preprocess ./output/test_video.mp4 10
 
 # Postprocess (YOLO output parsing → NMS → draw)
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/libbbv.so,interval=10000,outfile=output/bbv_post \
+  -plugin ./tools/bbv/libbbv.so,interval=10000,outfile=output/bbv_post \
   ./output/yolo_postprocess --synthetic ./output/test.jpg
 ```
 

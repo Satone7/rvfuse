@@ -16,11 +16,13 @@ DEMO_SRC="${WORKSPACE}/tools/bbv/demo.c"
 DEMO_ELF="${WORKSPACE}/tools/bbv/demo.elf"
 BBV_OUT="${WORKSPACE}/tools/bbv/bbv.out"
 QEMU_BIN="${QEMU_DIR}/build/qemu-riscv64"
-PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/bbv.so"
+PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/libbbv.so"
+CUSTOM_LIBBBV_SO="${WORKSPACE}/tools/bbv/libbbv.so"
 
 echo "========================================"
-echo "1. Verify Demo test program"
+echo "1. Prepare Demo test program"
 echo "========================================"
+
 if [ ! -f "${DEMO_SRC}" ]; then
     echo "demo.c not found, creating..."
     cat << 'EOF' > "${DEMO_SRC}"
@@ -44,13 +46,20 @@ void _start() {
 EOF
 fi
 
-if [ -f "${DEMO_ELF}" ]; then
-    echo "[OK] Demo compiled: ${DEMO_ELF}"
-else
-    echo "[SKIP] Demo binary not found at ${DEMO_ELF}"
-    echo "       Compile demo.c with a RISC-V toolchain to verify BBV output, e.g.:"
-    echo "       riscv64-unknown-clang -nostdlib -mno-relax -o demo.elf demo.c"
+echo "Compiling demo.elf with Docker LLVM toolchain..."
+RISCV_CLANG="${WORKSPACE}/tools/docker-llvm/riscv-clang"
+if [ ! -f "${RISCV_CLANG}" ]; then
+    echo "[SKIP] Docker LLVM riscv-clang not found: ${RISCV_CLANG}"
     DEMO_AVAILABLE=false
+else
+    if "${RISCV_CLANG}" -nostdlib -march=rv64imafdc -mabi=lp64d -fuse-ld=lld \
+            -o tools/bbv/demo.elf tools/bbv/demo.c 2>/dev/null; then
+        echo "[OK] Demo compiled: ${DEMO_ELF}"
+        DEMO_AVAILABLE=true
+    else
+        echo "[SKIP] Demo compilation failed (Docker may not be running)"
+        DEMO_AVAILABLE=false
+    fi
 fi
 echo ""
 
@@ -79,13 +88,16 @@ if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ] || [ "${FORCE_REBUILD}" = t
     echo "Building BBV plugin..."
     make plugins
     cd "${QEMU_DIR}"
+
+    echo "Building custom BBV plugin (tools/bbv/)..."
+    make -C "${WORKSPACE}/tools/bbv/"
 else
     echo "QEMU and plugin already built, skipping."
     echo "Use -f or --force-rebuild to rebuild."
 fi
 
-if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ]; then
-    echo "[OK] QEMU and BBV plugin built successfully."
+if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ] && [ -f "${CUSTOM_LIBBBV_SO}" ]; then
+    echo "[OK] QEMU, official libbbv.so, and custom libbbv.so built successfully."
 else
     echo "[ERROR] QEMU or plugin build failed!"
     exit 1
@@ -108,8 +120,8 @@ else
     rm -f "${BBV_OUT}"*
 
     echo "Running:"
-    echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
-    ${QEMU_BIN} -plugin "${PLUGIN_SO}",interval=10000,outfile="${BBV_OUT}" "${DEMO_ELF}"
+    echo "${QEMU_BIN} -plugin ${CUSTOM_LIBBBV_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
+    "${QEMU_BIN}" -plugin "${CUSTOM_LIBBBV_SO}",interval=10000,outfile="${BBV_OUT}" "${DEMO_ELF}"
 
     if [ -f "${BBV_OUT}.0.bb" ]; then
         echo "[OK] BBV output generated: ${BBV_OUT}.0.bb"
