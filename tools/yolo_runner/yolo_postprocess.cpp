@@ -1,12 +1,13 @@
-// test_postprocess.cpp — Test YOLO output parsing + NMS + drawing
-// No ORT or FFmpeg dependency. RISC-V binary, runs under QEMU.
+// yolo_postprocess.cpp — YOLO output parsing + NMS + drawing for BBV profiling
+// No ORT or FFmpeg dependency. Requires stb_image.h for JPEG loading.
+// RISC-V binary, runs under QEMU.
 //
 // Build:
-//   g++ -std=c++17 -O2 -I. test_postprocess.cpp -o test_postprocess
+//   g++ -std=c++17 -O2 -I. yolo_postprocess.cpp -o yolo_postprocess
 //
 // Run:
-//   ./test_postprocess <output.bin> <image.jpg> [conf] [iou]
-//   ./test_postprocess --synthetic <image.jpg>    (hardcoded detections for drawing test)
+//   ./yolo_postprocess <output.bin> <image.jpg> [conf] [iou]
+//   ./yolo_postprocess --synthetic <image.jpg>    (hardcoded detections for drawing test)
 
 #include <cstdio>
 #include <cstdlib>
@@ -130,6 +131,7 @@ static std::vector<Detection> parseYoloOutput(const float* data,
 static void drawRect(uint8_t* rgb, int stride, int imgW, int imgH,
                       int x1, int y1, int x2, int y2,
                       const uint8_t color[3], int thickness) {
+    // Note: x2/y2 are inclusive bounds; caller must ensure they fit within imgW/imgH.
     for (int t = 0; t < thickness; t++) {
         for (int x = x1 + t; x <= x2 - t; x++) {
             if (x >= 0 && x < imgW) {

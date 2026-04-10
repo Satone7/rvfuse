@@ -1,13 +1,14 @@
-// test_preprocess.cpp — Test FFmpeg video decode + image preprocessing
-// No ORT dependency. RISC-V binary, runs under QEMU.
+// yolo_preprocess.cpp — FFmpeg video decode + image preprocessing for BBV profiling
+// No ORT dependency. Requires FFmpeg (libavcodec/libavformat/libswscale/libavutil).
+// RISC-V binary, runs under QEMU.
 //
 // Build (inside RISC-V Docker):
-//   g++ -std=c++17 -O2 test_preprocess.cpp \
-//       -o test_preprocess \
+//   g++ -std=c++17 -O2 yolo_preprocess.cpp \
+//       -o yolo_preprocess \
 //       -lavcodec -lavformat -lswscale -lavutil
 //
 // Run:
-//   qemu-riscv64 -L <sysroot> ./test_preprocess <input.mp4> [max_frames]
+//   qemu-riscv64 -L <sysroot> ./yolo_preprocess <input.mp4> [max_frames]
 
 #include <cstdio>
 #include <cstdlib>
@@ -74,6 +75,10 @@ int main(int argc, char* argv[]) {
         srcW, srcH, AV_PIX_FMT_RGB24,
         MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, AV_PIX_FMT_RGB24,
         SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!swsResize) {
+        fprintf(stderr, "[ERROR] sws_getContext failed for resize\n");
+        return 1;
+    }
 
     // Pre-allocate buffers
     std::vector<uint8_t> rgb640(MODEL_INPUT_SIZE * MODEL_INPUT_SIZE * 3);
@@ -120,6 +125,11 @@ int main(int argc, char* argv[]) {
         SwsContext* toRgb = sws_getContext(
             frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
             srcW, srcH, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!toRgb) {
+            fprintf(stderr, "[WARN] sws_getContext failed for frame %d, skipping\n", frameCount + 1);
+            av_frame_unref(frame);
+            continue;
+        }
         sws_scale(toRgb, frame->data, frame->linesize, 0, frame->height,
                   rgbFrame->data, rgbFrame->linesize);
         sws_freeContext(toRgb);
