@@ -46,7 +46,7 @@ readonly -a STEP1_ARTIFACTS=(
 )
 # shellcheck disable=SC2034
 readonly -a STEP2_ARTIFACTS=(
-    "third_party/qemu/build/contrib/plugins/bbv.so"
+    "third_party/qemu/build/contrib/plugins/libbbv.so"
     "tools/bbv/libbbv.so"
 )
 # shellcheck disable=SC2034
@@ -517,7 +517,7 @@ step2_build_qemu() {
         return 1
     fi
 
-    record_step_result "$step" "PASS" "bbv.so built"
+    record_step_result "$step" "PASS" "QEMU + official and custom libbbv.so built"
     return 0
 }
 
