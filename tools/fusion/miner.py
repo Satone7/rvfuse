@@ -1,4 +1,9 @@
-"""Deterministic fusion pattern mining pipeline."""
+"""Subgraph-based fusion pattern mining pipeline.
+
+Enumerates connected DFG subgraphs, normalizes them to pattern templates,
+aggregates across basic blocks by BBV frequency, and writes a ranked
+pattern catalog JSON.
+"""
 
 from __future__ import annotations
 
@@ -10,87 +15,10 @@ from pathlib import Path
 
 from dfg.instruction import ISARegistry
 
-from fusion.pattern import (
-    Pattern,
-    classify_register,
-    is_control_flow,
-    normalize_chain,
-)
+from fusion.pattern import normalize_subgraph
+from fusion.subgraph import enumerate_subgraphs
 
 logger = logging.getLogger("fusion")
-
-
-def enumerate_chains(
-    dfg_data: dict,
-    registry: ISARegistry,
-) -> list[tuple[int, list[tuple[str, str]]]]:
-    """Extract all valid linear RAW chains from a single DFG.
-
-    Args:
-        dfg_data: Parsed DFG JSON dict with 'nodes' and 'edges'.
-        registry: ISA registry for register classification.
-
-    Returns:
-        List of (start_index, chain) tuples. Each chain is a list of
-        (mnemonic, operands) tuples, and start_index is the DFG node index
-        where the chain begins.
-    """
-    nodes = dfg_data["nodes"]
-    edges = dfg_data["edges"]
-
-    if len(nodes) < 2:
-        return []
-
-    # Build adjacency: edge_map[(src_idx, dst_idx)] = [register, ...]
-    edge_map: dict[tuple[int, int], list[str]] = defaultdict(list)
-    for e in edges:
-        edge_map[(e["src"], e["dst"])].append(e["register"])
-
-    # Determine register class for each node
-    def node_reg_class(idx: int) -> str | None:
-        mn = nodes[idx]["mnemonic"]
-        flow = registry.get_flow(mn)
-        if flow is None:
-            return None
-        resolved = flow.resolve(nodes[idx]["operands"])
-        all_regs = resolved.dst_regs + resolved.src_regs
-        return classify_register(all_regs[0]) if all_regs else None
-
-    results: list[tuple[int, list[tuple[str, str]]]] = []
-
-    def _valid_pair(i: int, j: int) -> bool:
-        mn_i, mn_j = nodes[i]["mnemonic"], nodes[j]["mnemonic"]
-        if is_control_flow(mn_i) or is_control_flow(mn_j):
-            return False
-        rc_i, rc_j = node_reg_class(i), node_reg_class(j)
-        if rc_i is None or rc_j is None or rc_i != rc_j:
-            return False
-        return True
-
-    # Scan for length-2 and length-3 chains
-    for i in range(len(nodes) - 1):
-        assert nodes[i]["index"] == i, f"Node index mismatch: expected {i}, got {nodes[i]['index']}"
-        if not _valid_pair(i, i + 1):
-            continue
-        if (i, i + 1) not in edge_map:
-            continue
-
-        # Length-2 chain
-        chain_2 = [
-            (nodes[i]["mnemonic"], nodes[i]["operands"]),
-            (nodes[i + 1]["mnemonic"], nodes[i + 1]["operands"]),
-        ]
-        results.append((i, chain_2))
-
-        # Try to extend to length-3
-        if i + 2 < len(nodes) and _valid_pair(i + 1, i + 2):
-            if (i + 1, i + 2) in edge_map:
-                chain_3 = chain_2 + [
-                    (nodes[i + 2]["mnemonic"], nodes[i + 2]["operands"]),
-                ]
-                results.append((i, chain_3))
-
-    return results
 
 
 def _build_bbv_map(hotspot: dict) -> dict[str, int]:
@@ -105,29 +33,42 @@ def aggregate_patterns(
     dfg_list: list[dict],
     hotspot: dict,
     registry: ISARegistry,
+    max_nodes: int = 8,
+    min_size: int = 2,
     top: int | None = None,
-) -> list[dict]:
-    """Enumerate, normalize, aggregate, and rank patterns across multiple DFGs."""
+) -> tuple[list[dict], int]:
+    """Enumerate, normalize, aggregate, and rank patterns across multiple DFGs.
+
+    Args:
+        dfg_list: List of DFG JSON dicts.
+        hotspot: BBV hotspot JSON with blocks[].address and blocks[].count.
+        registry: ISA registry for register flow resolution.
+        max_nodes: Maximum subgraph size to enumerate.
+        min_size: Minimum subgraph size to include in output (default 2).
+        top: Maximum number of patterns to return.
+
+    Returns:
+        A tuple of (patterns_list, total_subgraphs_enumerated).
+    """
     bbv_map = _build_bbv_map(hotspot)
     groups: dict[tuple, dict] = {}
+    total_subgraphs = 0
 
     for dfg_data in dfg_list:
         vaddr = dfg_data["vaddr"]
+        bb_id = dfg_data.get("bb_id", 0)
         frequency = bbv_map.get(vaddr, 0)
-        chains = enumerate_chains(dfg_data, registry)
+        nodes = dfg_data["nodes"]
 
-        for chain_start, chain in chains:
-            chain_end = chain_start + len(chain)
-            all_edges = dfg_data["edges"]
-            chain_edges = [
-                {"src": src, "dst": dst, "register": e["register"]}
-                for e in all_edges
-                if (src := e["src"]) >= chain_start
-                and (dst := e["dst"]) < chain_end
-                and dst == src + 1
-            ]
+        subgraphs = enumerate_subgraphs(dfg_data, max_nodes=max_nodes)
+        total_subgraphs += len(subgraphs)
+
+        for sg in subgraphs:
+            if len(sg) < min_size:
+                continue
+
             try:
-                pattern = normalize_chain(chain, chain_edges, registry)
+                pattern = normalize_subgraph(sg, dfg_data, registry)
             except ValueError:
                 continue
 
@@ -138,23 +79,46 @@ def aggregate_patterns(
                     "occurrence_count": 0,
                     "total_frequency": 0,
                     "source_bbs": [],
+                    "examples": [],
                 }
             groups[key]["occurrence_count"] += 1
             groups[key]["total_frequency"] += frequency
             if vaddr not in groups[key]["source_bbs"]:
                 groups[key]["source_bbs"].append(vaddr)
+                example = {
+                    "bb_id": bb_id,
+                    "vaddr": vaddr,
+                    "instructions": [
+                        {"index": nodes[i]["index"], "mnemonic": nodes[i]["mnemonic"],
+                         "operands": nodes[i]["operands"]}
+                        for i in sorted(sg)
+                    ],
+                }
+                groups[key]["examples"].append(example)
 
     results = []
     for key, group in groups.items():
         p = group["pattern"]
         results.append({
-            "opcodes": p.opcodes,
+            "opcodes": [mn for layer in p.topology for mn in layer],
             "register_class": p.register_class,
-            "length": p.length,
+            "size": p.size,
+            "topology": p.topology,
+            "edges": [
+                {
+                    "src_layer": e.src_layer,
+                    "src_opcode": e.src_opcode,
+                    "dst_layer": e.dst_layer,
+                    "dst_opcode": e.dst_opcode,
+                    "src_role": e.src_role,
+                    "dst_role": e.dst_role,
+                }
+                for e in p.edges
+            ],
             "occurrence_count": group["occurrence_count"],
             "total_frequency": group["total_frequency"],
-            "chain_registers": p.chain_registers,
             "source_bbs": group["source_bbs"],
+            "examples": group["examples"],
         })
 
     results.sort(key=lambda x: x["total_frequency"], reverse=True)
@@ -162,7 +126,7 @@ def aggregate_patterns(
         results = results[:top]
     for i, r in enumerate(results):
         r["rank"] = i + 1
-    return results
+    return results, total_subgraphs
 
 
 def mine(
@@ -171,6 +135,8 @@ def mine(
     registry: ISARegistry,
     output_path: Path,
     top: int | None = None,
+    max_nodes: int = 8,
+    min_size: int = 2,
 ) -> list[dict]:
     """Run the full mining pipeline: load DFGs, aggregate, write output."""
     dfg_files = sorted(dfg_dir.glob("*.json"))
@@ -184,15 +150,27 @@ def mine(
             logger.warning("Skipping invalid DFG file: %s", f)
 
     hotspot = json.loads(hotspot_path.read_text())
-    patterns = aggregate_patterns(dfg_list, hotspot, registry, top=top)
+    patterns, total_subgraphs = aggregate_patterns(
+        dfg_list, hotspot, registry,
+        max_nodes=max_nodes, min_size=min_size, top=top,
+    )
 
     output = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "source_df_count": len(dfg_list),
         "pattern_count": len(patterns),
         "patterns": patterns,
+        "enumeration_stats": {
+            "total_subgraphs": total_subgraphs,
+            "max_nodes": max_nodes,
+            "min_size": min_size,
+        },
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, indent=2) + "\n")
-    logger.info("Mined %d patterns from %d DFGs (top=%s)", len(patterns), len(dfg_list), top)
+    logger.info(
+        "Mined %d patterns from %d DFGs (top=%s, max_nodes=%s, min_size=%s), "
+        "%d total subgraphs enumerated",
+        len(patterns), len(dfg_list), top, max_nodes, min_size, total_subgraphs,
+    )
     return patterns
