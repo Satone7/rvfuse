@@ -208,15 +208,15 @@ cross_compile_onnxrt() {
                 -DCMAKE_C_FLAGS='-march=${march}' \
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -G Ninja \
-            && python3 -c "
+            && python3 -c '
 import pathlib
-p = pathlib.Path('/build/_deps/onnx-src/onnx/defs/schema.h')
+p = pathlib.Path("/build/_deps/onnx-src/onnx/defs/schema.h")
 t = p.read_text()
 t = t.replace(
-    'ONNX_UNUSED = \\\\\n      OpSchema(#name, __FILE__, __LINE__)',
-    'ONNX_UNUSED(\n      OpSchema(#name, __FILE__, __LINE__))')
+    "ONNX_UNUSED = \\\n      OpSchema(#name, __FILE__, __LINE__)",
+    "ONNX_UNUSED(\n      OpSchema(#name, __FILE__, __LINE__))")
 p.write_text(t)
-" \
+' \
             && ninja -j${JOBS} \
             && ninja install/strip
         "
