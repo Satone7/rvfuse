@@ -59,7 +59,7 @@ clone_if_missing() {
 # --- Fetch ONNXRT submodules ---
 fetch_ort_submodules() {
     if [ -d "${VENDOR_DIR}/onnxruntime" ]; then
-        info "Fetching onnxruntime submodules ==="
+        info "=== Fetching onnxruntime submodules ==="
         cd "${VENDOR_DIR}/onnxruntime"
         MAX_RETRIES=5
         for attempt in $(seq 1 ${MAX_RETRIES}); do
@@ -86,8 +86,8 @@ extract_sysroot() {
     rm -rf "${sysroot}"
     mkdir -p "${sysroot}"
     local tmp_container="rvfuse-sysroot-prep-$$"
+    trap "docker rm -f ${tmp_container} 2>/dev/null || true" EXIT
     docker run --platform riscv64 --name "${tmp_container}" -d riscv64/ubuntu:22.04 tail -f /dev/null > /dev/null
-    trap "docker rm -f ${tmp_container} 2>/dev/null || true" RETURN
     docker exec "${tmp_container}" apt-get update -qq
     docker exec "${tmp_container}" apt-get install -y --no-install-recommends -qq \
         libc6-dev libstdc++-11-dev libgcc-11-dev > /dev/null
@@ -105,22 +105,26 @@ extract_sysroot() {
     local lib="${sysroot}/lib/riscv64-linux-gnu"
     for f in libc.so.6 libcrypt.so.1 libdl.so.2 libm.so.6 libpthread.so.0 librt.so.1 \
              libgcc_s.so libgcc_s.so.1 libstdc++.so libstdc++.so.6; do
-        [ -e "${sysroot}/usr/lib/riscv64-linux-gnu/${f}" ] && \
+        if [ -e "${sysroot}/usr/lib/riscv64-linux-gnu/${f}" ]; then
             ln -sf "../../usr/lib/riscv64-linux-gnu/${f}" "${lib}/${f}"
+        fi
     done
     docker rm -f "${tmp_container}" > /dev/null
-    trap - RETURN
+    trap - EXIT
     local multilib="riscv64-linux-gnu"
     for dir in usr/lib; do
         local base="${sysroot}/${dir}"
-        [ -d "${base}/${multilib}" ] || continue
+        if [ ! -d "${base}/${multilib}" ]; then continue; fi
         for f in crt1.o crti.o crtn.o; do
-            [ -f "${base}/${multilib}/${f}" ] && ln -sf "${multilib}/${f}" "${base}/${f}"
+            if [ -f "${base}/${multilib}/${f}" ]; then
+                ln -sf "${multilib}/${f}" "${base}/${f}"
+            fi
         done
         for f in libc.so libc.so.6 libm.so libm.so.6 libdl.so libdl.so.2 \
                  librt.so librt.so.1 libpthread.so libpthread.so.0; do
-            [ -e "${base}/${multilib}/${f}" ] && [ ! -e "${base}/${f}" ] && \
+            if [ -e "${base}/${multilib}/${f}" ] && [ ! -e "${base}/${f}" ]; then
                 ln -sf "${multilib}/${f}" "${base}/${f}"
+            fi
         done
     done
     find "${sysroot}" -name "libm.a" -delete 2>/dev/null || true
@@ -168,6 +172,7 @@ cross_compile_onnxrt() {
         -v "${SCRIPT_DIR}/riscv64-linux-toolchain.cmake:/toolchain.cmake:ro" \
         -e LLVM_INSTALL=/llvm-install \
         -e SYSROOT=/sysroot \
+        -e GCC_BIN_DIR=/riscv64-gcc-bin \
         -w /build \
         rvfuse-xcompile-builder \
         bash -c "
@@ -252,7 +257,9 @@ setup_sysroot() {
     if [ -d "${ort_lib}" ]; then
         mkdir -p "${sysroot}/usr/local/lib"
         for f in "${ort_lib}"/libonnxruntime.so*; do
-            [ -e "${f}" ] && cp -a "${f}" "${sysroot}/usr/local/lib/"
+            if [ -e "${f}" ]; then
+                cp -a "${f}" "${sysroot}/usr/local/lib/"
+            fi
         done
     fi
 
