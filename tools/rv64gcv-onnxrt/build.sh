@@ -218,7 +218,6 @@ cross_compile() {
 
     export LLVM_INSTALL="${LLVM_INSTALL}"
     export SYSROOT="${sysroot}"
-    trap 'unset LLVM_INSTALL SYSROOT' RETURN
 
     cmake -S "${ORT_SOURCE}/cmake" -B "${ort_build}" \
         -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
@@ -240,7 +239,6 @@ cross_compile() {
     ninja -C "${ort_build}" install/strip
 
     unset LLVM_INSTALL SYSROOT
-    trap - RETURN
 
     info "ONNX Runtime cross-compiled to ${ort_install}"
     file "${ort_install}/lib/libonnxruntime.so*" || true
@@ -279,7 +277,7 @@ build_yolo_runner() {
         -o "${runner_out}" \
         -L"${ort_install}/lib" \
         -lonnxruntime \
-        -Wl,-rpath,'$ORIGIN/../lib'
+        -Wl,-rpath,'$ORIGIN/lib'
 
     info "YOLO runner built: ${runner_out}"
     file "${runner_out}"
