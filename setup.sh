@@ -56,6 +56,11 @@ readonly -a STEP3_ARTIFACTS_INFERENCE=(
     "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
 )
 # shellcheck disable=SC2034
+readonly -a STEP3_ARTIFACTS_C920_INFERENCE=(
+    "output/yolo_inference"
+    "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
+)
+# shellcheck disable=SC2034
 readonly -a STEP3_ARTIFACTS_PREPROCESS=(
     "output/yolo_preprocess"
     "output/sysroot/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1"
@@ -352,7 +357,7 @@ check_artifacts() {
 check_bbv_artifacts() {
     local pattern
     case "$TARGET" in
-        inference)   pattern="yolo.bbv.*.bb" ;;
+        inference|c920-inference)   pattern="yolo.bbv.*.bb" ;;
         preprocess)  pattern="bbv_pre.*.bb" ;;
         postprocess) pattern="bbv_post.*.bb" ;;
     esac
@@ -408,7 +413,12 @@ get_artifact_names() {
         0) echo "STEP0_ARTIFACTS" ;;
         1) echo "STEP1_ARTIFACTS" ;;
         2) echo "STEP2_ARTIFACTS" ;;
-        3) echo "STEP3_ARTIFACTS_${TARGET^^}" ;;
+        3)
+            case "$TARGET" in
+                c920-inference) echo "STEP3_ARTIFACTS_C920_INFERENCE" ;;
+                *) echo "STEP3_ARTIFACTS_${TARGET^^}" ;;
+            esac
+            ;;
         4) echo "__bbv__" ;;          # special target-based check
         5) echo "STEP5_ARTIFACTS" ;;
         6) echo "__dfg__" ;;          # special dir check
@@ -566,16 +576,14 @@ step2_build_qemu() {
 
 step3_docker_build() {
     local step=3
-    log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
+    log_info "=== Step ${step}: ${STEP_NAMES[$step]} (target=${TARGET}) ==="
 
-    # TODO: ONNX Runtime Docker build needs adaptation for LLVM 22 toolchain.
-    # The docker-onnxrt build.sh and Dockerfile were written for the previous
-    # toolchain setup. After the LLVM toolchain migration, the ONNX Runtime
-    # build (CMake config, compiler flags, sysroot extraction) needs to be
-    # updated to use tools/docker-llvm/ instead.
-    log_warn "Step 3 ONNX Runtime build requires LLVM 22 toolchain adaptation."
-    log_warn "Skipping — run './tools/docker-onnxrt/build.sh' manually after adaptation."
-    record_step_result "$step" "SKIP" "LLVM 22 toolchain adaptation needed"
+    if ! bash "${PROJECT_ROOT}/tools/docker-onnxrt/build.sh" --target "${TARGET}" 2>&1; then
+        record_step_result "$step" "FAIL" "tools/docker-onnxrt/build.sh exited with error"
+        return 1
+    fi
+
+    record_step_result "$step" "PASS" "yolo_inference + sysroot ready"
     return 0
 }
 
@@ -590,7 +598,7 @@ step4_bbv_profiling() {
     # Step 4 depends on Step 3 (target binary). If Step 3 was skipped
     # due to LLVM 22 toolchain adaptation, Step 4 cannot run.
     case "$TARGET" in
-        inference)
+        inference|c920-inference)
             local required_bin="${PROJECT_ROOT}/output/yolo_inference"
             local required_msg="depends on Step 3 (ONNX Runtime build)"
             ;;
@@ -617,7 +625,7 @@ step4_bbv_profiling() {
     local target_bin="" target_args=()
 
     case "$TARGET" in
-        inference)
+        inference|c920-inference)
             target_bin="${PROJECT_ROOT}/output/yolo_inference"
             target_args=("${PROJECT_ROOT}/output/yolo11n.ort" "${PROJECT_ROOT}/output/test.jpg" "10")
             ;;
@@ -686,7 +694,7 @@ step5_hotspot_report() {
     # Select BBV file and ELF based on target
     local bbv_pattern elf_bin json_output
     case "$TARGET" in
-        inference)
+        inference|c920-inference)
             bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
             elf_bin="${PROJECT_ROOT}/output/yolo_inference"
             json_output="${PROJECT_ROOT}/output/hotspot.json"
@@ -756,7 +764,7 @@ step6_dfg_generation() {
     # Select BBV file and ELF based on target
     local bbv_pattern elf_bin dfg_dir
     case "$TARGET" in
-        inference)
+        inference|c920-inference)
             bbv_pattern="${PROJECT_ROOT}/output/yolo.bbv.*.bb"
             elf_bin="${PROJECT_ROOT}/output/yolo_inference"
             dfg_dir="${PROJECT_ROOT}/output/dfg"
