@@ -201,6 +201,7 @@ cross_compile_onnxrt() {
                 -DCMAKE_BUILD_TYPE=Release \
                 -Donnxruntime_BUILD_SHARED_LIB=ON \
                 -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+                -Donnxruntime_DISABLE_CONTRIB_OPS=ON \
                 -Donnxruntime_DISABLE_RTTI=ON \
                 -DFETCHCONTENT_SOURCE_DIR_EIGEN=/eigen \
                 -DCMAKE_CXX_FLAGS='-Wno-stringop-overflow -Wno-unknown-warning-option -march=${march}' \
