@@ -151,6 +151,35 @@ RVFuse/
 | QEMU | https://gitlab.com/qemu-project/qemu | Mandatory |
 | LLVM | https://github.com/llvm/llvm-project | Mandatory |
 
+### Reusing Pre-built Artifacts (Worktrees)
+
+To avoid redundant rebuilds across worktrees, this project shares pre-built
+artifacts (e.g., LLVM, QEMU) via symlinks to the main repository.
+
+**LLVM**: If `third_party/llvm-project` has been updated and rebuilt in the
+main repository (`third_party/llvm-install/`), create a symlink instead of
+rebuilding:
+
+```bash
+# Run from worktree root. The relative path is resolved from the symlink's
+# parent dir (third_party/), not the CWD. 4 levels up from third_party/
+# reaches the repo root (.claude/worktrees/<name>/third_party/ → repo root).
+ln -sf ../../../../third_party/llvm-install third_party/llvm-install
+```
+
+**Verification**: After symlinking, confirm the toolchain is usable:
+```bash
+third_party/llvm-install/bin/clang --version
+```
+
+The wrapper scripts (`tools/local-llvm/common.sh`, `tools/build_llvm.sh`)
+already check `third_party/llvm-install/` first, so no further config is needed.
+
+**General rule**: Before rebuilding any large dependency (LLVM, QEMU), check
+whether a pre-built copy already exists in the main repository and symlink it
+first. Rebuild only when the submodule version has changed or the install is
+missing.
+
 ## Code Style
 
 - C++: camelCase functions/variables, PascalCase for ONNX Runtime API types, single-responsibility functions under 50 lines
