@@ -5,12 +5,14 @@ import unittest
 
 from dfg.instruction import BasicBlock, DFGEdge, Instruction, ISARegistry
 from dfg.isadesc.rv64i import build_registry
+from dfg.isadesc.rv64i_pseudo import build_registry as build_pseudo_registry
 from dfg.dfg import build_dfg
 
 
 def _make_registry() -> ISARegistry:
     reg = ISARegistry()
     build_registry(reg)
+    build_pseudo_registry(reg)
     return reg
 
 
@@ -130,9 +132,11 @@ def _make_imf_registry() -> ISARegistry:
     """Build a registry with I + M + F extensions."""
     reg = ISARegistry()
     from dfg.isadesc.rv64i import build_registry as build_i
+    from dfg.isadesc.rv64i_pseudo import build_registry as build_i_pseudo
     from dfg.isadesc.rv64m import build_registry as build_m
     from dfg.isadesc.rv64f import build_registry as build_f
     build_i(reg)
+    build_i_pseudo(reg)
     build_m(reg)
     build_f(reg)
     return reg
@@ -227,9 +231,11 @@ class TestVectorDfg(unittest.TestCase):
 
     def _make_v_registry(self) -> ISARegistry:
         from dfg.isadesc.rv64i import build_registry as build_i
+        from dfg.isadesc.rv64i_pseudo import build_registry as build_i_pseudo
         from dfg.isadesc.rv64v import build_registry as build_v
         reg = ISARegistry()
         build_i(reg)
+        build_i_pseudo(reg)
         build_v(reg)
         return reg
 

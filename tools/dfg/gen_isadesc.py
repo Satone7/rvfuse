@@ -256,6 +256,14 @@ def _extract_flow(entry: dict) -> tuple[list[str], list[str]]:
                 continue
             src.append(prefix + pos_name)
 
+    # Branch-format fixup: when there are no output operands but two GPR
+    # inputs (rs1, rs2), the parser in _extract_registers will assign the
+    # first register token to "rd" and the second to "rs1" positionally
+    # (since the third token is an immediate and gets skipped).  Remap so
+    # src positions match what the parser produces.
+    if not dst and len(src) == 2 and src == ["rs1", "rs2"]:
+        src = ["rd", "rs1"]
+
     return dst, src
 
 

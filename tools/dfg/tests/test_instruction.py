@@ -126,9 +126,11 @@ class TestRV64IInstructions(unittest.TestCase):
     def setUp(self) -> None:
         from dfg.instruction import ISARegistry
         from dfg.isadesc.rv64i import build_registry
+        from dfg.isadesc.rv64i_pseudo import build_registry as build_pseudo_registry
 
         self.registry = ISARegistry()
         build_registry(self.registry)
+        build_pseudo_registry(self.registry)
 
     def _resolve(self, mnemonic: str, operands: str) -> ResolvedFlow:
         flow = self.registry.get_flow(mnemonic)
