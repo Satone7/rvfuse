@@ -201,7 +201,7 @@ extract_sysroot
 # --- Step 3: Cross-compile ONNX Runtime ---
 cross_compile() {
     local ort_build="${OUTPUT_DIR}/.build"
-    local ort_install="${OUTPUT_DIR}/onnxruntime"
+    local ort_install="${OUTPUT_DIR}"
     local sysroot="${OUTPUT_DIR}/sysroot"
 
     if [[ "${FORCE}" != "true" && -d "${ort_install}/lib" ]]; then
@@ -251,7 +251,7 @@ cross_compile
 info "All done!"
 echo ""
 echo "Artifacts:"
-echo "  ORT:     ${OUTPUT_DIR}/onnxruntime/"
+echo "  ORT:     ${OUTPUT_DIR}/"
 echo "  Sysroot: ${OUTPUT_DIR}/sysroot/"
 echo ""
-file "${OUTPUT_DIR}/onnxruntime/lib/libonnxruntime.so" || true
+file "${OUTPUT_DIR}/lib/libonnxruntime.so" || true
