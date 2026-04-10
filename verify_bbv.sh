@@ -17,6 +17,7 @@ DEMO_ELF="${WORKSPACE}/tools/bbv/demo.elf"
 BBV_OUT="${WORKSPACE}/tools/bbv/bbv.out"
 QEMU_BIN="${QEMU_DIR}/build/qemu-riscv64"
 PLUGIN_SO="${QEMU_DIR}/build/contrib/plugins/bbv.so"
+CUSTOM_LIBBBV_SO="${WORKSPACE}/tools/bbv/libbbv.so"
 
 echo "========================================"
 echo "1. Verify Demo test program"
@@ -79,13 +80,16 @@ if [ ! -f "${QEMU_BIN}" ] || [ ! -f "${PLUGIN_SO}" ] || [ "${FORCE_REBUILD}" = t
     echo "Building BBV plugin..."
     make plugins
     cd "${QEMU_DIR}"
+
+    echo "Building custom BBV plugin (tools/bbv/)..."
+    make -C "${WORKSPACE}/tools/bbv/"
 else
     echo "QEMU and plugin already built, skipping."
     echo "Use -f or --force-rebuild to rebuild."
 fi
 
-if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ]; then
-    echo "[OK] QEMU and BBV plugin built successfully."
+if [ -f "${QEMU_BIN}" ] && [ -f "${PLUGIN_SO}" ] && [ -f "${CUSTOM_LIBBBV_SO}" ]; then
+    echo "[OK] QEMU, official libbbv.so, and custom libbbv.so built successfully."
 else
     echo "[ERROR] QEMU or plugin build failed!"
     exit 1
@@ -108,8 +112,8 @@ else
     rm -f "${BBV_OUT}"*
 
     echo "Running:"
-    echo "${QEMU_BIN} -plugin ${PLUGIN_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
-    ${QEMU_BIN} -plugin "${PLUGIN_SO}",interval=10000,outfile="${BBV_OUT}" "${DEMO_ELF}"
+    echo "${QEMU_BIN} -plugin ${CUSTOM_LIBBBV_SO},interval=10000,outfile=${BBV_OUT} ${DEMO_ELF}"
+    "${QEMU_BIN}" -plugin "${CUSTOM_LIBBBV_SO}",interval=10000,outfile="${BBV_OUT}" "${DEMO_ELF}"
 
     if [ -f "${BBV_OUT}.0.bb" ]; then
         echo "[OK] BBV output generated: ${BBV_OUT}.0.bb"

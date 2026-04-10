@@ -74,12 +74,17 @@ output/
 ./verify_bbv.sh
 ```
 
-This initializes the QEMU submodule, configures it for `riscv64-linux-user` with plugin support, and compiles both QEMU and the BBV plugin. After this step:
+This initializes the QEMU submodule, configures it for `riscv64-linux-user` with plugin support, and compiles QEMU, the official BBV plugin, and our custom BBV plugin (with `.disas` output and exit flush). After this step:
 
 ```
 third_party/qemu/build/
 ├── qemu-riscv64                              # QEMU RISC-V user-mode emulator
-└── contrib/plugins/bbv.so                     # BBV profiling plugin
+└── contrib/plugins/libbbv.so                  # Official BBV plugin (baseline)
+
+tools/bbv/
+├── bbv.c                                      # Custom BBV plugin source
+├── Makefile                                   # Independent build
+└── libbbv.so                                  # Custom BBV plugin (used by pipeline)
 ```
 
 ### Step 3: Build ONNX Runtime + YOLO runner for RISC-V
@@ -117,7 +122,7 @@ output/
 ```bash
 ./third_party/qemu/build/qemu-riscv64 \
   -L output/sysroot \
-  -plugin ./third_party/qemu/build/contrib/plugins/bbv.so,interval=100000,outfile=output/yolo.bbv \
+  -plugin ./tools/bbv/libbbv.so,interval=100000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg 1
 ```
 
