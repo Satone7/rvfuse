@@ -21,7 +21,10 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${CMAKE_SYSROOT}/usr/include/ri
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=rv64gcv")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv")
 
-# Use lld for linking (no GCC cross-compiler dependency)
+# Use lld for linking (no GCC cross-compiler dependency).
+# Previous c920-onnxrt toolchain used GCC's ld to work around R_RISCV_ALIGN
+# issues in older lld versions. LLVM 22's lld has mature RISC-V support and
+# handles this correctly.
 SET(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
 SET(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=lld")
 

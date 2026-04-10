@@ -218,6 +218,7 @@ cross_compile() {
 
     export LLVM_INSTALL="${LLVM_INSTALL}"
     export SYSROOT="${sysroot}"
+    trap 'unset LLVM_INSTALL SYSROOT' RETURN
 
     cmake -S "${ORT_SOURCE}/cmake" -B "${ort_build}" \
         -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
@@ -238,8 +239,8 @@ cross_compile() {
     info "Installing..."
     ninja -C "${ort_build}" install/strip
 
-    unset LLVM_INSTALL
-    unset SYSROOT
+    unset LLVM_INSTALL SYSROOT
+    trap - RETURN
 
     info "ONNX Runtime cross-compiled to ${ort_install}"
     file "${ort_install}/lib/libonnxruntime.so*" || true
