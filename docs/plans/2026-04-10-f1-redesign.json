@@ -1,0 +1,320 @@
+{
+  "project": "F1 Pattern Mining Redesign",
+  "description": "Rewrite the F1 fusion miner to use general connected subgraph enumeration over DFG RAW edges, replacing the incorrect adjacent-pair chain scanning. The goal is instruction set extension design — discovering multi-instruction data-flow patterns that could become new custom instructions.",
+  "goal": "Replace the adjacent-pair chain miner with a subgraph-based miner that discovers all connected DFG subgraphs, normalizes them by topology and register roles, aggregates across basic blocks, and outputs the new schema for F2 scoring.",
+  "architecture": "Three new/rewritten modules: subgraph.py (enumeration algorithm), pattern.py (normalization + dedup model), miner.py (orchestration). F2 modules (constraints.py, scorer.py) adapted for subgraph input. CLI updated with --max-nodes flag.",
+  "tech_stack": ["Python 3.13", "ISARegistry (existing)", "BBV hotspot JSON (existing)", "DFG JSON (existing)"],
+  "created_at": "2026-04-10",
+  "design_doc": "docs/plans/2026-04-10-f1-pattern-mining-redesign.md",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Create subgraph.py: connected subgraph enumeration",
+      "description": "Implement the seed+BFS expansion algorithm to enumerate all connected subgraphs up to MAX_NODES from a DFG. Pure algorithm module with no fusion-specific logic.",
+      "steps": [
+        "Create tools/fusion/subgraph.py with enumerate_subgraphs(nodes, edges, max_nodes) function",
+        "Implement seed initialization: create a 1-node subgraph for each DFG node",
+        "Implement BFS expansion: for each subgraph S, find neighbor nodes connected by RAW edges to any node in S",
+        "Accept expansion if |S| + 1 <= max_nodes and the result is connected",
+        "Track which edges belong to each subgraph (subset of original DFG edges)",
+        "Return list of subgraphs, each as a tuple of (frozenset of node indices, list of internal edges)",
+        "Add deduplication: use frozenset(node_indices) to avoid enumerating the same subgraph twice"
+      ],
+      "passes": false,
+      "files": {
+        "create": ["tools/fusion/subgraph.py"]
+      },
+      "validation_criteria": [
+        "enumerate_subgraphs returns all 1-node subgraphs for any DFG",
+        "For a 2-node DFG with one edge, returns both 1-node and 1 two-node subgraph",
+        "For float_chain_2.json fixture (2 nodes, 1 edge), returns 3 subgraphs total (2 singletons + 1 pair)",
+        "No duplicate subgraphs (verified by frozenset equality)",
+        "Subgraph edges are a subset of the original DFG edges",
+        "MAX_NODES=1 returns only singleton subgraphs",
+        "MAX_NODES=0 or negative raises ValueError"
+      ],
+      "skills": ["executing-single-task", "test-driven-development"]
+    },
+    {
+      "id": 2,
+      "title": "Create test_subgraph.py with fixtures",
+      "description": "Write unit tests for the subgraph enumeration module, including new test fixtures for non-adjacent edge DFGs that represent real workload patterns.",
+      "steps": [
+        "Create tools/fusion/tests/test_subgraph.py with TestEnumerateSubgraphs class",
+        "Write test for empty DFG (returns empty list)",
+        "Write test for single-node DFG (returns one singleton)",
+        "Write test for 2-node DFG with edge (returns 3 subgraphs)",
+        "Write test for 3-node chain DFG (returns 7 subgraphs: 3 singletons + 3 pairs + 1 triple)",
+        "Write test for fan-in DFG (2 sources → 1 consumer) to verify non-adjacent patterns",
+        "Write test that MAX_NODES limits output correctly",
+        "Create tools/fusion/tests/fixtures/fan_in_3node.json: two flw → one fmadd.s (non-adjacent edges)",
+        "Create tools/fusion/tests/fixtures/fan_out_3node.json: one flw → two fmadd.s (fan-out pattern)",
+        "Create tools/fusion/tests/fixtures/disconnected.json: two isolated nodes with no edges"
+      ],
+      "passes": false,
+      "files": {
+        "create": [
+          "tools/fusion/tests/test_subgraph.py",
+          "tools/fusion/tests/fixtures/fan_in_3node.json",
+          "tools/fusion/tests/fixtures/fan_out_3node.json",
+          "tools/fusion/tests/fixtures/disconnected.json"
+        ]
+      },
+      "depends_on": [1],
+      "validation_criteria": [
+        "All tests pass with pytest",
+        "Fan-in fixture correctly models non-adjacent RAW edges (src=0 dst=2 and src=1 dst=2)",
+        "Disconnected fixture has two nodes with no edges between them",
+        "Tests cover: empty, singleton, chain, fan-in, fan-out, disconnected, max_nodes limit"
+      ],
+      "skills": ["executing-single-task", "test-driven-development"]
+    },
+    {
+      "id": 3,
+      "title": "Rewrite pattern.py: SubgraphPattern model + normalization",
+      "description": "Replace the linear-chain Pattern dataclass with a SubgraphPattern model that captures DAG topology, normalized edge roles, and topological layer structure. Implement normalization from concrete subgraph instances.",
+      "steps": [
+        "Define SubgraphPattern dataclass with fields: opcodes, register_class, size, topology, edges, template_key",
+        "Implement normalize_subgraph(subgraph_nodes, subgraph_edges, dfg_nodes, registry) -> SubgraphPattern",
+        "In normalize_subgraph: resolve each node's operands via registry.get_flow().resolve()",
+        "Determine register_class from the majority class of subgraph nodes",
+        "For each edge in the subgraph: find src_role via _find_role(register, src_resolved.dst_regs, src_flow.dst_regs) and dst_role via _find_role(register, dst_resolved.src_regs, dst_flow.src_regs)",
+        "Compute topological layers: BFS from roots (nodes with no in-edges in subgraph), assign layer numbers",
+        "Within each layer, sort opcodes lexicographically for stability",
+        "Build template_key as (tuple(topology), tuple(normalized_edge_tuples), register_class)",
+        "Keep existing classify_register() and is_control_flow() functions unchanged",
+        "Keep existing _find_role() helper (reuse for subgraph edges)"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/pattern.py"]
+      },
+      "depends_on": [1],
+      "validation_criteria": [
+        "SubgraphPattern has opcodes, register_class, size, topology, edges, and template_key fields",
+        "template_key is hashable (tuple of tuples)",
+        "normalize_subgraph with float_chain_2.json nodes produces SubgraphPattern with 2 opcodes and 1 edge role pair",
+        "Two subgraphs with same structure but different register names produce identical template_keys",
+        "Topology is a list of lists (layers), not a flat list",
+        "classify_register and is_control_flow still exported and working"
+      ],
+      "skills": ["executing-single-task", "test-driven-development"]
+    },
+    {
+      "id": 4,
+      "title": "Create test_pattern.py: normalization + dedup tests",
+      "description": "Write unit tests for SubgraphPattern normalization and template_key deduplication.",
+      "steps": [
+        "Create tools/fusion/tests/test_pattern.py with TestSubgraphPattern class",
+        "Write test for 2-node subgraph normalization (float_chain_2 pattern)",
+        "Write test that two structurally identical subgraphs with different concrete registers produce same template_key",
+        "Write test that different edge structures produce different template_keys (fan-in vs chain)",
+        "Write test for topological layer computation: fan-in has 2 nodes in layer 0 and 1 in layer 1",
+        "Write test for register class determination from node majority",
+        "Write test for edge role resolution: flw.frd → fmadd.s.frs3"
+      ],
+      "passes": false,
+      "files": {
+        "create": ["tools/fusion/tests/test_pattern.py"]
+      },
+      "depends_on": [3],
+      "validation_criteria": [
+        "All tests pass with pytest",
+        "Template key correctly distinguishes fan-in from chain patterns",
+        "Topological layers are stable (same input always produces same output)",
+        "Edge roles are correctly resolved from concrete register names to role names"
+      ],
+      "skills": ["executing-single-task", "test-driven-development"]
+    },
+    {
+      "id": 5,
+      "title": "Rewrite miner.py: subgraph-based orchestration",
+      "description": "Replace the chain-based miner with subgraph-based orchestration: load DFGs → enumerate subgraphs → normalize → aggregate across BBs → write new schema JSON.",
+      "steps": [
+        "Replace enumerate_chains with a call to subgraph.enumerate_subgraphs",
+        "Rewrite aggregate_patterns: for each DFG, enumerate subgraphs, normalize each, group by template_key",
+        "For each normalized subgraph, look up BBV frequency from bbv_map using vaddr",
+        "Accumulate occurrence_count and total_frequency per template_key across BBs",
+        "Build pattern output dicts with new schema fields: opcodes, register_class, size, topology, edges, occurrence_count, total_frequency, source_bbs, examples",
+        "Store one concrete example per source BB (mnemonic, operands, index for each node in the subgraph)",
+        "Sort patterns by total_frequency descending, assign ranks",
+        "Rewrite mine() to write the new JSON schema including rejected_combinations section",
+        "Keep _build_bbv_map unchanged",
+        "Remove RejectedPair dataclass (unused from previous iteration)"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/miner.py"]
+      },
+      "depends_on": [1, 3],
+      "validation_criteria": [
+        "mine() writes JSON with new schema (topology, edges, examples fields)",
+        "mine() on float_chain_2.json fixture produces at least one pattern",
+        "mine() on fan_in_3node.json fixture produces a pattern with 2-layer topology",
+        "Patterns sorted by total_frequency descending with rank field",
+        "examples field contains concrete instruction instances per BB",
+        "rejected_combinations section is present in output"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 6,
+      "title": "Rewrite test_miner.py: end-to-end mining tests",
+      "description": "Rewrite miner tests to use the new subgraph-based approach and new output schema.",
+      "steps": [
+        "Rewrite TestEnumerateChains → TestSubgraphMining with tests for subgraph-based flow",
+        "Write test_single_dfg_produces_patterns: float_chain_2.json → 1 pattern with size=2",
+        "Write test_fan_in_aggregation: fan_in_3node.json → pattern with 3 nodes, 2-layer topology",
+        "Write test_cross_bb_aggregation: two BBs with same pattern → merged frequencies",
+        "Write test_bb_not_in_hotspot: BB without BBV entry → frequency=0",
+        "Write test_ranked_by_frequency: patterns sorted descending",
+        "Write test_top_n_filtering: --top limits output",
+        "Rewrite TestMineOutput: verify new JSON schema fields (topology, edges, examples)",
+        "Write test_mine_empty_directory: empty dir → 0 patterns"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/tests/test_miner.py"]
+      },
+      "depends_on": [5],
+      "validation_criteria": [
+        "All tests pass with pytest",
+        "No test references chain_registers or the old Pattern model",
+        "Output schema assertions check for topology, edges, and examples fields",
+        "mine() on real DFG data (output/dfg/json/) produces non-zero patterns"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 7,
+      "title": "Modify constraints.py: adapt to subgraph input",
+      "description": "Adapt ConstraintChecker to accept subgraph patterns (with edges and topology fields) instead of linear chain_registers. Add new constraint options.",
+      "steps": [
+        "Update check(pattern) to accept pattern dict with 'edges' field (list of {src_opcode, dst_opcode, src_role, dst_role})",
+        "Rewrite _check_operand_format: derive internal registers from edges, external registers from non-edge operands",
+        "Add new constraint 'no_control_flow' (hard, default enabled): check if any opcode is in _CONTROL_FLOW_MNEMONICS",
+        "Add new constraint 'max_nodes' (hard, default 8): check pattern size <= max_nodes",
+        "Add new constraint 'must_be_single_consumer' (hard, default disabled): check that only one node has no out-edges in the subgraph",
+        "Update ConstraintConfig.ALL_CONSTRAINTS with the three new entries",
+        "Keep existing per-instruction checks (encoding_32bit, no_load_store, etc.) unchanged",
+        "too_many_destinations/sources: continue using union of all flows (already works for subgraphs)"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/constraints.py"]
+      },
+      "depends_on": [3],
+      "validation_criteria": [
+        "check() accepts pattern dict with 'edges' field and produces correct Verdict",
+        "no_control_flow constraint flags patterns containing branch/jump instructions",
+        "max_nodes constraint rejects patterns exceeding the limit",
+        "operand_format correctly identifies internal vs external registers from subgraph edges",
+        "Existing constraints (encoding_32bit, datatype_encoding_space) still work",
+        "--list-constraints shows the three new constraints"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 8,
+      "title": "Modify scorer.py: adapt to subgraph input",
+      "description": "Adapt Scorer to work with subgraph patterns. Change tight_score to use edge/node ratio instead of linear chain density.",
+      "steps": [
+        "Update score_pattern() to read 'edges' and 'size' from pattern dict instead of 'chain_registers' and 'opcodes' length",
+        "Rewrite _tight_score: use len(edges) / size as density metric, remove hardcoded _CHAIN_FACTOR dict",
+        "Update _freq_score and _hw_score: no logic changes needed",
+        "Update the output dict: replace chain_registers with edges in the 'pattern' section",
+        "Update tightness output: replace raw_density and chain_factor with edge_count, node_count, and density",
+        "Update score() CLI helper: handle new catalog schema (patterns list with edges/topology fields)"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/scorer.py"]
+      },
+      "depends_on": [3],
+      "validation_criteria": [
+        "score_pattern() works with pattern dict containing 'edges' and 'size' fields",
+        "tight_score uses edge_count / node_count ratio",
+        "Output dict contains 'edges' instead of 'chain_registers'",
+        "Infeasible patterns still score 0.0",
+        "Integration test passes with new schema"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 9,
+      "title": "Modify __main__.py: add --max-nodes CLI arg",
+      "description": "Add --max-nodes parameter to the discover command and pass it through to the miner.",
+      "steps": [
+        "Add --max-nodes argument to argparse (type=int, default=8) for the discover command",
+        "Pass max_nodes to mine() function",
+        "Update mine() signature to accept max_nodes parameter",
+        "Pass max_nodes through to subgraph.enumerate_subgraphs()"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/__main__.py", "tools/fusion/miner.py"]
+      },
+      "depends_on": [1, 5],
+      "validation_criteria": [
+        "--max-nodes 3 limits subgraph enumeration to 3 nodes",
+        "--max-nodes defaults to 8",
+        "Invalid value (0 or negative) produces error message",
+        "python -m tools.fusion discover --help shows --max-nodes in usage"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 10,
+      "title": "Modify test_integration.py: update scoring pipeline tests",
+      "description": "Update the integration tests to use the new subgraph-based pattern schema in the scoring pipeline.",
+      "steps": [
+        "Update TestScoringPipeline.setUp catalog to use new schema (replace chain_registers with edges/topology)",
+        "Update test_full_pipeline assertions to check new output fields",
+        "Update test_feasibility_only_mode for new schema",
+        "Keep TestEncodingMetadataAvailable tests unchanged (they test ISARegistry directly)"
+      ],
+      "passes": false,
+      "files": {
+        "modify": ["tools/fusion/tests/test_integration.py"]
+      },
+      "depends_on": [7, 8],
+      "validation_criteria": [
+        "All integration tests pass",
+        "Catalog uses new schema with edges and topology fields",
+        "Candidate output contains new tightness fields (edge_count, node_count, density)"
+      ],
+      "skills": ["executing-single-task"]
+    },
+    {
+      "id": 11,
+      "title": "End-to-end validation: run miner on real DFG data",
+      "description": "Run the full pipeline (discover + score) on the actual YOLO DFG data in output/dfg/json/ and verify meaningful patterns are discovered.",
+      "steps": [
+        "Run: python3 -m tools.fusion discover --dfg-dir output/dfg/json --report output/hotspot.json --output output/fusion_patterns.json --no-agent",
+        "Verify fusion_patterns.json contains non-zero pattern_count",
+        "Verify at least one pattern has size >= 3 (flw + flw + fmadd.s or similar)",
+        "Verify topology field shows correct layer structure",
+        "Verify edges field contains correct role pairs",
+        "Run: python3 -m tools.fusion score --catalog output/fusion_patterns.json --output output/fusion_candidates.json",
+        "Verify fusion_candidates.json contains scored candidates",
+        "Run full test suite: python3 -m pytest tools/fusion/tests/ -v"
+      ],
+      "passes": false,
+      "files": {
+        "test": [
+          "output/fusion_patterns.json",
+          "output/fusion_candidates.json"
+        ]
+      },
+      "depends_on": [5, 6, 7, 8, 9, 10],
+      "validation_criteria": [
+        "pattern_count > 0 in fusion_patterns.json",
+        "At least one pattern with size >= 3",
+        "Topology has at least 2 layers for multi-node patterns",
+        "candidate_count > 0 in fusion_candidates.json",
+        "All unit tests pass (pytest tools/fusion/tests/ -v)"
+      ],
+      "skills": ["executing-single-task", "verification-before-completion"]
+    }
+  ]
+}
