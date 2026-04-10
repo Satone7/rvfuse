@@ -259,7 +259,7 @@ build_yolo_runner() {
     fi
 
     [ -f "${runner_src}/yolo_runner.cpp" ] || error "YOLO runner source not found at ${runner_src}"
-    [ -d "${ort_install}/lib" ] || error "ORT not built at ${ort_install}. Run without --skip-sysroot."
+    [ -d "${ort_install}/lib" ] || error "ORT not built at ${ort_install}. Remove --skip-source or run full build."
     [ -d "${sysroot}/usr" ] || error "Sysroot not found at ${sysroot}. Run without --skip-sysroot."
 
     info "Cross-compiling YOLO runner..."
@@ -267,6 +267,7 @@ build_yolo_runner() {
     "${LLVM_INSTALL}/bin/clang++" \
         --target=riscv64-unknown-linux-gnu \
         --sysroot="${sysroot}" \
+        -march=rv64gcv \
         -isystem "${sysroot}/usr/include/riscv64-linux-gnu" \
         -std=c++17 -O2 -g \
         -fuse-ld=lld \

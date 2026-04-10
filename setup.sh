@@ -461,6 +461,9 @@ cleanup_step() {
             rm -f "${PROJECT_ROOT}/output/cross-ort/yolo_preprocess"
             rm -f "${PROJECT_ROOT}/output/cross-ort/yolo_postprocess"
             rm -rf "${PROJECT_ROOT}/output/cross-ort/sysroot"
+            rm -rf "${PROJECT_ROOT}/output/cross-ort/lib"
+            rm -rf "${PROJECT_ROOT}/output/cross-ort/include"
+            rm -rf "${PROJECT_ROOT}/output/cross-ort/.build"
             ;;
         4)
             log_info "Cleaning Step 4 artifacts (BBV output)..."
