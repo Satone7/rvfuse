@@ -190,18 +190,21 @@ class TestRv64vModule(unittest.TestCase):
         self.assertTrue(any("vred" in m for m in reg._flows))
 
     def test_vfmv_f_s_in_both_v_and_f(self):
-        """VFMV_F_S and VFMV_S_F have both HasStdExtV and HasStdExtF
-        predicates, so they appear in both rv64v.py and rv64f.py.  The V
-        descriptor provides the vector-aware flow (tracks VR source/dest),
-        while the F descriptor provides the scalar-float perspective."""
+        """VFMV_F_S and VFMV_S_F have 'no pred' in LLVM 22, so they are not
+        matched by either HasVInstructions or HasStdExtF and no longer appear
+        in either extension."""
         from dfg.instruction import ISARegistry
         from dfg.isadesc.rv64v import build_registry
         from dfg.isadesc.rv64f import build_registry as build_f
         reg_v = ISARegistry()
         build_registry(reg_v)
-        # These are present in the V registry (vector-aware variant)
-        self.assertTrue(reg_v.is_known("vfmv.f.s"))
-        self.assertTrue(reg_v.is_known("vfmv.s.f"))
+        reg_f = ISARegistry()
+        build_f(reg_f)
+        # Neither extension contains these in LLVM 22
+        self.assertFalse(reg_v.is_known("vfmv.f.s"))
+        self.assertFalse(reg_v.is_known("vfmv.s.f"))
+        self.assertFalse(reg_f.is_known("vfmv.f.s"))
+        self.assertFalse(reg_f.is_known("vfmv.s.f"))
 
 
 if __name__ == "__main__":

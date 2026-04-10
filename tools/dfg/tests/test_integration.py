@@ -26,14 +26,15 @@ class TestFullRegistryLoad(unittest.TestCase):
     """Verify all four extensions load together without conflicts."""
 
     def test_no_mnemonic_collisions(self):
-        """F/V should not have overlapping mnemonics (except intentional VFMV)."""
+        """F/V should not have overlapping mnemonics."""
         reg_f = ISARegistry()
         build_f(reg_f)
         reg_v = ISARegistry()
         build_v(reg_v)
         collisions = set(reg_f._flows.keys()) & set(reg_v._flows.keys())
-        # VFMV_F_S and VFMV_S_F appear in both F and V extensions
-        self.assertEqual(collisions, {"vfmv.f.s", "vfmv.s.f"}, f"Unexpected collisions: {collisions}")
+        # In LLVM 22, vfmv.f.s and vfmv.s.f have 'no pred' and appear in
+        # neither extension, so there should be no collisions at all.
+        self.assertEqual(collisions, set(), f"Unexpected collisions: {collisions}")
 
     def test_total_instruction_count(self):
         """V extension should add hundreds of instructions."""
