@@ -64,8 +64,10 @@ def _compute_node_layer(
     layer_map: dict[int, int] = {}
     layer_num = 0
     while remaining:
-        layer_nodes = sorted(n for n in remaining if in_degree.get(n, 0) == 0)
+        layer_nodes = sorted(n for n in remaining if in_degree[n] == 0)
         if not layer_nodes:
+            # All remaining nodes have in_degree > 0 (a cycle from back-edges
+            # in the DFG). Group them into a single fallback layer.
             layer_nodes = sorted(remaining)
         for n in layer_nodes:
             layer_map[n] = layer_num

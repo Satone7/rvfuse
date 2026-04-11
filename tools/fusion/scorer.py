@@ -245,7 +245,9 @@ def score(
                 "pattern": {
                     "opcodes": p["opcodes"],
                     "register_class": p.get("register_class"),
-                    "chain_registers": p.get("chain_registers", []),
+                    "topology": p.get("topology"),
+                    "edges": p.get("edges", []),
+                    "size": p.get("size", len(p.get("opcodes", []))),
                 },
                 "input_frequency": p.get("total_frequency", 0),
                 "input_occurrence_count": p.get("occurrence_count", 0),
