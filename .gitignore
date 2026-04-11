@@ -62,6 +62,7 @@ tools/bbv/libbbv.so
 /demo.elf
 /demo.c
 test_bbv
+tools/bbv/demo.elf
 
 # Tools and Testing artifacts
 tests/tools/*.o
