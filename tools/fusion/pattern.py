@@ -1,22 +1,22 @@
-"""Fusible instruction pattern model and normalization."""
+"""Subgraph pattern model and normalization for fusion candidate discovery.
+
+Converts a connected DFG subgraph (set of node indices) into a normalized
+SubgraphPattern template:
+  1. Extract edges within the subgraph
+  2. Map concrete registers to operand roles via ISARegistry
+  3. Compute topological layers (same-layer opcodes sorted alphabetically)
+  4. Build a hashable template_key for cross-BB deduplication
+"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 
-from dfg.instruction import ISARegistry
 
 # Register classification patterns (matching dfg/instruction.py)
 _INTEGER_RE = re.compile(r"^(x\d+|zero|ra|sp|gp|tp|[ast]\d+|s\d+|jt?\d*)$")
 _FLOAT_RE = re.compile(r"^(f\d+|ft\d+|fs\d+|fa\d+|fv\d+)$")
-
-# Control flow mnemonics
-_CONTROL_FLOW_MNEMONICS = frozenset({
-    "beq", "bne", "blt", "bge", "bltu", "bgeu",
-    "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
-    "jal", "jalr", "j", "jr", "call", "ret",
-})
 
 
 def classify_register(reg_name: str) -> str | None:
@@ -28,67 +28,68 @@ def classify_register(reg_name: str) -> str | None:
     return None
 
 
-def is_control_flow(mnemonic: str) -> bool:
-    """Return True if the mnemonic is a branch, jump, or call."""
-    return mnemonic in _CONTROL_FLOW_MNEMONICS
+def _classify_subgraph(
+    node_indices: set[int],
+    nodes: list[dict],
+    registry,
+) -> str:
+    """Determine the dominant register class of a subgraph."""
+    for idx in sorted(node_indices):
+        mn = nodes[idx]["mnemonic"]
+        flow = registry.get_flow(mn)
+        if flow is None:
+            continue
+        resolved = flow.resolve(nodes[idx]["operands"])
+        all_regs = resolved.dst_regs + resolved.src_regs
+        if all_regs:
+            cls = classify_register(all_regs[0])
+            if cls:
+                return cls
+    return "unknown"
 
 
-def normalize_chain(
-    chain: list[tuple[str, str]],
-    edges_between: list[dict],
-    registry: ISARegistry,
-) -> Pattern:
-    """Normalize a concrete instruction chain to a Pattern template.
+def _compute_node_layer(
+    node_indices: set[int],
+    intra_edges: list[dict],
+) -> dict[int, int]:
+    """Map each node index to its topological layer number."""
+    remaining = set(node_indices)
+    in_degree: dict[int, int] = {n: 0 for n in remaining}
+    fwd: dict[int, set[int]] = {n: set() for n in remaining}
+    for e in intra_edges:
+        if e["src"] in remaining and e["dst"] in remaining:
+            in_degree[e["dst"]] = in_degree.get(e["dst"], 0) + 1
+            fwd[e["src"]].add(e["dst"])
 
-    Args:
-        chain: List of (mnemonic, operands) tuples.
-        edges_between: RAW edges within the chain, each with 'src', 'dst', 'register'.
-        registry: ISA registry for resolving operand role positions.
+    layer_map: dict[int, int] = {}
+    layer_num = 0
+    while remaining:
+        layer_nodes = sorted(n for n in remaining if in_degree[n] == 0)
+        if not layer_nodes:
+            # All remaining nodes have in_degree > 0 (a cycle from back-edges
+            # in the DFG). Group them into a single fallback layer.
+            layer_nodes = sorted(remaining)
+        for n in layer_nodes:
+            layer_map[n] = layer_num
+            remaining.discard(n)
+            for nb in fwd.get(n, set()):
+                in_degree[nb] -= 1
+        layer_num += 1
 
-    Returns:
-        A Pattern with normalized opcodes and chain_registers.
+    return layer_map
 
-    Raises:
-        ValueError: If any mnemonic is unknown in the registry.
-    """
-    opcodes = [mn for mn, _ in chain]
-    first_flow = registry.get_flow(chain[0][0])
-    if first_flow is None:
-        raise ValueError(f"Unknown mnemonic: {chain[0][0]}")
-    first_resolved = first_flow.resolve(chain[0][1])
-    all_regs = first_resolved.dst_regs + first_resolved.src_regs
-    reg_class = classify_register(all_regs[0]) if all_regs else None
 
-    chain_regs: list[list[str]] = []
-    for pair_idx in range(len(chain) - 1):
-        pair_edges = [
-            e for e in edges_between
-            if e["src"] == pair_idx and e["dst"] == pair_idx + 1
-        ]
-        roles_for_pair: list[list[str]] = []
-        for edge in pair_edges:
-            reg_name = edge["register"]
-            src_flow = registry.get_flow(chain[pair_idx][0])
-            if src_flow is None:
-                raise ValueError(f"Unknown mnemonic: {chain[pair_idx][0]}")
-            src_resolved = src_flow.resolve(chain[pair_idx][1])
-            dst_role = _find_role(reg_name, src_resolved.dst_regs, src_flow.dst_regs)
-
-            dst_flow = registry.get_flow(chain[pair_idx + 1][0])
-            if dst_flow is None:
-                raise ValueError(f"Unknown mnemonic: {chain[pair_idx + 1][0]}")
-            dst_resolved = dst_flow.resolve(chain[pair_idx + 1][1])
-            src_role = _find_role(reg_name, dst_resolved.src_regs, dst_flow.src_regs)
-
-            if dst_role and src_role:
-                roles_for_pair.append([dst_role, src_role])
-        chain_regs.extend(roles_for_pair)
-
-    return Pattern(
-        opcodes=opcodes,
-        register_class=reg_class or "unknown",
-        chain_registers=chain_regs,
-    )
+def _topological_layers(
+    node_indices: set[int],
+    intra_edges: list[dict],
+    nodes: list[dict],
+) -> list[list[str]]:
+    """Compute topological layers of the subgraph."""
+    layer_map = _compute_node_layer(node_indices, intra_edges)
+    layers_dict: dict[int, list[str]] = {}
+    for idx, layer in layer_map.items():
+        layers_dict.setdefault(layer, []).append(nodes[idx]["mnemonic"])
+    return [sorted(opcodes) for _, opcodes in sorted(layers_dict.items())]
 
 
 def _find_role(
@@ -101,32 +102,134 @@ def _find_role(
     return role_map.get(reg_name)
 
 
+def _normalize_edges(
+    intra_edges: list[dict],
+    node_indices: set[int],
+    nodes: list[dict],
+    layer_map: dict[int, int],
+    registry,
+) -> list[NormalizedEdge]:
+    """Convert concrete DFG edges to role-abstracted NormalizedEdge list."""
+    result: list[NormalizedEdge] = []
+    for e in intra_edges:
+        if e["src"] not in node_indices or e["dst"] not in node_indices:
+            continue
+        reg_name = e["register"]
+        src_mn = nodes[e["src"]]["mnemonic"]
+        dst_mn = nodes[e["dst"]]["mnemonic"]
+        src_ops = nodes[e["src"]]["operands"]
+        dst_ops = nodes[e["dst"]]["operands"]
+
+        src_flow = registry.get_flow(src_mn)
+        dst_flow = registry.get_flow(dst_mn)
+        if src_flow is None or dst_flow is None:
+            continue
+
+        src_resolved = src_flow.resolve(src_ops)
+        dst_resolved = dst_flow.resolve(dst_ops)
+
+        src_role = _find_role(reg_name, src_resolved.dst_regs, src_flow.dst_regs)
+        dst_role = _find_role(reg_name, dst_resolved.src_regs, dst_flow.src_regs)
+
+        if src_role and dst_role:
+            result.append(NormalizedEdge(
+                src_layer=layer_map[e["src"]],
+                src_opcode=src_mn,
+                dst_layer=layer_map[e["dst"]],
+                dst_opcode=dst_mn,
+                src_role=src_role,
+                dst_role=dst_role,
+            ))
+    return result
+
+
 @dataclass
-class Pattern:
-    """A normalized fusible instruction template.
+class NormalizedEdge:
+    """A role-abstracted edge between two instructions in the pattern."""
+
+    src_layer: int
+    src_opcode: str
+    dst_layer: int
+    dst_opcode: str
+    src_role: str
+    dst_role: str
+
+
+@dataclass
+class SubgraphPattern:
+    """A normalized fusible subgraph template.
 
     Attributes:
-        opcodes: Ordered list of instruction mnemonics in the chain.
-        register_class: "integer" or "float".
-        chain_registers: For each consecutive pair, a list of (dst_role, src_role)
-            tuples describing which operand positions carry the RAW dependency.
-            E.g. [["frd", "frs1"]] means the frd output of instruction i
-            feeds into the frs1 input of instruction i+1.
+        topology: Topological layers of opcodes.
+            e.g. [["flw", "flw"], ["fmadd.s"]]
+        edges: Role-abstracted edges between instructions.
+        register_class: "integer", "float", or "unknown".
+        size: Number of instructions in the subgraph.
     """
 
-    opcodes: list[str]
+    topology: list[list[str]]
+    edges: list[NormalizedEdge]
     register_class: str
-    chain_registers: list[list[str]] = field(default_factory=list)
-
-    @property
-    def length(self) -> int:
-        return len(self.opcodes)
+    size: int
 
     @property
     def template_key(self) -> tuple:
-        """Hashable key for grouping identical patterns across BBs.
+        """Hashable key for grouping identical patterns across BBs."""
+        topo_tuple = tuple(tuple(layer) for layer in self.topology)
+        edge_tuple = tuple(
+            (e.src_layer, e.src_opcode, e.dst_layer, e.dst_opcode, e.src_role, e.dst_role)
+            for e in sorted(self.edges, key=lambda e: (e.src_layer, e.dst_layer, e.src_role, e.dst_role))
+        )
+        return (topo_tuple, self.register_class, edge_tuple)
 
-        Converts lists to tuples so the key is hashable (usable in dicts/sets).
-        """
-        chain_tuple = tuple(tuple(pair) for pair in self.chain_registers)
-        return (tuple(self.opcodes), self.register_class, chain_tuple)
+
+def normalize_subgraph(
+    node_indices: frozenset[int] | set[int],
+    dfg_data: dict,
+    registry,
+) -> SubgraphPattern:
+    """Normalize a DFG subgraph into a SubgraphPattern template.
+
+    Args:
+        node_indices: Set of DFG node indices forming the subgraph.
+        dfg_data: DFG JSON dict with 'nodes' and 'edges'.
+        registry: ISA registry for register flow resolution.
+
+    Returns:
+        A SubgraphPattern with normalized topology, edges, and register class.
+
+    Raises:
+        ValueError: If any mnemonic is unknown in the registry.
+    """
+    node_set = set(node_indices)
+    nodes = dfg_data["nodes"]
+    all_edges = dfg_data["edges"]
+
+    # Validate all mnemonics are known
+    for idx in node_set:
+        mn = nodes[idx]["mnemonic"]
+        if registry.get_flow(mn) is None:
+            raise ValueError(f"unknown instruction: {mn}")
+
+    # Filter edges to those within the subgraph
+    intra_edges = [
+        e for e in all_edges
+        if e["src"] in node_set and e["dst"] in node_set
+    ]
+
+    # Classify register class
+    reg_class = _classify_subgraph(node_set, nodes, registry)
+
+    # Compute topological layers and node-to-layer mapping
+    layer_map = _compute_node_layer(node_set, intra_edges)
+    layers = _topological_layers(node_set, intra_edges, nodes)
+
+    # Normalize edges
+    norm_edges = _normalize_edges(intra_edges, node_set, nodes, layer_map, registry)
+
+    return SubgraphPattern(
+        topology=layers,
+        edges=norm_edges,
+        register_class=reg_class,
+        size=len(node_set),
+    )

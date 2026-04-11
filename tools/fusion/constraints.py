@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # Detected by opcode 0x57 (OP-V) + funct3 0x7.
 _CONFIG_FUNCT3 = frozenset({0x07})
 
+_CONTROL_FLOW = frozenset({
+    "beq", "bne", "blt", "bge", "bltu", "bgeu",
+    "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
+    "jal", "jalr", "j", "jr", "call", "ret",
+    "bgtu",
+})
+
 
 @dataclass
 class ConstraintConfig:
@@ -42,6 +49,8 @@ class ConstraintConfig:
         "too_many_sources":        ("hard", False, "唯一源字段数 > 3"),
         "has_immediate":           ("soft", False, "链中包含立即数操作数"),
         "missing_encoding":        ("soft", False, "指令缺少 InstructionFormat 元数据"),
+        "max_nodes":             ("hard", False, "子图节点数超过硬件可实现的融合上限"),
+        "no_control_flow":       ("hard", False, "子图包含控制流指令（分支/跳转）"),
     }
 
     @classmethod
@@ -99,8 +108,8 @@ class ConstraintChecker:
     """Check whether a fusion pattern satisfies hardware-level constraints.
 
     The checker evaluates a pattern dict (with keys ``opcodes``,
-    ``register_class``, and ``chain_registers``) against the encoding
-    metadata in an :class:`ISARegistry`.
+    ``register_class``, ``edges``, ``topology``, and ``size``) against
+    the encoding metadata in an :class:`ISARegistry`.
 
     Verdict priority:
       1. Any hard violation -> ``infeasible``
@@ -136,7 +145,7 @@ class ConstraintChecker:
     def _check_operand_format(
         self,
         opcodes: list[str],
-        chain_registers: list[list[str]],
+        edges: list[dict],
         flows: list,
         encodings: list,
     ) -> tuple[str, str] | None:
@@ -145,17 +154,20 @@ class ConstraintChecker:
         Mode A: 3 external sources + 1 destination (no immediate)
         Mode B: 2 external sources + 5-bit immediate + 1 destination
 
-        External operands are those not passed through the chain.
-        Uses chain_registers to identify internal registers.
+        External operands are those not passed through the subgraph.
+        Uses edges to identify internal register roles — a role is
+        internal if it appears as both a dst_role and a src_role
+        across the subgraph edges.
         Returns (violation_name, reason) tuple if violated, else None.
         """
-        # Collect all internal (chain-through) registers
-        internal_regs: set[str] = set()
-        for chain in chain_registers:
-            if len(chain) >= 2:
-                # First is the destination from previous, second is source to next
-                internal_regs.add(chain[0])
-                internal_regs.add(chain[1])
+        # Collect internal register roles from subgraph edges.
+        # src_role = producer output role (e.g. "frd"), becomes an internal dst.
+        # dst_role = consumer input role (e.g. "frs1"), becomes an internal src.
+        internal_dsts: set[str] = set()
+        internal_srcs: set[str] = set()
+        for edge in edges:
+            internal_dsts.add(edge.get("src_role", ""))
+            internal_srcs.add(edge.get("dst_role", ""))
 
         # Collect all external sources and destinations
         external_srcs: set[str] = set()
@@ -165,13 +177,13 @@ class ConstraintChecker:
         for i, flow in enumerate(flows):
             if flow is None:
                 continue
-            # External sources: src_regs not in internal_regs
+            # External sources: src_regs not fed by an internal edge
             for src in flow.src_regs:
-                if src not in internal_regs:
+                if src not in internal_srcs:
                     external_srcs.add(src)
-            # External destinations: dst_regs not in internal_regs
+            # External destinations: dst_regs not consumed by an internal edge
             for dst in flow.dst_regs:
-                if dst not in internal_regs:
+                if dst not in internal_dsts:
                     external_dsts.add(dst)
             # Check for immediate that fits in 5 bits (Mode B requirement)
             enc = encodings[i]
@@ -224,8 +236,8 @@ class ConstraintChecker:
 
         Args:
             pattern: Dict with keys ``opcodes`` (list[str]),
-                ``register_class`` (str), and ``chain_registers``
-                (list[list[str]]).
+                ``register_class`` (str), ``edges`` (list[dict]),
+                ``topology`` (list[list[str]]), and ``size`` (int).
 
         Returns:
             A :class:`Verdict` with status and violation details.
@@ -304,8 +316,8 @@ class ConstraintChecker:
                 reasons.append(result[1])
 
         if self.is_enabled("operand_format"):
-            chain_registers: list[list[str]] = pattern.get("chain_registers", [])
-            result = self._check_operand_format(opcodes, chain_registers, flows, encodings)
+            edges: list[dict] = pattern.get("edges", [])
+            result = self._check_operand_format(opcodes, edges, flows, encodings)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
@@ -339,6 +351,25 @@ class ConstraintChecker:
             if num_src > 3 and self.is_enabled("too_many_sources"):
                 hard_violations.append("too_many_sources")
                 reasons.append(f"chain has {num_src} unique source fields (max 3)")
+
+        if hard_violations:
+            return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)
+
+        # --- Check subgraph size limit ---
+        if self.is_enabled("max_nodes"):
+            num_nodes = len(opcodes)
+            max_allowed = 4  # Conservative default for ISA extension design
+            if num_nodes > max_allowed:
+                hard_violations.append("max_nodes")
+                reasons.append(f"subgraph has {num_nodes} nodes (max {max_allowed})")
+
+        # --- Check for control flow instructions ---
+        if self.is_enabled("no_control_flow"):
+            for i, opcode in enumerate(opcodes):
+                if opcode in _CONTROL_FLOW:
+                    hard_violations.append("no_control_flow")
+                    reasons.append(f"{opcode} is a control flow instruction")
+                    break
 
         if hard_violations:
             return Verdict(status="infeasible", reasons=reasons, violations=hard_violations)

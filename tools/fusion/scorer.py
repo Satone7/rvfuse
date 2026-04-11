@@ -73,19 +73,20 @@ class Scorer:
 
     def _tight_score(
         self,
-        chain_registers: list[list[str]],
-        length: int,
+        edges: list[dict],
+        size: int,
     ) -> float:
-        """Data-dependency tightness in [0, 1].
+        """Data-dependency density in [0, 1].
 
-        *raw_density* is the number of chain edges divided by
-        ``(length - 1)``, the maximum possible edges for a chain of that
-        size.  A bonus *chain_factor* is applied for longer chains.
-        The result is capped at 1.0.
+        For subgraph patterns: density = num_edges / (size * (size - 1) / 2),
+        i.e., what fraction of all possible directed edges exist. A bonus
+        chain_factor is applied for larger subgraphs.
         """
-        max_edges = max(1, length - 1)
-        raw_density = len(chain_registers) / max_edges
-        factor = _CHAIN_FACTOR.get(length, _CHAIN_FACTOR.get(max(_CHAIN_FACTOR), 1.0))
+        if size <= 1:
+            return 0.0
+        max_possible = size * (size - 1) / 2
+        raw_density = len(edges) / max_possible if max_possible > 0 else 0.0
+        factor = _CHAIN_FACTOR.get(size, _CHAIN_FACTOR.get(max(_CHAIN_FACTOR), 1.0))
         return min(raw_density * factor, 1.0)
 
     @staticmethod
@@ -106,33 +107,19 @@ class Scorer:
     # -- single pattern -------------------------------------------------------
 
     def score_pattern(self, pattern: dict[str, Any]) -> dict[str, Any]:
-        """Score a single fusion candidate pattern.
-
-        Args:
-            pattern: Dict with keys ``opcodes``, ``register_class``,
-                ``chain_registers``, ``total_frequency``, and
-                ``occurrence_count``.
-
-        Returns:
-            A result dict containing the final ``score``, sub-score
-            ``score_breakdown``, ``tightness`` details, and ``hardware``
-            verdict.
-        """
+        """Score a single fusion candidate pattern."""
         freq = pattern.get("total_frequency", 0)
         occurrences = pattern.get("occurrence_count", 0)
-        chain_regs = pattern.get("chain_registers", [])
-        length = len(pattern.get("opcodes", []))
+        edges = pattern.get("edges", [])
+        size = pattern.get("size", len(pattern.get("opcodes", [])))
 
         # Sub-scores
         freq_score = self._freq_score(freq)
-        tight_score = self._tight_score(chain_regs, length)
+        tight_score = self._tight_score(edges, size)
 
         verdict = self._checker.check(pattern)
         hw_score = self._hw_score(verdict)
 
-        # Weighted sum.  Infeasible patterns always score 0.0 regardless of
-        # other sub-scores -- a hardware veto means the pattern cannot be
-        # fused.
         w = self._weights
         if hw_score == 0.0:
             final_score = 0.0
@@ -147,13 +134,17 @@ class Scorer:
             "pattern": {
                 "opcodes": pattern["opcodes"],
                 "register_class": pattern.get("register_class"),
-                "chain_registers": chain_regs,
+                "topology": pattern.get("topology"),
+                "edges": edges,
+                "size": size,
             },
             "input_frequency": freq,
             "input_occurrence_count": occurrences,
             "tightness": {
-                "raw_density": len(chain_regs) / max(1, length - 1) if length > 1 else 0.0,
-                "chain_factor": _CHAIN_FACTOR.get(length, _CHAIN_FACTOR.get(max(_CHAIN_FACTOR), 1.0)),
+                "edge_count": len(edges),
+                "max_possible_edges": size * (size - 1) // 2 if size > 1 else 0,
+                "raw_density": len(edges) / (size * (size - 1) / 2) if size > 1 else 0.0,
+                "chain_factor": _CHAIN_FACTOR.get(size, _CHAIN_FACTOR.get(max(_CHAIN_FACTOR), 1.0)),
                 "score": tight_score,
             },
             "hardware": {
@@ -279,7 +270,9 @@ def score(
                 "pattern": {
                     "opcodes": p["opcodes"],
                     "register_class": p.get("register_class"),
-                    "chain_registers": p.get("chain_registers", []),
+                    "topology": p.get("topology"),
+                    "edges": p.get("edges", []),
+                    "size": p.get("size", len(p.get("opcodes", []))),
                 },
                 "input_frequency": p.get("total_frequency", 0),
                 "input_occurrence_count": p.get("occurrence_count", 0),
