@@ -238,13 +238,49 @@ cross_compile() {
     info "Installing..."
     ninja -C "${ort_build}" install/strip
 
-    unset LLVM_INSTALL SYSROOT
+    unset SYSROOT
 
     info "ONNX Runtime cross-compiled to ${ort_install}"
-    file "${ort_install}/lib/libonnxruntime.so*" || true
+    file "${ort_install}"/lib/libonnxruntime.so* || true
 }
 
 cross_compile
+
+# --- Step 3.5: Install ORT into sysroot ---
+install_ort_to_sysroot() {
+    local ort_install="${OUTPUT_DIR}"
+    local sysroot="${OUTPUT_DIR}/sysroot"
+    local sysroot_lib="${sysroot}/usr/lib/riscv64-linux-gnu"
+    local ort_so="${ort_install}/lib/libonnxruntime.so.1.24.4"
+
+    if [ ! -f "${ort_so}" ]; then
+        error "libonnxruntime.so not found at ${ort_so}"
+    fi
+
+    # Already installed?
+    if [[ "${FORCE}" != "true" && -f "${sysroot_lib}/libonnxruntime.so.1.24.4" ]]; then
+        info "ORT already in sysroot. Use --force to reinstall."
+        return 0
+    fi
+
+    info "Installing libonnxruntime.so into sysroot..."
+    cp "${ort_so}" "${sysroot_lib}/"
+    ln -sf libonnxruntime.so.1.24.4 "${sysroot_lib}/libonnxruntime.so.1"
+    ln -sf libonnxruntime.so.1 "${sysroot_lib}/libonnxruntime.so"
+
+    # Also symlink to top-level usr/lib/ for clang -L resolution
+    local top_lib="${sysroot}/usr/lib"
+    [ -e "${top_lib}/libonnxruntime.so.1.24.4" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so.1.24.4" "${top_lib}/libonnxruntime.so.1.24.4"
+    [ -e "${top_lib}/libonnxruntime.so.1" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so.1" "${top_lib}/libonnxruntime.so.1"
+    [ -e "${top_lib}/libonnxruntime.so" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so" "${top_lib}/libonnxruntime.so"
+
+    info "libonnxruntime.so installed to sysroot."
+}
+
+install_ort_to_sysroot
 
 # --- Step 4: Cross-compile YOLO runner ---
 build_yolo_runner() {
@@ -252,6 +288,7 @@ build_yolo_runner() {
     local runner_src="${PROJECT_ROOT}/tools/yolo_runner"
     local runner_out="${OUTPUT_DIR}/yolo_inference"
     local sysroot="${OUTPUT_DIR}/sysroot"
+    local sysroot_lib="${sysroot}/usr/lib"
 
     if [[ "${FORCE}" != "true" && -f "${runner_out}" ]]; then
         info "YOLO runner already built at ${runner_out}. Use --force to rebuild."
@@ -259,7 +296,7 @@ build_yolo_runner() {
     fi
 
     [ -f "${runner_src}/yolo_runner.cpp" ] || error "YOLO runner source not found at ${runner_src}"
-    [ -d "${ort_install}/lib" ] || error "ORT not built at ${ort_install}. Remove --skip-source or run full build."
+    [ -f "${sysroot_lib}/libonnxruntime.so" ] || error "libonnxruntime.so not in sysroot. Run full build (Step 3.5)."
     [ -d "${sysroot}/usr" ] || error "Sysroot not found at ${sysroot}. Run without --skip-sysroot."
 
     info "Cross-compiling YOLO runner..."
@@ -276,9 +313,8 @@ build_yolo_runner() {
         -I"${runner_src}" \
         "${runner_src}/yolo_runner.cpp" \
         -o "${runner_out}" \
-        -L"${ort_install}/lib" \
-        -lonnxruntime \
-        -Wl,-rpath,'$ORIGIN/lib'
+        -L"${sysroot_lib}" \
+        -lonnxruntime
 
     info "YOLO runner built: ${runner_out}"
     file "${runner_out}"

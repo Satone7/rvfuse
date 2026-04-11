@@ -438,7 +438,6 @@ def main(argv: list[str] | None = None) -> int:
     if not blocks:
         logger.error("No basic blocks found in %s", disas_path)
         return 1
-    _annotate_vector_config(blocks)
     logger.info("Parsed %d basic block(s) from %s", len(blocks), disas_path)
 
     # -- report-driven filtering -----------------------------------------------
@@ -491,6 +490,9 @@ def main(argv: list[str] | None = None) -> int:
         if not blocks:
             logger.error("No basic block with ID %d found", args.bb_filter)
             return 1
+
+    # -- annotate vector config (after filtering, only on selected BBs) --------
+    _annotate_vector_config(blocks)
 
     # -- agent -----------------------------------------------------------------
     agent = AgentDispatcher(enabled=not args.no_agent, model=args.model)
