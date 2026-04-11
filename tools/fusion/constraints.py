@@ -138,7 +138,7 @@ class ConstraintChecker:
     def _check_operand_format(
         self,
         opcodes: list[str],
-        chain_registers: list[list[str]],
+        edges: list[dict],
         flows: list,
         encodings: list,
     ) -> tuple[str, str] | None:
@@ -147,17 +147,21 @@ class ConstraintChecker:
         Mode A: 3 external sources + 1 destination (no immediate)
         Mode B: 2 external sources + 5-bit immediate + 1 destination
 
-        External operands are those not passed through the chain.
-        Uses chain_registers to identify internal registers.
+        External operands are those not passed through the subgraph.
+        Uses edges to identify internal register roles — a role is
+        internal if it appears as both a dst_role and a src_role
+        across the subgraph edges.
         Returns (violation_name, reason) tuple if violated, else None.
         """
-        # Collect all internal (chain-through) registers
-        internal_regs: set[str] = set()
-        for chain in chain_registers:
-            if len(chain) >= 2:
-                # First is the destination from previous, second is source to next
-                internal_regs.add(chain[0])
-                internal_regs.add(chain[1])
+        # Collect internal register roles from subgraph edges.
+        # A role carried between two instructions is both a dst_role
+        # (output of producer) and a src_role (input of consumer).
+        dst_roles: set[str] = set()
+        src_roles: set[str] = set()
+        for edge in edges:
+            dst_roles.add(edge.get("dst_role", ""))
+            src_roles.add(edge.get("src_role", ""))
+        internal_regs: set[str] = dst_roles & src_roles
 
         # Collect all external sources and destinations
         external_srcs: set[str] = set()
@@ -306,8 +310,8 @@ class ConstraintChecker:
                 reasons.append(result[1])
 
         if self.is_enabled("operand_format"):
-            chain_registers: list[list[str]] = pattern.get("chain_registers", [])
-            result = self._check_operand_format(opcodes, chain_registers, flows, encodings)
+            edges: list[dict] = pattern.get("edges", [])
+            result = self._check_operand_format(opcodes, edges, flows, encodings)
             if result is not None:
                 hard_violations.append(result[0])
                 reasons.append(result[1])
