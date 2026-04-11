@@ -108,8 +108,8 @@ class ConstraintChecker:
     """Check whether a fusion pattern satisfies hardware-level constraints.
 
     The checker evaluates a pattern dict (with keys ``opcodes``,
-    ``register_class``, and ``chain_registers``) against the encoding
-    metadata in an :class:`ISARegistry`.
+    ``register_class``, ``edges``, ``topology``, and ``size``) against
+    the encoding metadata in an :class:`ISARegistry`.
 
     Verdict priority:
       1. Any hard violation -> ``infeasible``
@@ -236,8 +236,8 @@ class ConstraintChecker:
 
         Args:
             pattern: Dict with keys ``opcodes`` (list[str]),
-                ``register_class`` (str), and ``chain_registers``
-                (list[list[str]]).
+                ``register_class`` (str), ``edges`` (list[dict]),
+                ``topology`` (list[list[str]]), and ``size`` (int).
 
         Returns:
             A :class:`Verdict` with status and violation details.
