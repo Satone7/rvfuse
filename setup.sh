@@ -29,7 +29,7 @@ readonly -A STEP_NAMES=(
     [5]="Hotspot Report"
     [6]="DFG Generation"
     [7]="Generate Report"
-    [8]="Fusion Pipeline"
+    [8]="Fusion Pipeline (F1+F2+F3)"
 )
 
 # Step artifact paths (relative to PROJECT_ROOT)
@@ -74,6 +74,7 @@ readonly -a STEP7_ARTIFACTS=()  # always runs
 # Step 8 (Fusion Pipeline): fusion_candidates.json
 readonly -a STEP8_ARTIFACTS=(
     "output/fusion_candidates.json"
+    "output/fusion_schemes/summary.md"
 )
 
 # --- Global state ---
@@ -940,6 +941,23 @@ step8_fusion_pipeline() {
         return 1
     fi
 
+    # F3: Generate fusion schemes (parallel Claude invocations)
+    if [[ "${SKIP_F3:-0}" == "1" ]]; then
+        log_info "  Skipping F3: Scheme Generation (SKIP_F3=1)"
+    else
+        log_info "  Running F3: Scheme Generation..."
+        local schemes_dir="${PROJECT_ROOT}/output/fusion_schemes"
+
+        if ! python3 -m tools.fusion scheme \
+            --candidates "$candidates_json" \
+            --scheme-dir "$schemes_dir" \
+            --top "$TOP_N" \
+            --model opus \
+            2>&1; then
+            log_warn "  F3 scheme generation failed — continuing without schemes"
+        fi
+    fi
+
     # Summary
     local pattern_count candidate_count
     pattern_count="$(python3 -c "import json; print(len(json.load(open('${patterns_json}'))['patterns']))")"
@@ -954,13 +972,7 @@ step8_fusion_pipeline() {
 # =============================================================================
 
 run_setup() {
-    for step_num in 0 1 2 3 4 5 6 7 8; do
-        # Step 7 always runs (report generation)
-        if (( step_num == 7 )); then
-            step7_report
-            continue
-        fi
-
+    for step_num in 0 1 2 3 4 5 6 8; do
         # Check if forced
         if is_step_forced "$step_num"; then
             cleanup_step "$step_num"
@@ -985,6 +997,9 @@ run_setup() {
             8) step8_fusion_pipeline ;;
         esac || true
     done
+
+    # Step 7 always runs — report is generated after all other steps
+    step7_report
 }
 
 main() {

@@ -79,7 +79,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["discover", "score", "validate"],
+        choices=["discover", "score", "validate", "scheme"],
         default=None,
         help="Command to run",
     )
@@ -207,6 +207,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="List all constraints with their default status and descriptions",
     )
+    parser.add_argument(
+        "--candidates",
+        type=Path,
+        default=None,
+        help="Path to fusion_candidates.json (required for scheme command)",
+    )
+    parser.add_argument(
+        "--scheme-dir",
+        type=Path,
+        default=None,
+        help="Output directory for scheme files (default: output/fusion_schemes/)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Number of parallel Claude processes for scheme generation (default: 4)",
+    )
     return parser.parse_args(argv)
 
 
@@ -233,7 +251,29 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command is None:
-        sys.exit("error: a command is required (discover, score, validate). Run with --help for usage.")
+        sys.exit("error: a command is required (discover, score, validate, scheme). Run with --help for usage.")
+
+    if args.command == "scheme":
+        if not args.candidates:
+            sys.exit("--candidates is required for scheme command")
+        if not args.candidates.exists():
+            sys.exit(f"Candidates file not found: {args.candidates}")
+
+        from fusion.scheme_batch import run_scheme_batch
+
+        scheme_dir = args.scheme_dir or Path("output/fusion_schemes")
+        effective_model = args.model or "opus"
+
+        run_scheme_batch(
+            candidates_json=args.candidates,
+            output_dir=scheme_dir,
+            top=args.top,
+            model=effective_model,
+            workers=args.workers,
+            timeout=300,
+            registry=registry,
+        )
+        return
 
     if args.command == "validate":
         if args.opcode is None:
