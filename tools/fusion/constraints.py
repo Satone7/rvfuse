@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # Detected by opcode 0x57 (OP-V) + funct3 0x7.
 _CONFIG_FUNCT3 = frozenset({0x07})
 
+_CONTROL_FLOW = frozenset({
+    "beq", "bne", "blt", "bge", "bltu", "bgeu",
+    "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
+    "jal", "jalr", "j", "jr", "call", "ret",
+    "bgtu",
+})
+
 
 @dataclass
 class ConstraintConfig:
@@ -154,14 +161,13 @@ class ConstraintChecker:
         Returns (violation_name, reason) tuple if violated, else None.
         """
         # Collect internal register roles from subgraph edges.
-        # A role carried between two instructions is both a dst_role
-        # (output of producer) and a src_role (input of consumer).
-        dst_roles: set[str] = set()
-        src_roles: set[str] = set()
+        # src_role = producer output role (e.g. "frd"), becomes an internal dst.
+        # dst_role = consumer input role (e.g. "frs1"), becomes an internal src.
+        internal_dsts: set[str] = set()
+        internal_srcs: set[str] = set()
         for edge in edges:
-            dst_roles.add(edge.get("dst_role", ""))
-            src_roles.add(edge.get("src_role", ""))
-        internal_regs: set[str] = dst_roles & src_roles
+            internal_dsts.add(edge.get("src_role", ""))
+            internal_srcs.add(edge.get("dst_role", ""))
 
         # Collect all external sources and destinations
         external_srcs: set[str] = set()
@@ -171,13 +177,13 @@ class ConstraintChecker:
         for i, flow in enumerate(flows):
             if flow is None:
                 continue
-            # External sources: src_regs not in internal_regs
+            # External sources: src_regs not fed by an internal edge
             for src in flow.src_regs:
-                if src not in internal_regs:
+                if src not in internal_srcs:
                     external_srcs.add(src)
-            # External destinations: dst_regs not in internal_regs
+            # External destinations: dst_regs not consumed by an internal edge
             for dst in flow.dst_regs:
-                if dst not in internal_regs:
+                if dst not in internal_dsts:
                     external_dsts.add(dst)
             # Check for immediate that fits in 5 bits (Mode B requirement)
             enc = encodings[i]
@@ -359,12 +365,6 @@ class ConstraintChecker:
 
         # --- Check for control flow instructions ---
         if self.is_enabled("no_control_flow"):
-            _CONTROL_FLOW = frozenset({
-                "beq", "bne", "blt", "bge", "bltu", "bgeu",
-                "beqz", "bnez", "blez", "bgez", "bltz", "bgtz",
-                "jal", "jalr", "j", "jr", "call", "ret",
-                "bgtu",
-            })
             for i, opcode in enumerate(opcodes):
                 if opcode in _CONTROL_FLOW:
                     hard_violations.append("no_control_flow")
