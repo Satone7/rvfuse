@@ -16,30 +16,31 @@
 
 **核心特点**：
 - YMM寄存器（256位，8个float32）
-- 显式掩码寄存器（AVX512特性，AVX/AVX2无）
-- 丰富的数据重排指令
+- 无掩码寄存器（AVX/AVX2限制，AVX512才有k0-k7掩码）
+- 丰富的数据重排指令（vunpck、vperm、vshuf系列）
 
 **高价值指令**：
 | 指令 | 功能 | RVV现状 |
 |------|------|---------|
 | `vunpcklps/vunpckhps` | 交错解包（低/高位元素分离） | RVV无直接对应，需用vrgather模拟 |
-| `vpermilps` | 立即数索引置换（编译时固定模式） | vrgather需要运行时向量索引 |
+| `vpermilps` | 立即数索引置换（编译时固定模式） | `vrgather.vi`支持单元素立即数索引，但不支持完整模式掩码 |
 | `vshufps` | 跨寄存器元素选择 | vrgather可实现但效率较低 |
 
 **收益分析**：
-矩阵转置是GEMM的核心操作（A矩阵行转列、B矩阵列打包）。AVX使用`vunpck`指令树实现4×4转置仅需6条指令：
+矩阵转置是GEMM的核心操作（A矩阵行转列、B矩阵列打包）。AVX使用`vunpck`指令树实现4×4转置仅需6条指令（注意使用独立目标寄存器避免写后读冲突）：
 
 ```asm
-; 4×4 float矩阵转置（AVX）
-vunpcklps ymm0, ymm0, ymm1  ; [a0,a2,b0,b2, ...]
-vunpckhps ymm1, ymm0, ymm1  ; [a1,a3,b1,b3, ...]
-vunpcklps ymm2, ymm2, ymm3
-vunpckhps ymm3, ymm2, ymm3
-vperm2f128 ymm4, ymm0, ymm2, 0x20  ; 跨128位段重组
+; 4×4 float矩阵转置（AVX，正确用法）
+vunpcklps ymm4, ymm0, ymm1  ; 交错低半部: [a0,b0,a1,b1, ...]
+vunpckhps ymm5, ymm0, ymm1  ; 交错高半部: [a2,b2,a3,b3, ...]
+vunpcklps ymm6, ymm2, ymm3
+vunpckhps ymm7, ymm2, ymm3
+vperm2f128 ymm0, ymm4, ymm6, 0x20  ; 跨128位段重组
+vperm2f128 ymm1, ymm4, ymm6, 0x31
 ...
 ```
 
-RVV需要8-12条`vrgather`指令实现相同功能，且每条需要额外的索引向量准备。
+RVV实现4×4转置需要4-6条`vrgather`指令（每行一条），加上索引向量准备（可预计算复用），总计约6-8条指令。RVV的优势是`vrgather`提供完全任意的重排模式，不限于固定交织方式。
 
 **建议扩展**：
 - `vunzip.vv`：奇偶元素分离（等效vunpck）
@@ -58,32 +59,40 @@ RVV需要8-12条`vrgather`指令实现相同功能，且每条需要额外的索
 **高价值指令**：
 | 指令 | 功能 | RVV现状 |
 |------|------|---------|
-| `vmlaq_lane_f32` | Lane-indexed FMA：`q0 += s0 * q1[lane]` | RVV需要单独提取lane再FMA |
+| `vmlaq_lane_f32` | Lane-indexed FMA：`q0[i] += q_b[i] * v_a[lane]` | RVV无等效，需逐标量加载广播 |
 | `vtrn/vzip/vuzp` | 跨寄存器元素交换/解包 | vrgather模拟，效率低 |
 | `vld1q_lane_f32` | 单元素加载到特定lane | RVV需load+insert两步 |
 
 **收益分析**：
-Lane-indexed FMA在GEMM内核中尤为重要。当处理多个输出行时，可以避免为每个lane单独准备标量：
+Lane-indexed FMA在GEMM内核中的核心价值是**批量加载A元素并逐个广播**。MLAS ARM64内核实际使用模式：
 
 ```asm
-; NEON: 一次处理4个输出元素，lane选择内置
-vmlaq_lane_f32 q0, s0, q1[0]  ; q0[0..3] += s0 * q1[0]
-vmlaq_lane_f32 q1, s0, q2[1]  ; q1[0..3] += s0 * q2[1]
+; NEON实际GEMM模式（来自MLAS SgemmKernelNeon.asm）
+ldr     d0, [x1], #8         ; 加载4个A元素到v0
+fmla    v4.4s, v8.4s, v0.s[0] ; 用v0的lane[0]广播，与B向量FMA
+fmla    v4.4s, v9.4s, v0.s[1] ; 用v0的lane[1]广播
+fmla    v4.4s, v10.4s, v0.s[2]; 用v0的lane[2]广播
+fmla    v4.4s, v11.4s, v0.s[3]; 用v0的lane[3]广播
+; 一次加载A，4条指令完成4个K步的FMA，无需额外广播指令
 ```
 
-RVV需要：
+当前RVV实现（标量广播模式）：
 ```asm
-; RVV: 需要先提取lane元素
-vfmv.v.f v0, a0               ; 广播A标量
-vle32.v v1, (b0)              ; 加载B向量
-vfmacc.vf v_acc, a0, v1       ; FMA
-; 若需特定lane，需额外vrgather
+; RVV当前: 逐个加载A标量并广播
+flw     fa0, 0(a1)           ; 加载A[0]
+vfmacc.vf v_acc, fa0, v_b    ; FMA (内部广播fa0)
+flw     fa0, 4(a1)           ; 加载A[1]
+vfmacc.vf v_acc, fa0, v_b+16 ; FMA
+; 每个K步需要1条load + 1条FMA = 2条指令
+; NEON: 1条load + 4条lane-FMA = 5条指令完成4个K步，平均1.25条/K步
 ```
+
+Lane-indexed FMA的核心优势是**减少A矩阵加载指令数**（4个元素合并为一次load），而非减少FMA指令数。
 
 **建议扩展**：
-- `vfmacc_lane.vf vd, rs1, vs2, lane`：Lane-indexed FMA
-  - 功能：`vd[i] += rs1 * vs2[lane]`
-  - 减少指令数：1条替代（提取+FMA）2条
+- `vfmacc_lane.vf vd, vs1, vs2, lane`：Lane-indexed FMA
+  - 功能：`vd[i] += vs2[i] * vs1[lane]`（广播vs1的指定lane，与vs2逐元素FMA）
+  - 核心价值：A矩阵4元素合并加载，逐lane广播FMA，减少K循环加载指令75%
   - 应用场景：多行GEMM、卷积im2col
 
 ---
@@ -98,7 +107,7 @@ vfmacc.vf v_acc, a0, v1       ; FMA
 **高价值指令**：
 | 指令 | 功能 | RVV现状 |
 |------|------|---------|
-| `xvldrepl.w` | 加载单元素并广播到整个向量 | RVV需load+vmv.v.x两步 |
+| `xvldrepl.w` | 加载单元素并广播到整个向量 | RVV可通过`vlse32.v` stride=0实现等效功能（见下文） |
 | `xvpermi.w` | 立即数索引置换（4元素） | vrgather需要向量索引 |
 | `xvreplgr2vr.w` | GR到VR广播 | vfmv.v.f等效 |
 
@@ -110,20 +119,19 @@ vfmacc.vf v_acc, a0, v1       ; FMA
 xvldrepl.w xr0, a0, 0   ; 从内存加载一个float32，广播到xr0[0..7]
 ```
 
-RVV需要：
+**RVV已有等效能力**：RVV规范支持通过strided load实现load+broadcast：
+
 ```asm
-; RVV: 2条指令
-flw fa0, 0(a0)          ; 加载标量
-vfmv.v.f v0, fa0        ; 广播到向量
+; RVV: 1条指令 — strided load with stride=0
+; RVV规范明确说明: "If the stride value is 0, only the element at the
+; address in rs1 is accessed, and its value is copied to all active elements"
+vlse32.v v0, (a0), x0    ; 加载float32，stride=0，广播到v0所有元素
+; C intrinsics: __riscv_vlse32_v_f32m1(addr, 0, vl)
 ```
 
-在GEMM内核中，每个K迭代需要加载A矩阵元素并广播，减少一半的加载指令可显著提升性能。
+因此LoongArch的`xvldrepl.w`优势在RVV中**已原生存在**，无需额外扩展。
 
-**建议扩展**：
-- `vlw.repl.v vd, (rs1)`：加载并广播
-  - 功能：从`rs1`地址加载32位值，广播到`vd`所有元素
-  - 减少指令数：1条替代2条
-  - 应用场景：GEMM K循环、卷积权重广播
+> **注**：`vlse32.v` stride=0在功能上等效，但不同微架构实现可能有性能差异。专用load+broadcast指令在某些硬件上可能更高效（避免stride计算逻辑），但这属于微架构优化范畴。
 
 ---
 
@@ -152,17 +160,32 @@ xvf32gerpp acc0, vA, vB  ; acc0[4×4] += vA[0..3] × vB[0..3]^T
 
 传统向量实现需要：
 ```asm
-; RVV VL=4: 需要4次FMA
-vfmacc.vf v0, a0, v_b    ; v0 += a0 * v_b
-vfmacc.vf v1, a1, v_b    ; v1 += a1 * v_b
-vfmacc.vf v2, a2, v_b    ; v2 += a2 * v_b
-vfmacc.vf v3, a3, v_b    ; v3 += a3 * v_b
+; RVV VL=16（当前实现，K展开=2，处理2行×16列）：
+; 每次K迭代（2个K步）：
+vfmacc.vf v_acc_r0, a0_r0, v_b0   ; row0 += A[0] * B[0..15]
+vfmacc.vf v_acc_r1, a0_r1, v_b0   ; row1 += A[0] * B[0..15]  (ProcessTwoRows)
+vfmacc.vf v_acc_r0, a1_r0, v_b1   ; row0 += A[1] * B[16..31]
+vfmacc.vf v_acc_r1, a1_r1, v_b1   ; row1 += A[1] * B[16..31]
+; 4条vfmacc处理 2行 × 16列 × 2K = 64个乘加
+
+; POWER10 MMA（K展开=4，处理2行×16列）：
+; 每次K迭代（4个K步）：
+xvf32gerpp acc[0..3], ABroadcast, BElements[0..3]  ; row0 × 16列 × 4K
+xvf32gerpp acc[4..7], A2Broadcast, BElements[0..3] ; row1 × 16列 × 4K
+; 8条MMA处理 2行 × 16列 × 4K = 128个乘加
+; 但MMA需要额外的disassemble_acc开销
 ```
 
-**性能提升预估**：
-- 指令数减少：**4:1**（4条FMA → 1条MMA）
-- 寄存器占用减少：**5:2**（4个accumulator+1个B向量 → 1个accumulator+2个向量）
-- 内存访问减少：B向量加载从4次变为1次
+> **注**：指令数对比需归一化到相同工作量。每K步每行每16列：RVV需2条vfmacc，POWER10需2条MMA，原始吞吐量相当。MMA的优势主要来自专用accumulator减少寄存器压力。
+
+**性能提升预估（基于实际MLAS内核对比）**：
+- POWER10 MMA每次K迭代处理4×16=64个FMA（4个B块 × 4×4外积），需要4条MMA指令
+- RVV VL=16每次K迭代（2个K步）处理2×2×16=64个FMA，需要4条`vfmacc.vf`指令
+- **指令数相当**，但MMA的优势在于：
+  - 寄存器压力降低：专用accumulator寄存器（POWER10有8个`__vector_quad`），不占用向量寄存器
+  - K展开宽度：MMA天然处理4个K元素的外积，RVV当前K展开为2
+  - B加载共享：4行A共享同一次B加载（外积特性）
+- **实际性能提升预估：1.3-2.0x**（来自寄存器压力降低和更宽的K展开，而非原始吞吐量差异）
 
 **建议扩展**：
 - `vmulacc.vv vd, vs1, vs2`：矩阵乘累加（外积）
@@ -187,11 +210,12 @@ vfmacc.vf v3, a3, v_b    ; v3 += a3 * v_b
 | `pfd` | 预取指令（数据/指令分离） | RVV无预取指令 |
 
 **收益分析**：
-`vec_perm`使用编译时常量掩码，编译器可以静态优化置换模式：
+`vec_perm`使用向量寄存器中的常量字节掩码，编译器可在编译时预计算掩码并优化：
 
-```asm
-; S390X: 编译器可优化常量掩码置换
-vec_perm v0, v1, v2, 0x1B  ; 掩码0x1B是立即数
+```cpp
+// S390X实际代码（来自MLAS SgemmKernelZVECTOR.cpp）
+const __vector unsigned char mask_even = { 0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27 };
+a1 = vec_perm(AElements[0], AElements[1], mask_even);  // 3操作数：dst, src1, src2, mask_reg
 ```
 
 RVV的`vrgather`需要向量索引：
@@ -201,7 +225,7 @@ vid.v v_idx           ; 生成索引 [0,1,2,3,...]
 vrgather.vv v0, v1, v_idx  ; 运行时置换
 ```
 
-常量掩码置换在编译时可预计算索引向量，但RVV缺乏立即数掩码语义。
+两者的关键区别：S390X的mask是16字节的查找表（每个字节索引一个元素），而RVV的vrgather使用元素级索引。对于编译时常量模式，RVV可以将索引向量预计算并存储在`.rodata`段，运行时仅需一条`vl`加载索引 + 一条`vrgather`，与S390X的"加载mask + vec_perm"效率相当。
 
 **建议扩展**：
 - `vperm.vx vd, vs2, imm`：立即数掩码置换（编译时固定）
@@ -230,14 +254,14 @@ RVV在几乎所有方面优于WASM SIMD：
 
 ### 按优先级排序
 
-| 优先级 | 扩展指令 | 来源平台 | 预期收益 | 实现难度 |
-|--------|----------|----------|----------|----------|
-| **P0** | `vmulacc.vv` (矩阵外积) | Power VSX | 3-5x性能提升 | 高（需新硬件单元） |
-| **P1** | `vfmacc_lane.vf` (Lane-indexed FMA) | ARM NEON | 减少指令数20% | 中 |
-| **P2** | `vlw.repl.v` (Load+Broadcast) | LoongArch | 减少指令数15% | 低 |
-| **P3** | `vunzip/vzip.vv` (奇偶分离/合并) | AVX/NEON | 优化转置50% | 中 |
-| **P4** | `vperm.vx` (立即数置换) | S390X/AVX | 编译时优化 | 低 |
-| **P5** | `vprefetch.r` (预取) | S390X | 内存延迟优化 | 低 |
+| 优先级 | 扩展指令 | 来源平台 | 预期收益 | 实现难度 | 备注 |
+|--------|----------|----------|----------|----------|------|
+| **P0** | `vmulacc.vv` (矩阵外积) | Power VSX | 1.3-2.0x性能提升 | 高（需新硬件单元） | 寄存器压力和K展开收益 |
+| **P1** | `vfmacc_lane.vf` (Lane-indexed FMA) | ARM NEON | 减少A加载指令75% | 中 | 批量加载A元素 |
+| ~~P2~~ | ~~`vlw.repl.v` (Load+Broadcast)~~ | ~~LoongArch~~ | ~~已有等效~~ | — | **RVV已支持**（`vlse32.v` stride=0） |
+| **P2** | `vunzip/vzip.vv` (奇偶分离/合并) | AVX/NEON | 优化转置25-40% | 中 | |
+| **P3** | `vperm.vx` (立即数置换) | S390X/AVX | 编译时优化 | 低 | 编译器可预计算索引 |
+| **P4** | `vprefetch.r` (预取) | S390X | 内存延迟优化 | 低 | |
 
 ### P0级：矩阵乘累加指令
 
@@ -270,40 +294,45 @@ vfmacc_lane.vf vd, rs1, vs2, lane[imm]
 ```
 
 **应用场景**：
-- 多行GEMM：不同行使用不同B向量lane
+- 多行GEMM：批量加载A矩阵元素到向量，逐lane广播FMA
 - 卷积核：权重矩阵特定通道复用
-- 减少寄存器压力：避免为每个lane提取元素
+- 减少A矩阵加载指令数（4个元素合并为1次向量load）
 
 **示例代码对比**：
 ```asm
-; 当前RVV实现（提取lane后FMA）
-vrgather.vx v_lane, v_b, lane    ; 提取特定lane元素到整个向量
-vfmacc.vf v_acc, a0, v_lane      ; FMA
-; 2条指令
+; 当前RVV实现（逐标量加载+广播FMA）
+flw     fa0, 0(a1)              ; 加载A[0]（标量）
+vfmacc.vf v_acc0, fa0, v_b      ; FMA
+flw     fa0, 4(a1)              ; 加载A[1]
+vfmacc.vf v_acc0, fa0, v_b+16   ; FMA
+; 4个K步 = 8条指令（4 load + 4 FMA）
 
-; 扩展后（Lane-indexed FMA）
-vfmacc_lane.vf v_acc, a0, v_b, lane  ; 单指令
+; 扩展后（Lane-indexed FMA，参照NEON模式）
+vle32.v v_a, (a1)               ; 一次加载4个A元素
+vfmacc_lane.vf v_acc0, v_a, v_b0, 0  ; 用v_a[0]广播FMA
+vfmacc_lane.vf v_acc0, v_a, v_b1, 1  ; 用v_a[1]广播FMA
+vfmacc_lane.vf v_acc0, v_a, v_b2, 2  ; 用v_a[2]广播FMA
+vfmacc_lane.vf v_acc0, v_a, v_b3, 3  ; 用v_a[3]广播FMA
+; 4个K步 = 5条指令（1 load + 4 lane-FMA），减少37.5%
 ```
 
 ---
 
-### P2级：Load+Broadcast
+### ~~P2级：Load+Broadcast~~ （已存在等效功能）
 
-**指令定义**：
+**RVV已原生支持**，无需扩展：
 ```
-vlw.repl.v vd, (rs1)
-功能：从内存加载32位值，广播到vd所有元素
-等效于：flw ft0, (rs1); vfmv.v.f vd, ft0
+vlse32.v vd, (rs1), x0    ; stride=0 → load + broadcast
+; 等效于：flw ft0, (rs1); vfmv.v.f vd, ft0
+; 但仅需1条指令
 ```
+RVV规范明确：stride为0时，仅访问rs1地址的单个元素并复制到所有活跃元素。
 
-**应用场景**：
-- GEMM K循环：A矩阵元素加载并广播
-- 卷积：单个权重值加载并应用到整个输出向量
-- 减少50%的K循环内指令
+此需求可从扩展列表中移除。
 
 ---
 
-### P3级：奇偶分离/合并
+### P2级：奇偶分离/合并（原P3）
 
 **指令定义**：
 ```
@@ -320,7 +349,7 @@ vzip.vv vd, vs2
 
 ---
 
-### P4级：立即数置换
+### P3级：立即数置换（原P4）
 
 **指令定义**：
 ```
@@ -354,14 +383,14 @@ vshuffle.vx vd, vs2, imm[8-bit]
 
 | 扩展指令 | 当前指令数 | 扩展后指令数 | 减少比例 |
 |----------|------------|--------------|----------|
-| `vmulacc.vv` (P0) | 4条FMA/K=4 | 1条MMA | 75% |
-| `vlw.repl.v` (P2) | 2条load+broadcast | 1条 | 50% |
-| `vfmacc_lane.vf` (P1) | 2条gather+FMA | 1条 | 50% |
+| `vmulacc.vv` (P0) | 4条FMA/K=4块 | 1条MMA | 75%指令减少，实际性能提升1.3-2.0x |
+| `vfmacc_lane.vf` (P1) | 8条(4 load + 4 FMA)/4K步 | 5条(1 load + 4 lane-FMA)/4K步 | 37.5% |
+| ~~`vlw.repl.v`~~ | ~~2条~~ | ~~1条~~ | **RVV已支持**（vlse32 stride=0） |
 
 **综合收益估算**：
-- P0实现：GEMM内核性能提升**3-5x**，整体推理加速**1.2-1.8x**
-- P1+P2组合：GEMM内核加速**20-30%**
-- P3优化转置：数据预处理阶段加速**30-50%**
+- P0实现：GEMM内核性能提升**1.3-2.0x**（来自寄存器压力降低和K展开），整体推理加速**1.1-1.5x**
+- P1：GEMM内核K循环指令数减少**37.5%**
+- P2（vunzip/vzip）优化转置：数据预处理阶段加速**25-40%**
 
 ---
 
@@ -395,9 +424,9 @@ vshuffle.vx vd, vs2, imm[8-bit]
 |------|------|--------|------|
 | RVV | `vfmacc.vf` | vec+scalar+vec | 标量广播FMA |
 | AVX512 | `vfmadd231ps` | zmm+zmm+zmm | 三向量FMA |
-| NEON | `vmlaq_lane_f32` | vec+scalar+vec[lane] | Lane-indexed |
-| LoongArch | `xfmad.d` | xr+xr+xr | 三向量FMA |
-| Power VSX | `xvf32gerpp` | acc+vec+vec | 矩阵外积 |
+| NEON | `vmlaq_lane_f32` | vec+vec+vec[lane] | Lane-indexed（A打包加载，逐lane广播） |
+| LoongArch | `xvfmadd.s` | xr+xr+xr | 向量FMA（`xfmad.d`为标量双精度） |
+| Power VSX | `xvf32gerpp` | acc+vec+vec | 4×4矩阵外积（需专用accumulator） |
 
 ### 数据重排指令对比
 
@@ -405,7 +434,7 @@ vshuffle.vx vd, vs2, imm[8-bit]
 |------|-----------|------|----------|
 | AVX | vunpck系列 | vpermilps/vpermd | 6条指令 |
 | NEON | vtrn/vzip/vuzp | 无立即数置换 | 4条指令 |
-| RVV | vrgather模拟 | vrgather.vv/vx | 8-12条指令 |
+| RVV | vrgather模拟 | vrgather.vv/vx | 6-8条指令（含索引准备） |
 | S390X | 无 | vec_perm（立即数） | 中等 |
 | Power | 无 | xxpermdi | 中等 |
 
@@ -415,9 +444,9 @@ vshuffle.vx vd, vs2, imm[8-bit]
 
 通过多平台对比分析，识别出以下对RVV最具价值的扩展方向：
 
-1. **矩阵级乘累加指令（P0）**：借鉴Power VSX MMA，实现单指令4×4矩阵外积，是性能提升最显著的扩展
-2. **Lane-indexed操作（P1）**：借鉴ARM NEON，减少GEMM内核寄存器压力
-3. **复合加载指令（P2）**：借鉴LoongArch，减少K循环指令数
-4. **数据重排指令（P3）**：借鉴AVX/NEON，优化矩阵转置效率
+1. **矩阵级乘累加指令（P0）**：借鉴Power VSX MMA，实现单指令4×4矩阵外积。收益主要来自专用accumulator寄存器降低压力和更宽的K展开，预估提升1.3-2.0x
+2. **Lane-indexed FMA（P1）**：借鉴ARM NEON `fmla ... v.s[lane]`，允许批量加载A元素后逐lane广播FMA，减少K循环中37.5%的指令数
+3. **Load+Broadcast（原P2）**：~~借鉴LoongArch~~ **RVV已原生支持**（`vlse32.v` stride=0），无需扩展
+4. **数据重排指令（P2）**：借鉴AVX/NEON的vunpck/vtrn，优化矩阵转置效率
 
-建议优先实现P0级矩阵乘累加指令，可在YOLO推理场景获得显著的性能提升。
+建议优先验证P0（矩阵外积）和P1（lane-indexed FMA）的可行性，这两项可在YOLO+ONNX Runtime场景带来实际性能收益。
