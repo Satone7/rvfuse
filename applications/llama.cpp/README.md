@@ -215,12 +215,14 @@ The model uses **Q4_0** quantization, but the hotspots reveal important behavior
 - **Q4_K gemv** indicates weight repacking from Q4_0 to Q4_K for computation
 - **IQ4_NL gemv** used for certain layer types (non-linear quantization)
 
-### Native Hardware Expectation
+### Analysis Limitations
 
-On real RISC-V hardware with RVV:
-- Batch allocator overhead would be <10% (native speed)
-- GEMV kernels would dominate (actual compute)
-- RVV vectorization would accelerate `ggml_gemv_*` functions significantly
+This profiling was conducted under QEMU emulation:
+- **QEMU overhead**: Software emulation amplifies simple instruction overhead
+- **Batch allocator dominance**: Contains many simple loops (addi, ld, sd, bnez) that each require emulation
+- **Short test**: 49 tokens generated may emphasize initialization overhead
+
+**Verification needed**: Run on native RISC-V hardware to determine if GEMV kernels become dominant, as typically expected for ML inference. Current QEMU results may not reflect hardware behavior.
 
 ## References
 
