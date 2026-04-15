@@ -13,4 +13,4 @@ A containerized LLVM 13 RISC-V toolchain that serves as a lightweight alternativ
 - `riscv-objdump`
 - `riscv-strip`
 
-See the [Docker LLVM Guide](../docs/docker-llvm-guide.md) for detailed usage instructions.
+See `docker-llvm/` for the containerized LLVM 13 RISC-V toolchain.
