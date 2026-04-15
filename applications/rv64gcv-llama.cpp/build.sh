@@ -225,6 +225,13 @@ cross_compile() {
     info "Installing binaries..."
     ninja -C "${llama_build}" install/strip
 
+    # Copy llama libs to sysroot for QEMU execution
+    info "Copying llama libs to sysroot..."
+    local sysroot_lib="${SYSROOT}/lib/riscv64-linux-gnu"
+    cp -a "${llama_install}/lib"/libllama.so* "${sysroot_lib}/"
+    cp -a "${llama_install}/lib"/libggml.so* "${llama_install}/lib"/libggml-base.so* "${llama_install}/lib"/libggml-cpu.so* "${sysroot_lib}/"
+    cp -a "${llama_install}/lib"/libmtmd.so* "${sysroot_lib}/"
+
     unset SYSROOT
 
     info "llama.cpp cross-compiled to ${llama_install}"
