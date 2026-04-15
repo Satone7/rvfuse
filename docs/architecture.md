@@ -179,9 +179,15 @@ RVFuse/
 │   ├── analyze_bbv.py     # BBV hotspot analysis (464 lines)
 │   ├── profile_to_dfg.sh  # End-to-end profiling → DFG pipeline
 │   ├── dfg/               # DFG generation engine (~3400 lines)
-│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner
+│   ├── fusion/            # Fusion pattern discovery (Phase 2)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
-│   └── yolo_runner/       # YOLO inference C++ runner
+│   └── bbv/               # QEMU BBV plugin
+├── applications/          # Test applications
+│   └── yolo/              # YOLO inference application
+│       ├── runner/        # YOLO inference C++ runner
+│       ├── ort/           # Cross-compile ORT v1.24.4 (rv64gcv)
+│       ├── ort-c920/      # C920 platform ORT build variant
+│       └── patches/       # MLAS RVV patches
 ├── tests/                 # Integration tests
 └── third_party/           # Git submodules
     ├── qemu/              # QEMU (mandatory)
@@ -329,7 +335,7 @@ RVFuse/
 ## 8. Agent Checklist
 
 ### Inputs
-- Project roadmap (four-phase plan in CLAUDE.md and `docs/plans/2026-04-08-phase2-feature-roadmap.md`)
+- Project roadmap (four-phase plan in CLAUDE.md)
 - Repository structure and module responsibilities
 - DFG engine architecture (parser → instruction → builder → output)
 - ISA descriptor generation pipeline (`llvm-tblgen` → `gen_isadesc.py` → `isadesc/`)
@@ -351,5 +357,5 @@ RVFuse/
 **Notes**
 
 - This document reflects the project state as of 2026-04-08
-- Phase 1 (setup + profiling + DFG) is complete; detailed design documents for each iteration are in `docs/plans/`
+- Phase 1 (setup + profiling + DFG) is complete
 - Future phases should be introduced through separate feature specifications and architecture revisions

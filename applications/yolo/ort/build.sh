@@ -1,93 +1,10 @@
-# LLVM 22 Host Cross-Compile ORT v1.24.4 Implementation Plan
-
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** Cross-compile ONNX Runtime v1.24.4 (full build) for rv64gcv on the host machine using the LLVM 22 toolchain from `third_party/llvm-install`, producing `libonnxruntime.so`.
-
-**Architecture:** Two files — a CMake toolchain file and a build script. The build script checks prerequisites, extracts a sysroot from a `riscv64/ubuntu:24.04` container (the only Docker usage), auto-clones ORT source if missing, then runs cmake + ninja directly on the host. No Docker container for compilation, no GCC cross-compiler.
-
-**Tech Stack:** Bash, CMake, Ninja, LLVM 22 (clang/lld/llvm-ar), Docker (sysroot extraction only), ONNX Runtime v1.24.4, Eigen 3.4.0
-
----
-
-## File Map
-
-| File | Responsibility |
-|------|----------------|
-| `tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake` | CMake toolchain: target triple, sysroot, march flags, lld linker |
-| `tools/rv64gcv-onnxrt/build.sh` | Build orchestrator: prerequisites, sysroot export, source clone, cmake, ninja, install |
-
----
-
-### Task 1: Create the CMake toolchain file
-
-**Files:**
-- Create: `tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake`
-
-Reference: `tools/c920-onnxrt/riscv64-linux-toolchain.cmake` (existing pattern). Key changes: replace `-B/riscv64-gcc-bin -Wl,-Bdynamic` with `-fuse-ld=lld`.
-
-- [ ] **Step 1: Create the toolchain file**
-
-```cmake
-# Cross-compilation toolchain for RISC-V 64-bit using LLVM 22
-# Target: rv64gcv (IMAFD_C_V), Linux, lp64d ABI
-SET(CMAKE_SYSTEM_NAME Linux)
-SET(CMAKE_SYSTEM_VERSION 1)
-SET(CMAKE_SYSTEM_PROCESSOR riscv64)
-
-SET(CMAKE_C_COMPILER $ENV{LLVM_INSTALL}/bin/clang)
-SET(CMAKE_CXX_COMPILER $ENV{LLVM_INSTALL}/bin/clang++)
-
-SET(CMAKE_C_COMPILER_TARGET riscv64-unknown-linux-gnu)
-SET(CMAKE_CXX_COMPILER_TARGET riscv64-unknown-linux-gnu)
-
-SET(CMAKE_SYSROOT $ENV{SYSROOT})
-SET(CMAKE_FIND_ROOT_PATH $ENV{SYSROOT})
-
-# Clang doesn't automatically add triplet-specific include paths like GCC does.
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -isystem ${CMAKE_SYSROOT}/usr/include/riscv64-linux-gnu")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${CMAKE_SYSROOT}/usr/include/riscv64-linux-gnu")
-
-# Enable RVV 1.0 auto-vectorization (LLVM 22)
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=rv64gcv")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv")
-
-# Use lld for linking (no GCC cross-compiler dependency)
-SET(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
-SET(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=lld")
-
-SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-SET(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake
-git commit -m "feat(rv64gcv-onnxrt): add CMake toolchain file for rv64gcv"
-```
-
----
-
-### Task 2: Create the build script — scaffolding + prerequisites
-
-**Files:**
-- Create: `tools/rv64gcv-onnxrt/build.sh`
-
-Reference: `tools/c920-onnxrt/build.sh` (structure, colors, argument parsing). Adapt: remove Docker build step, remove YOLO runner step, change Ubuntu to 24.04, use lld.
-
-- [ ] **Step 1: Write the build script — header through prerequisites**
-
-```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 OUTPUT_DIR="${PROJECT_ROOT}/output/cross-ort"
-VENDOR_DIR="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor"
+VENDOR_DIR="${SCRIPT_DIR}/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 ORT_SOURCE="${VENDOR_DIR}/onnxruntime"
 EIGEN_SOURCE="${VENDOR_DIR}/eigen"
@@ -141,29 +58,6 @@ check_prerequisites() {
 }
 
 check_prerequisites
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add tools/rv64gcv-onnxrt/build.sh
-git commit -m "feat(rv64gcv-onnxrt): add build script scaffolding with prerequisites"
-```
-
----
-
-### Task 3: Add source cloning logic
-
-**Files:**
-- Modify: `tools/rv64gcv-onnxrt/build.sh`
-
-Append after the `check_prerequisites` call. Reference: `tools/rv64gcv-onnxrt/build.sh:14-47` (clone_if_missing + submodule fetch).
-
-- [ ] **Step 1: Append source cloning functions and call**
-
-Append after `check_prerequisites`:
-
-```bash
 
 # --- Step 1: Clone ORT and Eigen sources ---
 clone_if_missing() {
@@ -207,29 +101,6 @@ clone_sources() {
 }
 
 clone_sources
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add tools/rv64gcv-onnxrt/build.sh
-git commit -m "feat(rv64gcv-onnxrt): add ORT v1.24.4 and Eigen source cloning"
-```
-
----
-
-### Task 4: Add sysroot extraction logic
-
-**Files:**
-- Modify: `tools/rv64gcv-onnxrt/build.sh`
-
-Append after the `clone_sources` call. Reference: `tools/c920-onnxrt/build.sh:56-141` (sysroot extraction). Key changes: Ubuntu 24.04, `libstdc++-12-dev`, remove GCC-ld specific symlinks.
-
-- [ ] **Step 1: Append sysroot extraction function and call**
-
-Append after `clone_sources`:
-
-```bash
 
 # --- Step 2: Extract riscv64 sysroot ---
 extract_sysroot() {
@@ -303,6 +174,21 @@ extract_sysroot() {
         done
     fi
 
+    # Also symlink CRT files and shared libs to lib/riscv64-linux-gnu/ for the
+    # dynamic linker area (ld-linux looks for shared libs in /lib/triplet/).
+    local lib="${sysroot}/lib/riscv64-linux-gnu"
+    if [ -d "${sysroot}/usr/lib/${multilib}" ]; then
+        for f in crt1.o crti.o crtn.o Scrt1.o; do
+            [ -f "${sysroot}/usr/lib/${multilib}/${f}" ] && [ ! -e "${lib}/${f}" ] && \
+                ln -sf "../../usr/lib/${multilib}/${f}" "${lib}/${f}"
+        done
+        for f in libc.so.6 libm.so.6 libdl.so.2 librt.so.1 libpthread.so.0 \
+                 libgcc_s.so libgcc_s.so.1 libstdc++.so libstdc++.so.6; do
+            [ -e "${sysroot}/usr/lib/${multilib}/${f}" ] && [ ! -e "${lib}/${f}" ] && \
+                ln -sf "../../usr/lib/${multilib}/${f}" "${lib}/${f}"
+        done
+    fi
+
     # Remove problematic static libs (libm.a has __frexpl requiring long double)
     find "${sysroot}" -name "libm.a" -delete 2>/dev/null || true
 
@@ -311,34 +197,11 @@ extract_sysroot() {
 }
 
 extract_sysroot
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add tools/rv64gcv-onnxrt/build.sh
-git commit -m "feat(rv64gcv-onnxrt): add sysroot extraction from Ubuntu 24.04"
-```
-
----
-
-### Task 5: Add cmake build and install logic
-
-**Files:**
-- Modify: `tools/rv64gcv-onnxrt/build.sh`
-
-Append after the `extract_sysroot` call. This is the main build step — cmake configure + ninja build + ninja install/strip, all running directly on the host (no `docker run`).
-
-- [ ] **Step 1: Append cross-compile function and call**
-
-Append after `extract_sysroot`:
-
-```bash
 
 # --- Step 3: Cross-compile ONNX Runtime ---
 cross_compile() {
     local ort_build="${OUTPUT_DIR}/.build"
-    local ort_install="${OUTPUT_DIR}/onnxruntime"
+    local ort_install="${OUTPUT_DIR}"
     local sysroot="${OUTPUT_DIR}/sysroot"
 
     if [[ "${FORCE}" != "true" && -d "${ort_install}/lib" ]]; then
@@ -375,92 +238,97 @@ cross_compile() {
     info "Installing..."
     ninja -C "${ort_build}" install/strip
 
-    unset LLVM_INSTALL
     unset SYSROOT
 
     info "ONNX Runtime cross-compiled to ${ort_install}"
-    file "${ort_install}/lib/libonnxruntime.so*" || true
+    file "${ort_install}"/lib/libonnxruntime.so* || true
 }
 
 cross_compile
+
+# --- Step 3.5: Install ORT into sysroot ---
+install_ort_to_sysroot() {
+    local ort_install="${OUTPUT_DIR}"
+    local sysroot="${OUTPUT_DIR}/sysroot"
+    local sysroot_lib="${sysroot}/usr/lib/riscv64-linux-gnu"
+    local ort_so="${ort_install}/lib/libonnxruntime.so.1.24.4"
+
+    if [ ! -f "${ort_so}" ]; then
+        error "libonnxruntime.so not found at ${ort_so}"
+    fi
+
+    # Already installed?
+    if [[ "${FORCE}" != "true" && -f "${sysroot_lib}/libonnxruntime.so.1.24.4" ]]; then
+        info "ORT already in sysroot. Use --force to reinstall."
+        return 0
+    fi
+
+    info "Installing libonnxruntime.so into sysroot..."
+    cp "${ort_so}" "${sysroot_lib}/"
+    ln -sf libonnxruntime.so.1.24.4 "${sysroot_lib}/libonnxruntime.so.1"
+    ln -sf libonnxruntime.so.1 "${sysroot_lib}/libonnxruntime.so"
+
+    # Also symlink to top-level usr/lib/ for clang -L resolution
+    local top_lib="${sysroot}/usr/lib"
+    [ -e "${top_lib}/libonnxruntime.so.1.24.4" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so.1.24.4" "${top_lib}/libonnxruntime.so.1.24.4"
+    [ -e "${top_lib}/libonnxruntime.so.1" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so.1" "${top_lib}/libonnxruntime.so.1"
+    [ -e "${top_lib}/libonnxruntime.so" ] || \
+        ln -sf "riscv64-linux-gnu/libonnxruntime.so" "${top_lib}/libonnxruntime.so"
+
+    info "libonnxruntime.so installed to sysroot."
+}
+
+install_ort_to_sysroot
+
+# --- Step 4: Cross-compile YOLO runner ---
+build_yolo_runner() {
+    local ort_install="${OUTPUT_DIR}"
+    local runner_src="${PROJECT_ROOT}/tools/yolo_runner"
+    local runner_out="${OUTPUT_DIR}/yolo_inference"
+    local sysroot="${OUTPUT_DIR}/sysroot"
+    local sysroot_lib="${sysroot}/usr/lib"
+
+    if [[ "${FORCE}" != "true" && -f "${runner_out}" ]]; then
+        info "YOLO runner already built at ${runner_out}. Use --force to rebuild."
+        return 0
+    fi
+
+    [ -f "${runner_src}/yolo_runner.cpp" ] || error "YOLO runner source not found at ${runner_src}"
+    [ -f "${sysroot_lib}/libonnxruntime.so" ] || error "libonnxruntime.so not in sysroot. Run full build (Step 3.5)."
+    [ -d "${sysroot}/usr" ] || error "Sysroot not found at ${sysroot}. Run without --skip-sysroot."
+
+    info "Cross-compiling YOLO runner..."
+
+    "${LLVM_INSTALL}/bin/clang++" \
+        --target=riscv64-unknown-linux-gnu \
+        --sysroot="${sysroot}" \
+        -march=rv64gcv \
+        -isystem "${sysroot}/usr/include/riscv64-linux-gnu" \
+        -std=c++17 -O2 -g \
+        -fuse-ld=lld \
+        -I"${ort_install}/include/onnxruntime" \
+        -I"${ort_install}/include/onnxruntime/core/session" \
+        -I"${runner_src}" \
+        "${runner_src}/yolo_runner.cpp" \
+        -o "${runner_out}" \
+        -L"${sysroot_lib}" \
+        -lonnxruntime
+
+    info "YOLO runner built: ${runner_out}"
+    file "${runner_out}"
+}
+
+build_yolo_runner
 
 # --- Done ---
 info "All done!"
 echo ""
 echo "Artifacts:"
-echo "  ORT:     ${OUTPUT_DIR}/onnxruntime/"
+echo "  ORT:     ${OUTPUT_DIR}/lib/libonnxruntime.so"
 echo "  Sysroot: ${OUTPUT_DIR}/sysroot/"
+echo "  Runner:  ${OUTPUT_DIR}/yolo_inference"
 echo ""
-file "${OUTPUT_DIR}/onnxruntime/lib/libonnxruntime.so" || true
-```
-
-- [ ] **Step 2: Make the script executable and commit**
-
-```bash
-chmod +x tools/rv64gcv-onnxrt/build.sh
-git add tools/rv64gcv-onnxrt/build.sh
-git commit -m "feat(rv64gcv-onnxrt): add cmake cross-compile and install steps"
-```
-
----
-
-### Task 6: Create symlink for llvm-install and test the build
-
-**Files:**
-- No new files (creates a symlink + runs the build)
-
-This is the validation step — ensure the llvm-install symlink exists from the main repo, then run the full build.
-
-- [ ] **Step 1: Create the llvm-install symlink if missing**
-
-```bash
-# From the worktree root
-LLVM_INSTALL="third_party/llvm-install"
-if [ ! -e "${LLVM_INSTALL}" ]; then
-    ln -s /home/pren/wsp/rvfuse/third_party/llvm-install "${LLVM_INSTALL}"
-    echo "Created symlink: ${LLVM_INSTALL} -> /home/pren/wsp/rvfuse/third_party/llvm-install"
-else
-    echo "llvm-install already exists at ${LLVM_INSTALL}"
-fi
-```
-
-Note: Do NOT commit this symlink — it's local to the worktree. The main repo has the actual directory.
-
-- [ ] **Step 2: Run the full build**
-
-```bash
-./tools/rv64gcv-onnxrt/build.sh -j$(nproc)
-```
-
-Expected: The script runs through all three steps (source clone, sysroot extraction, cmake build). The final output should show:
-
-```
-=== All done! ===
-
-Artifacts:
-  ORT:     output/cross-ort/onnxruntime/
-  Sysroot: output/cross-ort/sysroot/
-
-output/cross-ort/onnxruntime/lib/libonnxruntime.so: ELF 64-bit LSB shared object, UCB RISC-V, version 1 (SYSV), dynamically linked ...
-```
-
-- [ ] **Step 3: Verify the output is a valid RISC-V ELF**
-
-```bash
-file output/cross-ort/onnxruntime/lib/libonnxruntime.so
-readelf -h output/cross-ort/onnxruntime/lib/libonnxruntime.so | grep -E '(Class|Machine|Flags)'
-```
-
-Expected:
-- `ELF 64-bit LSB shared object, UCB RISC-V`
-- `Machine:.*RISC-V`
-- Flags should include `RVC` and `RV64I` (and ideally V/D/C/F/M/A extensions)
-
-- [ ] **Step 4: Commit if any fixes were needed during the build**
-
-If the build succeeded without modifications, no commit is needed. If you had to fix the toolchain file or build script, commit the fixes:
-
-```bash
-git add -A
-git commit -m "fix(rv64gcv-onnxrt): fixes from initial build validation"
-```
+file "${OUTPUT_DIR}/lib/libonnxruntime.so" || true
+file "${OUTPUT_DIR}/yolo_inference" || true

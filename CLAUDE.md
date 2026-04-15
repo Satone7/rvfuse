@@ -23,8 +23,7 @@ RVFuse is a RISC-V instruction fusion research platform. The goal is to:
 | 3 | Simulation and benefit quantification | Planned |
 | 4 | Extension and diversification | Planned |
 
-**Phase 2 Feature Roadmap**: See [`docs/plans/2026-04-08-phase2-feature-roadmap.md`](docs/plans/2026-04-08-phase2-feature-roadmap.md)
-for the complete feature breakdown, dependency chain, and acceptance criteria.
+**Phase 2 Feature Roadmap**: F1 → F2 → F3 in order. Each feature needs its own design doc before implementation begins.
 
 | Feature | Description | Status | Design Doc |
 |---------|-------------|--------|------------|
@@ -63,7 +62,7 @@ git submodule update --remote
 ./verify_bbv.sh
 
 # Cross-compile ONNX Runtime + YOLO runner for RISC-V (rv64gcv)
-./tools/rv64gcv-onnxrt/build.sh
+./applications/yolo/ort/build.sh
 
 # Run BBV profiling on the YOLO binary (dynamically linked, needs sysroot)
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
@@ -134,13 +133,21 @@ RVFuse/
 │   │   ├── gen_isadesc.py # llvm-tblgen ISA descriptor generator
 │   │   ├── isadesc/       # ISA extension descriptors (I, F, M)
 │   │   └── tests/         # Unit tests (~1300 lines)
-│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner (rv64gcv)
+│   ├── fusion/            # Fusion pattern discovery (Phase 2)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
-│   └── yolo_runner/       # YOLO inference C++ runner
+│   ├── bbv/               # QEMU BBV plugin
+│   └── local-llvm/        # LLVM 22 local toolchain
+├── applications/          # Test applications
+│   └── yolo/              # YOLO inference application
+│       ├── runner/        # YOLO inference C++ runner
+│       ├── ort/           # Cross-compile ORT v1.24.4 (rv64gcv)
+│       ├── ort-c920/      # C920 platform ORT build
+│       └── patches/       # MLAS RVV patches
 ├── tests/                 # Integration tests
 ├── third_party/           # Git submodules
 │   ├── qemu/              # QEMU (mandatory)
-│   └── llvm-project/      # LLVM (mandatory)
+│   ├── llvm-project/      # LLVM (mandatory)
+│   └── riscv-rvv-intrinsic-doc/ # RVV intrinsic semantics (reference)
 └── .rainbow/              # Workflow automation scripts
 ```
 
@@ -150,6 +157,7 @@ RVFuse/
 |------------|--------|--------|
 | QEMU | https://gitlab.com/qemu-project/qemu | Mandatory |
 | LLVM | https://github.com/llvm/llvm-project | Mandatory |
+| RVV Intrinsics Doc | https://github.com/riscv-non-isa/riscv-rvv-intrinsic-doc | Reference (RVV semantics) |
 
 ## Code Style
 
