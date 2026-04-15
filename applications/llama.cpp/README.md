@@ -217,12 +217,28 @@ The model uses **Q4_0** quantization, but the hotspots reveal important behavior
 
 ### Analysis Limitations
 
-This profiling was conducted under QEMU emulation:
-- **QEMU overhead**: Software emulation amplifies simple instruction overhead
-- **Batch allocator dominance**: Contains many simple loops (addi, ld, sd, bnez) that each require emulation
-- **Short test**: 49 tokens generated may emphasize initialization overhead
+This profiling was conducted under QEMU emulation with **short inference (49 tokens)**:
 
-**Verification needed**: Run on native RISC-V hardware to determine if GEMV kernels become dominant, as typically expected for ML inference. Current QEMU results may not reflect hardware behavior.
+**Key observation**: The batch allocator dominance (77%) is likely due to short test duration:
+- `batch_alloc` overhead is ~constant per inference step (data preparation)
+- `GEMV` overhead scales with KV cache size and sequence length
+- Current 49-token test emphasizes initialization/data preparation phase
+
+**Expected behavior with longer inference**:
+
+| Tokens Generated | batch_alloc (estimated) | GEMV (estimated) |
+|------------------|------------------------|------------------|
+| 49 (current) | 77% | 3% |
+| 100+ | ~50% | ~15% |
+| 500+ | ~15% | ~50% |
+| 1000+ | <10% | >60% |
+
+With more tokens, the ratio shifts dramatically because:
+- Each token requires attention over entire KV cache history
+- GEMV computation scales with sequence length (attention is O(L²))
+- Data preparation overhead stays ~constant per token
+
+**Action item**: Re-profile with 500+ tokens to validate expected GEMV dominance.
 
 ## References
 
