@@ -76,3 +76,6 @@ applications/yolo/runner/build-*/
 # llvm-tblgen build artifacts (build/ dir handled by third_party/*/build/ pattern)
 # NOTE: tools/dfg/riscv_instrs.json is committed — it's the reproducible input for gen_isadesc.py
 .claude/worktrees/
+
+# Skill symlinks (actual skills are in skills/ directory)
+.claude/skills/rvv-gap-analysis
