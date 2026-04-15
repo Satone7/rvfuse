@@ -2,6 +2,165 @@
 
 RISC-V Instruction Fusion Research Platform
 
+## 指令分析与调研流程 (Instruction Analysis Workflow)
+
+本流程描述了一套规范性的指令分析和向量化优化调研方法，以实际应用为出发点，通过系统化的 profiling 和优化迭代来提升应用性能。
+
+### 流程概览
+
+| 步骤 | 目标 | 输入 | 输出 |
+|------|------|------|------|
+| 1 | 交叉编译目标应用 | 源代码 | RISC-V 可执行文件 + sysroot |
+| 2 | 验证应用运行 | RISC-V 二进制 | 运行成功确认 |
+| 3 | BBV Profiling | RISC-V 二进制 | `.bb` 统计 + `.disas` 反汇编 |
+| 4 | 热点分析 | BBV 数据 | `hotspot.json` |
+| 5 | RVV 向量化优化 | 热点函数 | 向量化版本 + 正确性验证 |
+| 6 | 优化效果评估 | 向量化版本 | 新的 BBV 数据 + 对比分析 |
+
+### Step 1: 交叉编译目标应用
+
+使用 `local-llvm` (LLVM 22 交叉编译工具链) 和 `riscv64/ubuntu:24.04` Docker 镜像完成目标应用的编译：
+
+```bash
+# 构建交叉编译工具链并提取 sysroot
+./tools/rv64gcv-onnxrt/build.sh
+
+# 输出目录结构：
+# output/cross-ort/
+# ├── yolo_inference          # RISC-V 可执行文件 (动态链接)
+# ├── lib/libonnxruntime.so   # ONNX Runtime 共享库
+# └── sysroot/                 # RISC-V sysroot (用于 QEMU)
+```
+
+**关键配置：**
+- 目标架构：`rv64gcv` (支持 RVV 向量扩展)
+- 编译选项：启用自动向量化 (`-O3 -mllvm -riscv-v-vector-bits-max=256`)
+- 链接方式：动态链接，依赖 sysroot 中的运行时库
+
+### Step 2: 验证应用运行
+
+编译 QEMU + BBV 插件后，在 QEMU (不加载 BBV) 中测试应用运行是否正常：
+
+```bash
+# 构建 QEMU + BBV 插件 (首次需要)
+./verify_bbv.sh
+
+# 在 QEMU 中验证应用运行 (不使用 BBV)
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
+
+# 预期输出：推理成功，检测结果正常显示
+```
+
+**验证要点：**
+- 应用能够正常启动和退出
+- 输出结果正确 (与 x86 版本对比)
+- 无运行时错误或异常
+
+### Step 3: BBV Profiling
+
+使用 QEMU + BBV 运行应用，采集基本块执行统计：
+
+```bash
+# 启用 BBV profiling
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  -plugin ./tools/bbv/libbbv.so,interval=100000,outfile=output/yolo.bbv \
+  ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
+
+# 输出文件：
+# output/yolo.bbv.0.bb     # BBV 统计数据 (执行次数)
+# output/yolo.bbv.0.disas  # 带 BBid 的反汇编
+```
+
+**Profiling 参数：**
+- `interval=N`：采样间隔 (指令数)，越小越精细但输出更大
+- `outfile=PATH`：输出文件前缀，自动添加 `.pid.bb` 和 `.pid.disas` 后缀
+
+### Step 4: 热点分析
+
+使用 `analyze_bbv.py` 分析 BBV 数据，定位热点基本块：
+
+```bash
+python3 tools/analyze_bbv.py \
+  --bbv output/yolo.bbv.0.bb \
+  --elf output/yolo_inference \
+  --sysroot output/sysroot \
+  --json-output output/hotspot.json
+
+# 输出：
+# - 终端：热点函数/基本块的文本报告 (--top 20)
+# - hotspot.json：完整的基本块执行数据 (用于 DFG 生成)
+```
+
+**分析内容：**
+- 基本块执行频率排名
+- 函数级别热点定位
+- 地址到源码映射 (`addr2line`)
+
+### Step 5: RVV 向量化优化
+
+利用 Agent 实现热点函数的 RVV 向量化：
+
+```bash
+# 使用 rvv-gap-analysis skill 分析向量化差距
+/rvv-gap-analysis
+
+# 或使用 Claude Agent 手动分析：
+# 1. 读取 hotspot.json 确定热点函数
+# 2. 分析热点基本块的指令模式
+# 3. 设计 RVV 向量化方案
+# 4. 编写向量代码并编译
+# 5. 对比标量版本验证正确性
+```
+
+**优化策略：**
+- 循环向量化：将标量循环转换为 RVV 向量循环
+- SIMD 化：利用 `vle32.v` / `vse32.v` 等向量加载/存储
+- 宽度选择：根据数据类型选择合适的 LMUL 和 SEW
+
+**正确性验证：**
+```bash
+# 运行向量化版本并对比输出
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  ./output/yolo_inference_vec ./output/yolo11n.ort ./output/test.jpg
+
+# 对比检测结果与标量版本是否一致
+```
+
+### Step 6: 优化效果评估
+
+再次使用 QEMU + BBV 运行向量化版本，评估优化效果：
+
+```bash
+# Profiling 向量化版本
+./third_party/qemu/build/qemu-riscv64 \
+  -L output/sysroot \
+  -plugin ./tools/bbv/libbbv.so,interval=100000,outfile=output/yolo_vec.bbv \
+  ./output/yolo_inference_vec ./output/yolo11n.ort ./output/test.jpg
+
+# 分析新的 BBV 数据
+python3 tools/analyze_bbv.py \
+  --bbv output/yolo_vec.bbv.0.bb \
+  --elf output/yolo_inference_vec \
+  --sysroot output/sysroot \
+  --json-output output/hotspot_vec.json
+
+# 对比 hotspot.json 和 hotspot_vec.json
+# - 热点函数变化
+# - 基本块执行次数变化
+# - 指令分布变化
+```
+
+**评估指标：**
+- 热点基本块执行次数减少比例
+- 向量指令占比提升
+- 关键函数指令数下降
+
+---
+
 ## Overview
 
 RVFuse profiles real workloads (YOLO object detection) on RISC-V via QEMU emulation, collects basic block execution data, and identifies instruction fusion candidates in hot code paths.

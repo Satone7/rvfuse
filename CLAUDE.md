@@ -23,8 +23,7 @@ RVFuse is a RISC-V instruction fusion research platform. The goal is to:
 | 3 | Simulation and benefit quantification | Planned |
 | 4 | Extension and diversification | Planned |
 
-**Phase 2 Feature Roadmap**: See [`docs/plans/2026-04-08-phase2-feature-roadmap.md`](docs/plans/2026-04-08-phase2-feature-roadmap.md)
-for the complete feature breakdown, dependency chain, and acceptance criteria.
+**Phase 2 Feature Roadmap**: F1 → F2 → F3 in order. Each feature needs its own design doc before implementation begins.
 
 | Feature | Description | Status | Design Doc |
 |---------|-------------|--------|------------|
@@ -140,7 +139,8 @@ RVFuse/
 ├── tests/                 # Integration tests
 ├── third_party/           # Git submodules
 │   ├── qemu/              # QEMU (mandatory)
-│   └── llvm-project/      # LLVM (mandatory)
+│   ├── llvm-project/      # LLVM (mandatory)
+│   └── riscv-rvv-intrinsic-doc/ # RVV intrinsic semantics (reference)
 └── .rainbow/              # Workflow automation scripts
 ```
 
@@ -150,6 +150,7 @@ RVFuse/
 |------------|--------|--------|
 | QEMU | https://gitlab.com/qemu-project/qemu | Mandatory |
 | LLVM | https://github.com/llvm/llvm-project | Mandatory |
+| RVV Intrinsics Doc | https://github.com/riscv-non-isa/riscv-rvv-intrinsic-doc | Reference (RVV semantics) |
 
 ## Code Style
 
