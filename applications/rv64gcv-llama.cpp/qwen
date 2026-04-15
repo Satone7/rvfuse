@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Paths
-SYSROOT="${PROJECT_ROOT}/output/llama.cpp/sysroot"
+SYSROOT="${PROJECT_ROOT}/output/c920-ort/sysroot"
 BIN="${PROJECT_ROOT}/output/llama.cpp/bin"
 MODEL_DIR="${PROJECT_ROOT}/models"
 QEMU="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
@@ -138,7 +138,7 @@ run_inference() {
     if [ "${INTERACTIVE}" == "true" ]; then
         echo -e "${YELLOW}Starting interactive chat (Ctrl+C to exit)...${NC}"
         echo ""
-        exec "${QEMU}" -L "${SYSROOT}" -cpu max "${BIN}/llama-cli" \
+        exec "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu max "${BIN}/llama-cli" \
             -m "${model_path}" \
             -t "${NUM_THREADS}" \
             --temp "${TEMP}" \
@@ -150,7 +150,7 @@ run_inference() {
         echo "Prompt: ${PROMPT}"
         echo ""
 
-        "${QEMU}" -L "${SYSROOT}" -cpu max "${BIN}/llama-completion" \
+        "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu max "${BIN}/llama-completion" \
             -m "${model_path}" \
             -p "${PROMPT}" \
             -n "${NUM_TOKENS}" \
