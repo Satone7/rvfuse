@@ -148,7 +148,6 @@ RVFuse/
 │   ├── qemu/              # QEMU (mandatory)
 │   ├── llvm-project/      # LLVM (mandatory)
 │   └── riscv-rvv-intrinsic-doc/ # RVV intrinsic semantics (reference)
-└── .rainbow/              # Workflow automation scripts
 ```
 
 ## Dependencies
