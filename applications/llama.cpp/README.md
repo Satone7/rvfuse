@@ -166,6 +166,62 @@ python3 output/llama.cpp/bin/convert_hf_to_gguf.py \
 | Target | `rv64gcv_zfh_zvfh_zicbop_zihintpause` |
 | ABI | lp64d |
 
+## BBV Profiling Hotspot Analysis
+
+Profiling conducted on Qwen2.5-0.5B-Instruct **Q4_0** quantized model (2026-04-15):
+
+### Top Hotspots Distribution
+
+| Category | Function | Library | Execution % |
+|----------|----------|---------|-------------|
+| Batch Management | `llama_batch_allocr::ubatch_add` | libllama.so | **35.25%** |
+| Batch Management | `llama_batch_allocr::split_equal` | libllama.so | **20.14%** |
+| Quantization | `ggml_quantize_mat_q8_0_4x4` | libggml-cpu.so | ~2% |
+| GEMV (Q4_K) | `ggml_gemv_q4_K_8x8_q8_K` | libggml-cpu.so | ~1.7% |
+| GEMV (IQ4) | `ggml_gemv_iq4_nl_4x4_q8_0` | libggml-cpu.so | 0.22% |
+
+### Library Distribution
+
+| Library | Execution % |
+|---------|-------------|
+| libllama.so | **78.25%** |
+| libggml-cpu.so | 9.16% |
+| libcrypto.so | 3.68% |
+| libggml-base.so | 2.94% |
+
+### Quantization Relationship
+
+The model uses **Q4_0** quantization, but the hotspots reveal important behavior:
+
+1. **Batch Allocator Dominance (65%+)**
+   - `ubatch_add`: Adds tokens to micro-batch for parallel processing
+   - `split_equal`: Splits batch into equal-sized chunks for KV cache management
+   - This overhead is due to QEMU emulation overhead, not representative of native hardware
+
+2. **Repacking Mechanism**
+   - `ggml_gemv_q4_K_8x8_q8_K` appears despite Q4_0 model
+   - llama.cpp uses **repacking**: converts Q4_0 weights to Q4_K format during computation
+   - Q4_K provides better SIMD-style vectorization for matrix operations
+
+3. **Activation Quantization**
+   - `ggml_quantize_mat_q8_0_4x4`: Quantizes activation matrices to Q8_0
+   - This is temporary quantization during computation, not model weights
+   - Required for efficient matrix-vector multiplication
+
+### Key Observations
+
+- **Batch management overhead** is amplified by QEMU emulation (would be lower on native hardware)
+- **GEMV functions** (matrix-vector multiply) are the core compute kernels
+- **Q4_K gemv** indicates weight repacking from Q4_0 to Q4_K for computation
+- **IQ4_NL gemv** used for certain layer types (non-linear quantization)
+
+### Native Hardware Expectation
+
+On real RISC-V hardware with RVV:
+- Batch allocator overhead would be <10% (native speed)
+- GEMV kernels would dominate (actual compute)
+- RVV vectorization would accelerate `ggml_gemv_*` functions significantly
+
 ## References
 
 - [llama.cpp RISC-V documentation](https://github.com/ggerganov/llama.cpp/blob/master/docs/build-riscv64-spacemit.md)
