@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # Paths
 SYSROOT="${PROJECT_ROOT}/output/llama.cpp/sysroot"
 BIN="${PROJECT_ROOT}/output/llama.cpp/bin"
-MODEL_DIR="${PROJECT_ROOT}/models"
+MODEL_DIR="${SCRIPT_DIR}/models"
 QEMU="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
 
 # Default model

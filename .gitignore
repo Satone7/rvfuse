@@ -46,10 +46,10 @@ setup-report.txt
 
 # Pre-cloned vendor sources for cross-compilation
 applications/yolo/ort/vendor/
-applications/rv64gcv-llama.cpp/vendor/
+applications/llama.cpp/vendor/
 
 # Model files (large GGUF models)
-models/*.gguf
+applications/llama.cpp/models/*.gguf
 
 # ONNX Runtime + YOLO build artifacts
 output/*
