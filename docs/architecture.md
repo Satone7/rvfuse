@@ -179,9 +179,15 @@ RVFuse/
 │   ├── analyze_bbv.py     # BBV hotspot analysis (464 lines)
 │   ├── profile_to_dfg.sh  # End-to-end profiling → DFG pipeline
 │   ├── dfg/               # DFG generation engine (~3400 lines)
-│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner
+│   ├── fusion/            # Fusion pattern discovery (Phase 2)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
-│   └── yolo_runner/       # YOLO inference C++ runner
+│   └── bbv/               # QEMU BBV plugin
+├── applications/          # Test applications
+│   └── yolo/              # YOLO inference application
+│       ├── runner/        # YOLO inference C++ runner
+│       ├── ort/           # Cross-compile ORT v1.24.4 (rv64gcv)
+│       ├── ort-c920/      # C920 platform ORT build variant
+│       └── patches/       # MLAS RVV patches
 ├── tests/                 # Integration tests
 └── third_party/           # Git submodules
     ├── qemu/              # QEMU (mandatory)

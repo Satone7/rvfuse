@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-PATCH_FILE="${PROJECT_ROOT}/patches/mlas/rvv-gemm-vl16.patch"
+PATCH_FILE="${PROJECT_ROOT}/applications/yolo/patches/mlas/rvv-gemm-vl16.patch"
 ORT_BUILD_DIR="${PROJECT_ROOT}/output/ort-vl16-build"
 ORT_INSTALL_DIR="${PROJECT_ROOT}/output/ort-vl16"
 SYSROOT="${PROJECT_ROOT}/output/sysroot"
@@ -44,7 +44,7 @@ check_prerequisites() {
     [ -f "${PATCH_FILE}" ] || error "Patch file not found: ${PATCH_FILE}"
 
     # Check sysroot exists
-    [ -d "${SYSROOT}/usr" ] || error "Sysroot not found: ${SYSROOT}. Run ./tools/rv64gcv-onnxrt/build.sh first."
+    [ -d "${SYSROOT}/usr" ] || error "Sysroot not found: ${SYSROOT}. Run ./applications/yolo/ort/build.sh first."
 
     # Check QEMU exists (or use system qemu)
     if [ ! -f "${QEMU_PATH}" ]; then
@@ -61,7 +61,7 @@ check_prerequisites() {
 
 # --- Apply Patch ---
 apply_patch() {
-    local ort_source="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor/onnxruntime"
+    local ort_source="${PROJECT_ROOT}/applications/yolo/ort/vendor/onnxruntime"
 
     [ -d "${ort_source}/cmake" ] || error "ORT source not found: ${ort_source}"
 
@@ -92,8 +92,8 @@ apply_patch() {
 
 # --- Build MLAS with VL=16 ---
 build_mlas_vl16() {
-    local ort_source="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor/onnxruntime"
-    local toolchain="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake"
+    local ort_source="${PROJECT_ROOT}/applications/yolo/ort/vendor/onnxruntime"
+    local toolchain="${PROJECT_ROOT}/applications/yolo/ort/riscv64-linux-toolchain.cmake"
     local llvm_install="${PROJECT_ROOT}/third_party/llvm-install"
 
     [ -f "${toolchain}" ] || error "Toolchain file not found: ${toolchain}"
@@ -156,9 +156,9 @@ run_mlas_tests() {
 
 # --- Build Scalar Reference ---
 build_scalar_reference() {
-    local ort_source="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/vendor/onnxruntime"
+    local ort_source="${PROJECT_ROOT}/applications/yolo/ort/vendor/onnxruntime"
     local scalar_build="${PROJECT_ROOT}/output/ort-scalar-build"
-    local toolchain="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/riscv64-linux-toolchain.cmake"
+    local toolchain="${PROJECT_ROOT}/applications/yolo/ort/riscv64-linux-toolchain.cmake"
     local llvm_install="${PROJECT_ROOT}/third_party/llvm-install"
 
     info "Building scalar reference (without VL=16 patch) for comparison..."

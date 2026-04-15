@@ -62,7 +62,7 @@ git submodule update --remote
 ./verify_bbv.sh
 
 # Cross-compile ONNX Runtime + YOLO runner for RISC-V (rv64gcv)
-./tools/rv64gcv-onnxrt/build.sh
+./applications/yolo/ort/build.sh
 
 # Run BBV profiling on the YOLO binary (dynamically linked, needs sysroot)
 # Note: outfile produces output/yolo.bbv.<pid>.bb (e.g. output/yolo.bbv.0.bb)
@@ -133,9 +133,16 @@ RVFuse/
 │   │   ├── gen_isadesc.py # llvm-tblgen ISA descriptor generator
 │   │   ├── isadesc/       # ISA extension descriptors (I, F, M)
 │   │   └── tests/         # Unit tests (~1300 lines)
-│   ├── rv64gcv-onnxrt/    # Cross-compile ORT v1.24.4 + YOLO runner (rv64gcv)
+│   ├── fusion/            # Fusion pattern discovery (Phase 2)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
-│   └── yolo_runner/       # YOLO inference C++ runner
+│   ├── bbv/               # QEMU BBV plugin
+│   └── local-llvm/        # LLVM 22 local toolchain
+├── applications/          # Test applications
+│   └── yolo/              # YOLO inference application
+│       ├── runner/        # YOLO inference C++ runner
+│       ├── ort/           # Cross-compile ORT v1.24.4 (rv64gcv)
+│       ├── ort-c920/      # C920 platform ORT build
+│       └── patches/       # MLAS RVV patches
 ├── tests/                 # Integration tests
 ├── third_party/           # Git submodules
 │   ├── qemu/              # QEMU (mandatory)

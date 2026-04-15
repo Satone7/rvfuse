@@ -34,6 +34,6 @@ Adds RISC-V Vector Extension (RVV) support to MLAS SGEMM kernel.
 **Usage:**
 Apply to ONNX Runtime source tree before building:
 ```bash
-cd vendor/onnxruntime
-patch -p1 < ../../patches/mlas/rvv-gemm.patch
+cd applications/yolo/ort/vendor/onnxruntime
+patch -p1 < ../../../patches/mlas/rvv-gemm.patch
 ```

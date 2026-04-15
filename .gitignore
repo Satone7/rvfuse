@@ -45,7 +45,7 @@ coverage/
 setup-report.txt
 
 # Pre-cloned vendor sources for cross-compilation
-tools/rv64gcv-onnxrt/vendor/
+applications/yolo/ort/vendor/
 
 # ONNX Runtime + YOLO build artifacts
 output/*
@@ -71,7 +71,7 @@ tests/tools/*.log
 tests/tools/test_hello.c
 
 # YOLO runner build directories
-tools/yolo_runner/build-*/
+applications/yolo/runner/build-*/
 
 # llvm-tblgen build artifacts (build/ dir handled by third_party/*/build/ pattern)
 # NOTE: tools/dfg/riscv_instrs.json is committed — it's the reproducible input for gen_isadesc.py

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 OUTPUT_DIR="${PROJECT_ROOT}/output/cross-ort"
 VENDOR_DIR="${SCRIPT_DIR}/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"

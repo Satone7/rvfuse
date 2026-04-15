@@ -23,7 +23,7 @@ RISC-V Instruction Fusion Research Platform
 
 ```bash
 # 构建交叉编译工具链并提取 sysroot
-./tools/rv64gcv-onnxrt/build.sh
+./applications/yolo/ort/build.sh
 
 # 输出目录结构：
 # output/cross-ort/
@@ -249,11 +249,11 @@ tools/bbv/
 ### Step 3: Cross-compile ONNX Runtime + YOLO runner for RISC-V
 
 ```bash
-./tools/rv64gcv-onnxrt/build.sh
+./applications/yolo/ort/build.sh
 ```
 
 This script:
-1. **Clones** `onnxruntime` (v1.24.4) and `eigen` (3.4.0) source trees to `tools/rv64gcv-onnxrt/vendor/` (skips if already present)
+1. **Clones** `onnxruntime` (v1.24.4) and `eigen` (3.4.0) source trees to `applications/yolo/ort/vendor/` (skips if already present)
 2. **Extracts** a riscv64 sysroot from a Docker container (requires Docker)
 3. **Cross-compiles** ONNX Runtime using LLVM 22 + lld targeting rv64gcv
 4. **Cross-compiles** the YOLO inference runner against the built ORT
@@ -503,17 +503,6 @@ RVFuse/
 │   └── plans/                   # Design + implementation plans per feature
 ├── memory/                      # Ground-rules and project governance
 ├── tools/
-│   ├── rv64gcv-onnxrt/
-│   │   ├── build.sh             # Cross-compile ORT + YOLO runner (rv64gcv)
-│   │   ├── riscv64-linux-toolchain.cmake  # CMake toolchain
-│   │   └── vendor/              # Pre-cloned source trees (gitignored)
-│   │       ├── onnxruntime/     # microsoft/onnxruntime v1.24.4
-│   │       └── eigen/           # libeigen 3.4.0
-│   ├── yolo_runner/
-│   │   ├── yolo_runner.cpp      # YOLO inference runner (ONNX Runtime C++ API)
-│   │   ├── yolo_preprocess.cpp  # Preprocess test: FFmpeg decode + resize + normalize
-│   │   ├── yolo_postprocess.cpp # Postprocess test: YOLO parse + NMS + draw
-│   │   └── stb_image.h          # Header-only image loader
 │   ├── dfg/                     # Data Flow Graph generation
 │   │   ├── __main__.py          # CLI entry point
 │   │   ├── filter.py            # Report-driven BB selection (top-N / coverage)
@@ -526,6 +515,21 @@ RVFuse/
 │   │   └── tests/
 │   ├── analyze_bbv.py           # BBV hotspot report generator (text + JSON)
 │   └── profile_to_dfg.sh        # End-to-end: BBV analysis → selective DFG
+├── applications/                # Test applications
+│   └── yolo/                    # YOLO inference application
+│       ├── runner/              # YOLO inference C++ runner
+│       │   ├── yolo_runner.cpp  # YOLO inference runner (ONNX Runtime C++ API)
+│       │   ├── yolo_preprocess.cpp  # Preprocess test: FFmpeg decode + resize + normalize
+│       │   ├── yolo_postprocess.cpp # Postprocess test: YOLO parse + NMS + draw
+│       │   └── stb_image.h      # Header-only image loader
+│       ├── ort/                 # Cross-compile ORT + YOLO runner (rv64gcv)
+│       │   ├── build.sh         # Build script
+│       │   ├── riscv64-linux-toolchain.cmake  # CMake toolchain
+│       │   └── vendor/          # Pre-cloned source trees (gitignored)
+│       │       ├── onnxruntime/ # microsoft/onnxruntime v1.24.4
+│       │       └── eigen/       # libeigen 3.4.0
+│       ├── ort-c920/            # C920 platform ORT build variant
+│       └── patches/             # MLAS RVV patches
 ├── output/                      # Build artifacts and profiling data
 │   ├── yolo_inference           # RISC-V inference binary
 │   ├── yolo11n.ort              # Optimized ORT format model

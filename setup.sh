@@ -6,7 +6,7 @@ set -euo pipefail
 # =============================================================================
 #
 # Thin orchestrator that delegates actual work to existing scripts:
-#   prepare_model.sh, verify_bbv.sh, tools/rv64gcv-onnxrt/build.sh,
+#   prepare_model.sh, verify_bbv.sh, applications/yolo/ort/build.sh,
 #   tools/profile_to_dfg.sh
 #
 # Supports artifact-based skip detection and --force with cleanup.
@@ -572,7 +572,7 @@ step3_cross_compile() {
     local step=3
     log_info "=== Step ${step}: ${STEP_NAMES[$step]} ==="
 
-    local build_script="${PROJECT_ROOT}/tools/rv64gcv-onnxrt/build.sh"
+    local build_script="${PROJECT_ROOT}/applications/yolo/ort/build.sh"
     local build_args=()
 
     if is_step_forced "$step"; then
@@ -580,7 +580,7 @@ step3_cross_compile() {
     fi
 
     if ! bash "${build_script}" "${build_args[@]}" 2>&1; then
-        record_step_result "$step" "FAIL" "tools/rv64gcv-onnxrt/build.sh exited with error"
+        record_step_result "$step" "FAIL" "applications/yolo/ort/build.sh exited with error"
         return 1
     fi
 
