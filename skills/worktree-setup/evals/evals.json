@@ -1,0 +1,23 @@
+{
+  "skill_name": "worktree-setup",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我刚创建了一个新的worktree分支来开发fusion-miner功能，需要设置环境。主仓库在/home/pren/wsp/rvfuse，worktree在.claude/worktrees/fusion-miner。帮我完成环境准备。",
+      "expected_output": "Create symlinks to QEMU build, LLVM install, BBV plugin, local-llvm tools, and set up sysroot. Initialize submodules.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我需要在worktree中运行QEMU profiling，但发现third_party/qemu/build目录不存在。主仓库地址是/home/pren/wsp/rvfuse。",
+      "expected_output": "Identify that worktree needs symlink to main repo's QEMU build, create the symlink, and explain how to verify.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "enter worktree for llama.cpp work",
+      "expected_output": "After entering worktree, set up symlinks to shared resources (QEMU, LLVM, sysroot from llama.cpp if available), initialize submodules.",
+      "files": []
+    }
+  ]
+}
