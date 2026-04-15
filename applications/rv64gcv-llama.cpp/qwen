@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# Quick Qwen inference wrapper for RV64GCV llama.cpp via QEMU
+# Usage: ./qwen -p "Hello" [-n 32] [-t 4]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# Paths
+SYSROOT="${PROJECT_ROOT}/output/llama.cpp/sysroot"
+BIN="${PROJECT_ROOT}/output/llama.cpp/bin"
+MODEL_DIR="${PROJECT_ROOT}/models"
+QEMU="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
+
+# Default model
+DEFAULT_MODEL="Qwen2.5-0.5B-Instruct-Q4_0.gguf"
+MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf"
+
+# Default parameters
+PROMPT=""
+NUM_TOKENS=32
+NUM_THREADS=1
+TEMP=0.7
+INTERACTIVE=false
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info()  { echo -e "${GREEN}✓ $*${NC}"; }
+warn()  { echo -e "${YELLOW}! $*${NC}"; }
+error() { echo -e "${RED}✗ $*${NC}" >&2; exit 1; }
+
+show_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -p, --prompt <text>     Prompt text (required for non-interactive)"
+    echo "  -n, --tokens <num>      Number of tokens to generate (default: 32)"
+    echo "  -t, --threads <num>     Number of threads (default: 1, QEMU is slow)"
+    echo "  --temp <float>          Temperature (default: 0.7)"
+    echo "  -i, --interactive       Run in interactive chat mode"
+    echo "  -m, --model <name>      Model filename (default: ${DEFAULT_MODEL})"
+    echo "  -h, --help              Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -p \"Hello, world!\""
+    echo "  $0 -p \"What is 2+2?\" -n 10"
+    echo "  $0 -i  # Interactive mode"
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--prompt)    PROMPT="$2"; shift 2 ;;
+        -n|--tokens)    NUM_TOKENS="$2"; shift 2 ;;
+        -t|--threads)   NUM_THREADS="$2"; shift 2 ;;
+        --temp)         TEMP="$2"; shift 2 ;;
+        -i|--interactive) INTERACTIVE=true; shift ;;
+        -m|--model)     DEFAULT_MODEL="$2"; shift 2 ;;
+        -h|--help)      show_help; exit 0 ;;
+        *)              error "Unknown argument: $1" ;;
+    esac
+done
+
+# Check prerequisites
+check_qemu() {
+    if [ ! -f "${QEMU}" ]; then
+        error "QEMU not found at ${QEMU}. Run verify_bbv.sh first."
+    fi
+}
+
+check_sysroot() {
+    if [ ! -d "${SYSROOT}/usr" ]; then
+        error "Sysroot not found at ${SYSROOT}. Run build.sh first."
+    fi
+}
+
+check_binary() {
+    if [ ! -f "${BIN}/llama-cli" ]; then
+        error "llama-cli not found at ${BIN}. Run build.sh first."
+    fi
+}
+
+# Download model if missing
+ensure_model() {
+    local model_path="${MODEL_DIR}/${DEFAULT_MODEL}"
+
+    if [ -f "${model_path}" ]; then
+        info "Model found: ${model_path}"
+        return 0
+    fi
+
+    warn "Model not found, downloading..."
+    echo "  URL: ${MODEL_URL}"
+    echo "  Size: ~409 MB"
+
+    mkdir -p "${MODEL_DIR}"
+
+    # Try wget first, then curl
+    if command -v wget &>/dev/null; then
+        wget -q --show-progress -O "${model_path}" "${MODEL_URL}" || \
+            error "Download failed with wget"
+    elif command -v curl &>/dev/null; then
+        curl -L -o "${model_path}" "${MODEL_URL}" || \
+            error "Download failed with curl"
+    else
+        error "Neither wget nor curl found. Please install one."
+    fi
+
+    info "Model downloaded: ${model_path}"
+    ls -lh "${model_path}"
+}
+
+# Run inference
+run_inference() {
+    local model_path="${MODEL_DIR}/${DEFAULT_MODEL}"
+
+    if [ -z "${PROMPT}" ] && [ "${INTERACTIVE}" != "true" ]; then
+        error "No prompt provided. Use -p \"your prompt\" or -i for interactive mode."
+    fi
+
+    echo ""
+    echo -e "${BLUE}════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  RV64GCV llama.cpp via QEMU ${NC}"
+    echo -e "${BLUE}════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Model:   ${DEFAULT_MODEL}"
+    echo "  Threads: ${NUM_THREADS}"
+    echo "  Tokens:  ${NUM_TOKENS}"
+    echo "  Temp:    ${TEMP}"
+    echo ""
+
+    if [ "${INTERACTIVE}" == "true" ]; then
+        echo -e "${YELLOW}Starting interactive chat (Ctrl+C to exit)...${NC}"
+        echo ""
+        exec "${QEMU}" -L "${SYSROOT}" -cpu max "${BIN}/llama-cli" \
+            -m "${model_path}" \
+            -t "${NUM_THREADS}" \
+            --temp "${TEMP}" \
+            -e \
+            2>&1
+    else
+        echo -e "${YELLOW}Running inference...${NC}"
+        echo ""
+        echo "Prompt: ${PROMPT}"
+        echo ""
+
+        "${QEMU}" -L "${SYSROOT}" -cpu max "${BIN}/llama-completion" \
+            -m "${model_path}" \
+            -p "${PROMPT}" \
+            -n "${NUM_TOKENS}" \
+            -t "${NUM_THREADS}" \
+            --temp "${TEMP}" \
+            2>&1 | tee /tmp/qwen_output.log
+
+        echo ""
+        echo -e "${GREEN}════════════════════════════════════════${NC}"
+        echo -e "${GREEN}  Inference complete ${NC}"
+        echo -e "${GREEN}════════════════════════════════════════${NC}"
+    fi
+}
+
+# Main
+check_qemu
+check_sysroot
+check_binary
+ensure_model
+run_inference

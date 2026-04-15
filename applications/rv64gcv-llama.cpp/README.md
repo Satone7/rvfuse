@@ -82,15 +82,48 @@ RISC-V Linux sysroot (~220M) with:
 - libstdc++, libgcc_s
 - Dynamic linker: `ld-linux-riscv64-lp64d.so.1`
 
-## Usage with QEMU
+## Quick Start
+
+The `qwen` wrapper script provides easy access to Qwen inference via QEMU:
+
+```bash
+# Simple inference (auto-downloads model if missing)
+./qwen -p "Hello, world!"
+
+# Custom options
+./qwen -p "What is 2+2?" -n 10 --temp 0.5
+
+# Interactive chat mode
+./qwen -i
+
+# Multi-threaded (note: QEMU is slow, threads help little)
+./qwen -p "Tell me a story" -t 4 -n 64
+```
+
+Options:
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-p, --prompt` | Prompt text | Required |
+| `-n, --tokens` | Tokens to generate | 32 |
+| `-t, --threads` | Number of threads | 1 |
+| `--temp` | Temperature | 0.7 |
+| `-i, --interactive` | Chat mode | false |
+| `-m, --model` | Model filename | Qwen2.5-0.5B-Instruct-Q4_0.gguf |
+| `-h, --help` | Show help | - |
+
+**Note**: QEMU emulation is ~50-100x slower than native RISC-V hardware. Expect 0.2-0.3 tokens/second.
+
+## Usage with QEMU (Advanced)
+
+Direct llama.cpp execution without the wrapper:
 
 ```bash
 SYSROOT=output/llama.cpp/sysroot
 BIN=output/llama.cpp/bin
 
 # Run inference (requires GGUF model file)
-qemu-riscv64 -L $SYSROOT $BIN/llama-cli \
-    -m models/qwen-0.5b-q4_0.gguf \
+qemu-riscv64 -L $SYSROOT -cpu max $BIN/llama-cli \
+    -m models/Qwen2.5-0.5B-Instruct-Q4_0.gguf \
     -p "Hello, world!" \
     -t 4
 
