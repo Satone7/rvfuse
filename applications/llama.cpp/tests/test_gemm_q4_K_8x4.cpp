@@ -3,17 +3,13 @@
 // Compares the RVV vectorized implementation against the scalar (generic)
 // reference on deterministic pseudo-random data.
 //
+// VLEN variants:
+//   - VLEN >= 512: dual-tile 4x16 output (ncols_interleaved=16)
+//   - VLEN < 512:  single-tile 4x8 output (ncols_interleaved=8)
+//
 // Build (rv64gcv, VLEN=512):
-//   riscv64-linux-gnu-g++ -std=c++17 -O2 -march=rv64gcv -mabi=lp64d \
+//   riscv64-linux-gnu-g++ -std=c++17 -O2 -march=rv64gcv_zvl512b -mabi=lp64d \
 //       -DGGML_USE_RISCV_V -o test_gemm_q4_K_8x4 test_gemm_q4_K_8x4.cpp -lm
-//
-// Run:
-//   ./test_gemm_q4_K_8x4
-//
-// Cross-compile (from x86 host):
-//   /path/to/riscv64-linux-gnu-g++ -std=c++17 -O2 -march=rv64gcv_zvl512b \
-//       -mabi=lp64d -DGGML_USE_RISCV_V -static -o test_gemm_q4_K_8x4 \
-//       test_gemm_q4_K_8x4.cpp -lm
 
 #include <cstdint>
 #include <cstddef>
@@ -36,7 +32,6 @@ typedef uint16_t ggml_half;
 #define GGML_RESTRICT
 #define GGML_UNUSED(x) (void)(x)
 
-// FP16 -> FP32 via software conversion (portable, no <arm_fp16.h> needed)
 static inline float ggml_half_to_fp32(ggml_half h) {
     union { uint32_t u; float f; } u32f;
     uint32_t sign = (h >> 15) & 1;
@@ -44,7 +39,6 @@ static inline float ggml_half_to_fp32(ggml_half h) {
     uint32_t frac = h & 0x3FF;
     if (exp == 0) {
         if (frac == 0) { u32f.u = sign << 31; return u32f.f; }
-        // subnormal: normalize
         while (!(frac & 0x400)) frac <<= 1;
         frac &= 0x3FF;
         u32f.u = (sign << 31) | ((exp + 127 - 14) << 23) | ((frac << 13) & 0x7FFFFF);
@@ -62,16 +56,16 @@ static inline float ggml_half_to_fp32(ggml_half h) {
 // Data structures (copied from ggml-cpu/repack.h)
 // ---------------------------------------------------------------------------
 struct block_q4_Kx8 {
-    ggml_half d[8];      // super-block scale for quantized scales
-    ggml_half dmin[8];   // super-block scale for quantized mins
-    uint8_t scales[96];  // scales and mins, quantized with 6 bits
-    uint8_t qs[1024];    // 4-bit quants
+    ggml_half d[8];
+    ggml_half dmin[8];
+    uint8_t scales[96];
+    uint8_t qs[1024];
 };
 
 struct block_q8_Kx4 {
-    float d[4];              // delta
-    int8_t qs[QK_K * 4];     // quants
-    int16_t bsums[QK_K / 4]; // sum of quants in groups of 16
+    float d[4];
+    int8_t qs[QK_K * 4];
+    int16_t bsums[QK_K / 4];
 };
 
 static_assert(sizeof(block_q4_Kx8) == sizeof(ggml_half) * 16 + K_SCALE_SIZE * 8 + QK_K * 4,
@@ -80,10 +74,8 @@ static_assert(sizeof(block_q8_Kx4) == sizeof(float) * 4 + QK_K * 4 + (QK_K / 4) 
               "wrong q8_K block size");
 
 // ---------------------------------------------------------------------------
-// Scalar (generic) reference implementation
+// Scalar (generic) reference implementation (always 8-column interleaved)
 // ---------------------------------------------------------------------------
-// Clang -O2 miscompiles this scalar reference on RISC-V (auto-vectorizer bug),
-// so disable optimization for this function when targeting RVV.
 #if defined(__riscv_v_intrinsic)
 __attribute__((optnone))
 #endif
@@ -94,7 +86,7 @@ static void ggml_gemm_q4_K_8x4_q8_K_scalar(
 {
     const int qk = QK_K;
     const int nb = n / qk;
-    const int ncols_interleaved = 8;
+    const int ncols_interleaved = 8;  // Scalar reference: fixed at 8
     const int blocklen = 4;
     static const uint32_t kmask1 = 0x3f3f3f3f;
     static const uint32_t kmask2 = 0x0f0f0f0f;
@@ -103,10 +95,6 @@ static void ggml_gemm_q4_K_8x4_q8_K_scalar(
     assert(n % qk == 0);
     assert(nr % 4 == 0);
     assert(nc % ncols_interleaved == 0);
-
-    GGML_UNUSED(nb);
-    GGML_UNUSED(ncols_interleaved);
-    GGML_UNUSED(blocklen);
 
     float sumf[4][8];
     float sum_minf[4][8];
@@ -168,8 +156,6 @@ static void ggml_gemm_q4_K_8x4_q8_K_scalar(
 
 // ---------------------------------------------------------------------------
 // RVV vectorized implementation — single source of truth
-// File: include/rvv_gemm_q4_K_8x4.inl (included by both this test and the
-// production patch to prevent copy divergence)
 // ---------------------------------------------------------------------------
 #include "../include/rvv_gemm_q4_K_8x4.inl"
 
@@ -186,23 +172,20 @@ static uint32_t rng_next() {
 static uint8_t  rng_u8()  { return (uint8_t)(rng_next() & 0xFF); }
 static int8_t   rng_i8()  { return (int8_t)(rng_next() & 0xFF); }
 static uint16_t rng_u16() { return (uint16_t)(rng_next() | (rng_next() << 15)); }
-static int16_t  rng_i16() { return (int16_t)(rng_next() | (rng_next() << 15)); }
 
 static float fp32_from_bits(uint32_t u) {
     float f; memcpy(&f, &u, 4); return f;
 }
 
 static ggml_half rng_f16() {
-    // Generate a normal FP16 value (exponent 1..30, bias 15)
     uint32_t sign = rng_next() & 1;
-    uint32_t exp  = (rng_next() % 29) + 1;  // 1..29, well within normal range
+    uint32_t exp  = (rng_next() % 29) + 1;
     uint32_t frac = rng_next() & 0x3FF;
     return (ggml_half)((sign << 15) | (exp << 10) | frac);
 }
 
 static float rng_float_scale() {
-    // Generate float in range [0.1, 2.0]
-    uint32_t u = 0x3DCCCCCD + (rng_next() & 0x00FFFFF); // ~0.1 .. ~1.1 in float
+    uint32_t u = 0x3DCCCCCD + (rng_next() & 0x00FFFFF);
     float f = fp32_from_bits(u);
     return f > 0 ? f : 0.1f;
 }
@@ -210,27 +193,17 @@ static float rng_float_scale() {
 // ---------------------------------------------------------------------------
 // Fill block data with deterministic pseudo-random values
 // ---------------------------------------------------------------------------
-static void fill_q4_Kx8(block_q4_Kx8 & blk) {
+static void fill_q4_kx8(block_q4_Kx8 & blk) {
     for (int i = 0; i < 8; i++) blk.d[i] = rng_f16();
     for (int i = 0; i < 8; i++) blk.dmin[i] = rng_f16();
     for (int i = 0; i < 96; i++) blk.scales[i] = rng_u8();
     for (int i = 0; i < 1024; i++) blk.qs[i] = rng_u8();
 }
 
-static void fill_q8_Kx4(block_q8_Kx4 & blk) {
+static void fill_q8_kx4(block_q8_Kx4 & blk) {
     for (int i = 0; i < 4; i++) blk.d[i] = rng_float_scale();
     for (int i = 0; i < QK_K * 4; i++) blk.qs[i] = rng_i8();
-    // Compute bsums: sum of each group of 16 consecutive q8 values
-    // bsums layout is interleaved (same as the kernel expects)
-    // For now, compute correct bsums for the interleaved layout
     memset(blk.bsums, 0, sizeof(blk.bsums));
-    // The bsums in the interleaved layout: for row m, sub-block sb,
-    // bsum at index (sb*8) + (m*4) - ((sb%2)*6), values bp[0]+bp[1]
-    // This is complex, so just compute raw sums per 16-element group
-    // and store in a format compatible with how the kernel reads them.
-    // The bsums array has QK_K/4 = 64 int16_t entries.
-    // Interpretation: for row m, the bsums are at offsets that depend on
-    // the interleaved repack layout. We compute them from the actual q8 data.
     for (int m = 0; m < 4; m++) {
         for (int sb = 0; sb < 8; sb++) {
             int16_t * bp = blk.bsums + (sb * 8) + (m * 4) - ((sb % 2) * 6);
@@ -246,37 +219,45 @@ static void fill_q8_Kx4(block_q8_Kx4 & blk) {
 }
 
 // ---------------------------------------------------------------------------
-// Test runner
+// Test runner (adapts nc for VLEN variant)
 // ---------------------------------------------------------------------------
-static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
+static int run_test(int n_blocks, int n_col_groups_8, int n_row_groups,
                     const char * label) {
+    // Determine nc based on VLEN variant
+    // VLEN >= 512: ncols_interleaved = 16 (processes 2 blocks per x-iteration)
+    // VLEN < 512:  ncols_interleaved = 8
+#if defined(__riscv_v_fixed_vlen) && __riscv_v_fixed_vlen >= 512
+    const int ncols_interleaved = 16;
+    const int n_col_groups = n_col_groups_8 / 2;  // Each RVV iteration processes 2 scalar groups
+#else
+    const int ncols_interleaved = 8;
+    const int n_col_groups = n_col_groups_8;
+#endif
+
     const int n  = n_blocks * QK_K;
     const int nr = n_row_groups * 4;
-    const int nc = n_col_groups * 8;
-    const size_t bs = nc; // stride = nc (row-major output)
+    const int nc = n_col_groups_8 * 8;  // Scalar reference always uses 8-column groups
+    const size_t bs = nc;
 
-    // Allocate output buffers
     std::vector<float> out_scalar(nr * nc, 0.0f);
     std::vector<float> out_rvv(nr * nc, 0.0f);
 
-    // Allocate input blocks
-    std::vector<block_q4_Kx8> q4_blocks(n_blocks * n_col_groups);
+    // Scalar reference: n_col_groups_8 blocks of 8 columns each
+    std::vector<block_q4_Kx8> q4_blocks(n_blocks * n_col_groups_8);
     std::vector<block_q8_Kx4> q8_blocks(n_blocks * n_row_groups);
 
-    // Fill with deterministic data
-    for (int i = 0; i < (int)q4_blocks.size(); i++) fill_q4_Kx8(q4_blocks[i]);
-    for (int i = 0; i < (int)q8_blocks.size(); i++) fill_q8_Kx4(q8_blocks[i]);
+    for (int i = 0; i < (int)q4_blocks.size(); i++) fill_q4_kx8(q4_blocks[i]);
+    for (int i = 0; i < (int)q8_blocks.size(); i++) fill_q8_kx4(q8_blocks[i]);
 
-    // Run scalar reference
+    // Run scalar reference (always 8-column interleaved)
     ggml_gemm_q4_K_8x4_q8_K_scalar(n, out_scalar.data(), bs,
-                                     q4_blocks.data(), q8_blocks.data(), nr, nc);
+                                   q4_blocks.data(), q8_blocks.data(), nr, nc);
 
 #if defined(__riscv_v_intrinsic)
-    // Run RVV
+    // Run RVV (ncols_interleaved depends on VLEN)
     ggml_gemm_q4_K_8x4_q8_K_rvv(n, out_rvv.data(), bs,
-                                   q4_blocks.data(), q8_blocks.data(), nr, nc);
+                                 q4_blocks.data(), q8_blocks.data(), nr, nc);
 #else
-    // On non-RVV platforms, just skip comparison
     printf("  [SKIP] %s — RVV intrinsics not available\n", label);
     return 0;
 #endif
@@ -284,7 +265,6 @@ static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
     // Compare outputs
     int max_diff_idx = -1;
     float max_abs_diff = 0.0f;
-    float max_rel_diff = 0.0f;
     int n_mismatch = 0;
 
     for (int i = 0; i < nr * nc; i++) {
@@ -295,13 +275,9 @@ static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
 
         if (abs_diff > max_abs_diff) {
             max_abs_diff = abs_diff;
-            max_rel_diff = rel_diff;
             max_diff_idx = i;
         }
 
-        // Tolerance: absolute 0.5 (half-ULP of int32->float at typical magnitudes)
-        // or relative 1e-4 for large values
-        // Also detect NaN/inf via isnan() check
         if ((abs_diff > 0.5f && rel_diff > 1e-4f) || isnan(out_scalar[i]) || isnan(out_rvv[i])) {
             n_mismatch++;
             if (n_mismatch <= 5) {
@@ -314,10 +290,16 @@ static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
     }
 
     if (n_mismatch == 0) {
-        printf("  [PASS] %s — %d elements, max_abs_diff=%.2e (at [%d,%d])\n",
+        printf("  [PASS] %s — %d elements, max_abs_diff=%.2e (at [%d,%d]) [VLEN=%d]\n",
                label, nr * nc, max_abs_diff,
                max_diff_idx >= 0 ? max_diff_idx / nc : 0,
-               max_diff_idx >= 0 ? max_diff_idx % nc : 0);
+               max_diff_idx >= 0 ? max_diff_idx % nc : 0,
+#if defined(__riscv_v_fixed_vlen)
+               __riscv_v_fixed_vlen
+#else
+               -1
+#endif
+               );
         return 0;
     } else {
         printf("  [FAIL] %s — %d/%d mismatches, max_abs_diff=%.2e\n",
@@ -327,27 +309,32 @@ static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
 }
 
 int main() {
-    printf("=== ggml_gemm_q4_K_8x4_q8_K: RVV vs Scalar correctness test ===\n\n");
+#if defined(__riscv_v_fixed_vlen) && __riscv_v_fixed_vlen >= 512
+    printf("=== ggml_gemm_q4_K_8x4_q8_K: RVV-512 (4x16) vs Scalar correctness test ===\n\n");
+#else
+    printf("=== ggml_gemm_q4_K_8x4_q8_K: RVV-256 (4x8) vs Scalar correctness test ===\n\n");
+#endif
 
     int failures = 0;
 
-    // Test 1: minimum viable size (1 block, 1 col group, 1 row group)
-    failures += run_test(1, 1, 1, "min-1x1x1");
+    // Test 1: minimum viable (nc must be multiple of 16 for VLEN=512)
+    // Use n_col_groups_8=2 to give nc=16
+    failures += run_test(1, 2, 1, "min-1x2x1");
 
-    // Test 2: typical tile (1 block, 1 col group, 2 row groups)
-    failures += run_test(1, 1, 2, "typical-1x1x2");
+    // Test 2: typical (nc=16 for VLEN=512)
+    failures += run_test(1, 2, 2, "typical-1x2x2");
 
-    // Test 3: multiple blocks (4 blocks, 2 col groups, 2 row groups)
-    failures += run_test(4, 2, 2, "multi-4x2x2");
+    // Test 3: multiple blocks (nc=32)
+    failures += run_test(4, 4, 2, "multi-4x4x2");
 
-    // Test 4: stress test with many blocks
-    failures += run_test(8, 2, 2, "stress-8x2x2");
+    // Test 4: stress (nc=32)
+    failures += run_test(8, 4, 2, "stress-8x4x2");
 
-    // Test 5: single col, many rows
-    failures += run_test(2, 1, 4, "tall-2x1x4");
+    // Test 5: tall (nc=16)
+    failures += run_test(2, 2, 4, "tall-2x2x4");
 
-    // Test 6: many cols, single row group
-    failures += run_test(2, 4, 1, "wide-2x4x1");
+    // Test 6: wide (nc=64)
+    failures += run_test(2, 8, 1, "wide-2x8x1");
 
     printf("\n=== Summary: %d test(s) failed ===\n", failures);
     return failures;

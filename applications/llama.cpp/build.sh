@@ -313,6 +313,7 @@ build_and_run_tests() {
         -mabi=lp64d
         -fuse-ld=lld
         -DGGML_USE_RISCV_V
+        -D__riscv_v_fixed_vlen=512
         -I"${SCRIPT_DIR}/include"
     )
 
