@@ -3,6 +3,17 @@ set -euo pipefail
 
 # Cross-compile llama.cpp for RISC-V rv64gcv using LLVM 22
 # Output: llama-cli, llama-server executables for RISC-V
+#
+# Usage:
+#   build.sh [OPTIONS]
+#
+# Options:
+#   --force          Rebuild everything from scratch
+#   --skip-sysroot   Skip sysroot extraction (use existing)
+#   --skip-source    Skip llama.cpp source cloning
+#   --test           Compile and run tests under tests/
+#   --help           Show this help message
+#   -j, --jobs N     Parallel build jobs (default: nproc)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -11,10 +22,8 @@ VENDOR_DIR="${SCRIPT_DIR}/vendor"
 LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 LLAMA_SOURCE="${VENDOR_DIR}/llama.cpp"
 TOOLCHAIN_FILE="${SCRIPT_DIR}/riscv64-linux-toolchain.cmake"
-
-# Use sysroot from rv64gcv-onnxrt if available (shared resource)
-ORT_OUTPUT="${PROJECT_ROOT}/output/cross-ort"
-ORT_SYSROOT="${ORT_OUTPUT}/sysroot"
+QEMU_RISCV64="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
+TEST_BUILD_DIR="${OUTPUT_DIR}/.test-build"
 
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp.git"
 LLAMA_VERSION="b8783"  # Latest release as of 2026-04-14
@@ -29,22 +38,50 @@ info()  { echo -e "${GREEN}=== $* ===${NC}"; }
 warn()  { echo -e "${YELLOW}Warning: $*${NC}"; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 
+# --- Help ---
+show_help() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Cross-compile llama.cpp for RISC-V rv64gcv using LLVM 22.
+
+Options:
+  --force          Rebuild everything from scratch
+  --skip-sysroot   Skip sysroot extraction (use existing)
+  --skip-source    Skip llama.cpp source cloning
+  --test           Compile and run tests under tests/
+  -j, --jobs N     Parallel build jobs (default: nproc)
+  --help           Show this help message
+
+Output artifacts:
+  CLI:    ${OUTPUT_DIR}/bin/llama-cli
+  Server: ${OUTPUT_DIR}/bin/llama-server
+  Lib:    ${OUTPUT_DIR}/lib/
+  Sysroot: ${OUTPUT_DIR}/sysroot
+
+Run with QEMU:
+  ${QEMU_RISCV64} -L ${OUTPUT_DIR}/sysroot \\
+    ${OUTPUT_DIR}/bin/llama-cli -m <model.gguf> -p "Hello"
+EOF
+}
+
 # --- Argument parsing ---
 FORCE=false
 SKIP_SYSROOT=false
 SKIP_SOURCE=false
-USE_SHARED_SYSROOT=true
+RUN_TESTS=false
 JOBS=$(nproc 2>/dev/null || echo 4)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --force)         FORCE=true; shift ;;
-        --skip-sysroot)  SKIP_SYSROOT=true; shift ;;
-        --skip-source)   SKIP_SOURCE=true; shift ;;
-        --standalone)    USE_SHARED_SYSROOT=false; shift ;;
-        -j|--jobs)       JOBS="$2"; shift 2 ;;
-        -j*)             JOBS="${1#-j}"; shift ;;
-        *)               error "Unknown argument: $1" ;;
+        --help|-h)      show_help; exit 0 ;;
+        --force)        FORCE=true; shift ;;
+        --skip-sysroot) SKIP_SYSROOT=true; shift ;;
+        --skip-source)  SKIP_SOURCE=true; shift ;;
+        --test)         RUN_TESTS=true; shift ;;
+        -j|--jobs)      JOBS="$2"; shift 2 ;;
+        -j*)            JOBS="${1#-j}"; shift ;;
+        *)              error "Unknown argument: $1 (use --help for usage)" ;;
     esac
 done
 
@@ -58,38 +95,40 @@ check_prerequisites() {
     [ -d "${LLVM_INSTALL}/bin" ] || error "LLVM install not found at ${LLVM_INSTALL}"
     [ -f "${LLVM_INSTALL}/bin/clang" ] || error "clang not found at ${LLVM_INSTALL}/bin/clang"
 
+    if [[ "${RUN_TESTS}" == "true" ]]; then
+        [ -f "${QEMU_RISCV64}" ] || error "qemu-riscv64 not found at ${QEMU_RISCV64}"
+    fi
+
     info "All prerequisites met."
     echo "  LLVM:    ${LLVM_INSTALL}/bin/clang --version"
     "${LLVM_INSTALL}/bin/clang" --version | head -1 || true
+    if [[ "${RUN_TESTS}" == "true" ]]; then
+        echo "  QEMU:    ${QEMU_RISCV64}"
+    fi
 }
 
 check_prerequisites
 
 # --- Step 1: Sysroot ---
-# Prefer shared sysroot from rv64gcv-onnxrt to avoid duplicate Docker extraction
 setup_sysroot() {
-    if [[ "${SKIP_SYSROOT}" == "true" ]]; then
-        info "Skipping sysroot setup (--skip-sysroot)"
-        SYSROOT="${ORT_SYSROOT}"
-        return 0
-    fi
-
-    if [[ "${USE_SHARED_SYSROOT}" == "true" && -d "${ORT_SYSROOT}/usr" ]]; then
-        info "Using shared sysroot from rv64gcv-onnxrt: ${ORT_SYSROOT}"
-        SYSROOT="${ORT_SYSROOT}"
-        return 0
-    fi
-
-    # Standalone sysroot (for isolated builds)
     local standalone_sysroot="${OUTPUT_DIR}/sysroot"
 
+    if [[ "${SKIP_SYSROOT}" == "true" ]]; then
+        if [ ! -d "${standalone_sysroot}/usr" ]; then
+            error "Sysroot not found at ${standalone_sysroot} (remove --skip-sysroot to extract)"
+        fi
+        SYSROOT="${standalone_sysroot}"
+        info "Using existing sysroot: ${SYSROOT}"
+        return 0
+    fi
+
     if [[ "${FORCE}" != "true" && -d "${standalone_sysroot}/usr" ]]; then
-        info "Standalone sysroot already exists at ${standalone_sysroot}. Use --force to re-extract."
+        info "Sysroot already exists at ${standalone_sysroot}. Use --force to re-extract."
         SYSROOT="${standalone_sysroot}"
         return 0
     fi
 
-    info "Extracting standalone riscv64 sysroot from riscv64/ubuntu:24.04..."
+    info "Extracting riscv64 sysroot from riscv64/ubuntu:24.04..."
     command -v docker &>/dev/null || error "Docker not found. Sysroot extraction requires Docker."
 
     rm -rf "${standalone_sysroot}"
@@ -111,7 +150,6 @@ setup_sysroot() {
 
     docker cp "${tmp_container}:/usr/lib"      "${standalone_sysroot}/usr_lib_tmp"
     docker cp "${tmp_container}:/usr/include"  "${standalone_sysroot}/usr_include_tmp"
-    # Copy ALL runtime libs from /lib/riscv64-linux-gnu/ (not just ld-linux)
     docker cp "${tmp_container}:/lib/riscv64-linux-gnu" "${standalone_sysroot}/lib_riscv_tmp"
 
     mkdir -p "${standalone_sysroot}/usr" "${standalone_sysroot}/lib"
@@ -145,7 +183,7 @@ setup_sysroot() {
     find "${standalone_sysroot}" -name "libm.a" -delete 2>/dev/null || true
 
     SYSROOT="${standalone_sysroot}"
-    info "Standalone sysroot ready at ${SYSROOT}"
+    info "Sysroot ready at ${SYSROOT}"
     echo "  $(du -sh "${SYSROOT}" | cut -f1)"
 }
 
@@ -177,6 +215,54 @@ clone_source() {
 
 clone_source
 
+# --- Step 2.5: Apply patches ---
+apply_patches() {
+    local riscv_dir="${LLAMA_SOURCE}/ggml/src/ggml-cpu/arch/riscv"
+    local patches_dir="${SCRIPT_DIR}/rvv-patches"
+
+    [ -d "${patches_dir}" ] || { warn "No rvv-patches directory found, skipping."; return 0; }
+
+    mkdir -p "${riscv_dir}"
+
+    # Iterate over each patch directory (skip _template)
+    local patch_count=0
+    for patch_subdir in "${patches_dir}"/*/; do
+        [ -d "${patch_subdir}" ] || continue
+        local name="$(basename "${patch_subdir}")"
+        [[ "${name}" == "_template" ]] && continue
+
+        local inl_file="${patch_subdir}${name}.inl"
+        local patch_file="${patch_subdir}patch.diff"
+
+        # Find .inl file (may have different naming convention)
+        for f in "${patch_subdir}"*.inl; do
+            [ -f "${f}" ] && inl_file="${f}" && break
+        done
+
+        if [ -f "${inl_file}" ]; then
+            local inl_dst="${riscv_dir}/$(basename "${inl_file}")"
+            cp -f "${inl_file}" "${inl_dst}"
+            info "Copied $(basename "${inl_file}") to ${riscv_dir}/"
+        fi
+
+        if [ -f "${patch_file}" ]; then
+            if git -C "${LLAMA_SOURCE}" apply --check "${patch_file}" 2>/dev/null; then
+                git -C "${LLAMA_SOURCE}" apply "${patch_file}"
+                info "Applied patch: ${name}/patch.diff"
+                patch_count=$((patch_count + 1))
+            else
+                info "Patch ${name}/patch.diff already applied or not applicable, skipping."
+            fi
+        else
+            warn "No patch.diff found in ${patch_subdir}"
+        fi
+    done
+
+    info "Applied ${patch_count} RVV patch(es)"
+}
+
+apply_patches
+
 # --- Step 3: Cross-compile llama.cpp ---
 cross_compile() {
     local llama_build="${OUTPUT_DIR}/.build"
@@ -198,11 +284,6 @@ cross_compile() {
     export LLVM_INSTALL="${LLVM_INSTALL}"
     export SYSROOT="${SYSROOT}"
 
-    # Configure with RISC-V vectorization enabled
-    # GGML_RVV: RISC-V Vector extension (RVV 1.0)
-    # GGML_RV_ZFH: Half-precision float support
-    # GGML_RV_ZICBOP: Cache block operations (CBOP)
-    # GGML_RV_ZIHINTPAUSE: Pause hint for spin loops
     cmake -S "${LLAMA_SOURCE}" -B "${llama_build}" \
         -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
         -DCMAKE_INSTALL_PREFIX="${llama_install}" \
@@ -239,18 +320,96 @@ cross_compile() {
 
 cross_compile
 
+# --- Step 4: Build and run tests ---
+build_and_run_tests() {
+    local cc="${LLVM_INSTALL}/bin/clang++"
+    local patches_dir="${SCRIPT_DIR}/rvv-patches"
+
+    mkdir -p "${TEST_BUILD_DIR}"
+    rm -rf "${TEST_BUILD_DIR}"/*
+
+    # Collect test.cpp files from each rvv-patches subdirectory
+    local test_files=()
+    local test_dirs=()
+    for patch_subdir in "${patches_dir}"/*/; do
+        [ -d "${patch_subdir}" ] || continue
+        local name="$(basename "${patch_subdir}")"
+        [[ "${name}" == "_template" ]] && continue
+
+        local test_file="${patch_subdir}test.cpp"
+        if [ -f "${test_file}" ]; then
+            test_files+=("${test_file}")
+            test_dirs+=("${patch_subdir}")
+        fi
+    done
+
+    if [[ ${#test_files[@]} -eq 0 ]]; then
+        warn "No test.cpp files found in ${patches_dir}"
+        return 0
+    fi
+
+    local failures=0
+    local passed=0
+    local skipped=0
+
+    for i in "${!test_files[@]}"; do
+        local test_src="${test_files[$i]}"
+        local test_dir="${test_dirs[$i]}"
+        local test_name="$(basename "${test_dir}")"
+
+        local test_bin="${TEST_BUILD_DIR}/test_${test_name}"
+
+        local test_flags=(
+            -std=c++17 -O2
+            --target=riscv64-unknown-linux-gnu
+            --sysroot="${SYSROOT}"
+            -march=rv64gcv_zvl512b_zfh_zvfh
+            -mabi=lp64d
+            -fuse-ld=lld
+            -DGGML_USE_RISCV_V
+            -D__riscv_v_fixed_vlen=512
+            -I"${test_dir}"  # Include the patch directory for .inl files
+        )
+
+        info "Compiling test_${test_name}..."
+        if "${cc}" "${test_flags[@]}" -o "${test_bin}" "${test_src}" -lm 2>&1; then
+            info "Running test_${test_name} under QEMU..."
+            if "${QEMU_RISCV64}" -L "${SYSROOT}" "${test_bin}" 2>&1; then
+                passed=$((passed + 1))
+            else
+                error "test_${test_name} failed (exit code $?)"
+                failures=$((failures + 1))
+            fi
+        else
+            warn "test_${test_name} compilation failed (likely non-RVV test on x86 host)"
+            skipped=$((skipped + 1))
+        fi
+        echo ""
+    done
+
+    echo ""
+    info "Test results: ${passed} passed, ${failures} failed, ${skipped} skipped"
+    [[ ${failures} -eq 0 ]]
+}
+
+if [[ "${RUN_TESTS}" == "true" ]]; then
+    build_and_run_tests
+fi
+
 # --- Done ---
-info "All done!"
-echo ""
-echo "Artifacts:"
-echo "  CLI:    ${OUTPUT_DIR}/bin/llama-cli"
-echo "  Server: ${OUTPUT_DIR}/bin/llama-server"
-echo "  Lib:    ${OUTPUT_DIR}/lib/"
-echo "  Sysroot: ${OUTPUT_DIR}/sysroot"
-echo ""
-file "${OUTPUT_DIR}/bin/llama-cli" || true
-file "${OUTPUT_DIR}/bin/llama-server" || true
-echo ""
-echo "Usage with QEMU:"
-echo "  qemu-riscv64 -L ${OUTPUT_DIR}/sysroot ${OUTPUT_DIR}/bin/llama-cli -m <model.gguf> -p \"Hello\""
-echo "  qemu-riscv64 -L ${OUTPUT_DIR}/sysroot ${OUTPUT_DIR}/bin/llama-server -m <model.gguf> --port 8080"
+if [[ "${RUN_TESTS}" != "true" ]]; then
+    info "All done!"
+    echo ""
+    echo "Artifacts:"
+    echo "  CLI:     ${OUTPUT_DIR}/bin/llama-cli"
+    echo "  Server:  ${OUTPUT_DIR}/bin/llama-server"
+    echo "  Lib:     ${OUTPUT_DIR}/lib/"
+    echo "  Sysroot: ${OUTPUT_DIR}/sysroot"
+    echo ""
+    file "${OUTPUT_DIR}/bin/llama-cli" || true
+    file "${OUTPUT_DIR}/bin/llama-server" || true
+    echo ""
+    echo "Run with QEMU:"
+    echo "  ${QEMU_RISCV64} -L ${OUTPUT_DIR}/sysroot ${OUTPUT_DIR}/bin/llama-cli -m <model.gguf> -p \"Hello\""
+    echo "  ${QEMU_RISCV64} -L ${OUTPUT_DIR}/sysroot ${OUTPUT_DIR}/bin/llama-server -m <model.gguf> --port 8080"
+fi

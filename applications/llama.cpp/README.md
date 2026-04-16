@@ -26,6 +26,43 @@ This directory contains build scripts for cross-compiling llama.cpp to RISC-V rv
 
 Target architecture: `rv64gcv_zfh_zvfh_zicbop_zihintpause` (lp64d ABI)
 
+## Directory Structure
+
+```
+applications/llama.cpp/
+├── README.md
+├── build.sh                 # Cross-compile orchestrator
+├── models/                  # GGUF model files
+├── output/                  # Build artifacts
+├── vendor/                  # llama.cpp source (git submodule)
+├── qwen                     # Qwen inference wrapper
+├── riscv64-linux-toolchain.cmake
+│
+├── rvv-patches/             # RVV implementations (inl + patch + test)
+│   ├── gemm-q4_K-8x4/       # Q4_K × Q8_K GEMM (4x4 tile)
+│   │   ├── rvv_gemm_q4_K_8x4.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
+│   ├── quantize-q8_0-4x4/   # FP32 → Q8_0 quantize (4x4 interleaved)
+│   │   ├── rvv_quantize_q8_0_4x4.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
+│   └── _template/           # Template for new RVV implementations
+│       ├── rvv_<name>.inl.template
+│       ├── patch.diff.template
+│       ├── test.cpp.template
+│       └── README.md.template
+```
+
+Each RVV implementation follows the **single source of truth** principle:
+- `.inl` file contains the RVV implementation code
+- `patch.diff` applies changes to llama.cpp (includes the .inl file)
+- `test.cpp` validates correctness against scalar reference
+
 ## Prerequisites
 
 - LLVM 22 installation at `third_party/llvm-install/`
@@ -242,6 +279,77 @@ Core inference functions (quantize + GEMV) represent **5.5%** of total execution
 | 32 tokens (current) | 60% | 40% | negligible |
 | 512 tokens | ~25% | **~65%** | ~10% |
 | 1024+ tokens | ~15% | **~80%** | ~5% |
+
+### Q8_0 Model Inference Phase Analysis
+
+Profiling conducted on Qwen2.5-0.5B-Instruct **Q8_0** quantized model (2026-04-15):
+- Model size: 675MB (vs 428MB for Q4_0)
+- Inference: 20 tokens generated via QEMU BBV profiling
+- **Filtered**: Excluded initialization phase (`backend_load`, `numa_init`, `quantize_iq2_s`)
+
+#### Inference Phase Hotspots Distribution
+
+| Category | Function | Library | Execution % |
+|----------|----------|---------|-------------|
+| Batch Management | `llama_batch_allocr::split_equal` | libllama.so | **14.59%** |
+| GEMM (Q4_K) | `ggml_gemm_q4_K_8x4_q8_K` | libggml-cpu.so | **7.07%** |
+| GEMV (MXFP4) | `ggml_gemv_mxfp4_4x4_q8_0` | libggml-cpu.so | **1.11%** |
+| Crypto | (checksum operations) | libcrypto.so | **5.73%** |
+
+#### Library Distribution (Inference Phase)
+
+| Library | Execution % |
+|---------|-------------|
+| libllama.so | **23.32%** |
+| libggml-cpu.so | **16.96%** |
+| libcrypto.so | 13.94% |
+| libggml-base.so | 6.65% |
+
+#### Category Distribution (Inference Phase)
+
+| Category | Execution % |
+|----------|-------------|
+| Batch Management | **20.09%** |
+| GEMV/GEMM (Matrix ops) | **16.22%** |
+| Crypto (checksum) | 13.94% |
+| Other | 15.41% |
+
+#### GEMV/GEMM Function Breakdown
+
+| Function | Purpose | % of Matrix Ops |
+|----------|---------|-----------------|
+| `ggml_gemm_q4_K_8x4_q8_K` | Q4_K weights × Q8_K activation | **52.9%** |
+| `ggml_gemv_mxfp4_4x4_q8_0` | MXFP4 weights × Q8_0 activation | 13.9% |
+| `ggml_gemv_q2_K_16x1_q8_K_generic` | Q2_K weights × Q8_K activation | 10.3% |
+| `ggml_gemm_q4_0_8x8_q8_0_generic` | Q4_0 weights × Q8_0 activation | 9.8% |
+| `ggml_gemm_q4_0_4x8_q8_0` | Q4_0 weights × Q8_0 activation | 5.9% |
+| `ggml_gemv_q8_0_16x1_q8_0_generic` | Q8_0 weights × Q8_0 activation | 4.4% |
+
+#### Key Findings: Q4 vs Q8 Comparison
+
+| Metric | Q4_0 Model | Q8_0 Model |
+|--------|------------|------------|
+| Batch Management % | 77.75% | 20.09% |
+| GEMV/GEMM % | 3.07% | 16.22% |
+| Quantization % | 4.59% | 1.53% |
+| Backend Load % | 1.62% | 14.79% (filtered) |
+
+**Analysis**:
+
+1. **Higher compute ratio in Q8**: GEMV/GEMM accounts for 16.22% vs 3.07% in Q4
+   - Q8 weights are larger, requiring more matrix operations
+   - Batch management overhead is relatively lower
+
+2. **Repacking still dominant**: Even for Q8 model, `ggml_gemm_q4_K_8x4_q8_K` dominates (52.9%)
+   - llama.cpp repacks weights to Q4_K format for efficient computation
+   - This applies to both Q4 and Q8 quantized models
+
+3. **Common activation format**: All GEMV/GEMM functions use Q8 activation (`q8_0` or `q8_K` suffix)
+   - Q4 and Q8 models share the same activation quantization path
+   - Weight format determines which kernel is selected
+
+4. **Crypto overhead**: libcrypto.so accounts for 13.94% (checksum validation)
+   - More prominent in Q8 due to larger model file validation
 
 ## References
 

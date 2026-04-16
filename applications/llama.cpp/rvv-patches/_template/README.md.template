@@ -1,0 +1,37 @@
+# <name>
+
+RVV implementation of `<function_name>` - <brief description>.
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `rvv_<name>.inl` | RVV implementation (single source of truth) |
+| `patch.diff` | Patch to integrate into llama.cpp |
+| `test.cpp` | Correctness test (RVV vs scalar reference) |
+
+## Function Signature
+
+```cpp
+<function_signature>
+```
+
+## Algorithm
+
+1. <Step 1>
+2. <Step 2>
+...
+
+## Gap Analysis
+
+See: `docs/report/llama.cpp/rvv-gap-analysis-<name>-YYYY-MM-DD.md`
+
+## Build & Test
+
+```bash
+# Build llama.cpp with this patch
+./build.sh --force --test
+
+# Run standalone test
+./build.sh --test
+```
