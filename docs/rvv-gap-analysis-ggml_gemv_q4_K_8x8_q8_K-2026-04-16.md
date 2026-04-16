@@ -12,9 +12,15 @@
 
 **BBV数据**: 未提供，收益为理论估算（基于算法复杂度分析）
 
-**关键发现**: RVV缺乏**pairwise横向乘加指令**和**int8点积指令**，这是量化GEMV向量化实现的核心瓶颈。当前RVV实现退化为标量循环。效率差距分析:
-- **vs AVX2向量化**: 约15.5倍 (AVX2归一化~18条指令 vs RVV标量280条)
-- **vs RVV理想向量化**: 约3-8倍 (RVV无扩展向量实现需额外指令 vs 有扩展实现)
+**RVV实现状态**: 已实现（`rvv_gemv_q4_K_8x8_q8_K.inl`），采用**correctness-first策略**：
+- 核心K循环使用标量实现，严格匹配ARM NEON算法正确性
+- 6-bit scales/mins解码使用标量helper函数
+- 最终bias subtraction使用标量计算
+
+**关键发现**: RVV缺乏**pairwise横向乘加指令**和**signed×signed int8点积指令**，导致核心计算退化为标量循环。效率差距分析:
+- **vs ARM NEON DOTPROD向量化**: 约7.8倍 (NEON归一化~36条指令 vs RVV标量核心循环)
+- **vs x86 AVX2向量化**: 约15.5倍 (AVX2归一化~18条指令 vs RVV标量核心循环)
+- **潜在改进**: 若RVV新增`vdot4a.vv` (signed×signed)，核心K循环可向量化，预计减少60%指令
 
 ---
 
@@ -37,30 +43,65 @@
 
 ### 当前实现状态
 
-当前RVV实现(`rvv_gemv_q4_K_8x8_q8_K.inl`)本质上为**标量实现**：
+当前RVV实现(`rvv_gemv_q4_K_8x8_q8_K.inl`)采用**correctness-first策略**，核心计算使用标量实现以严格匹配ARM NEON算法正确性：
 
 ```c
-// 核心K循环 - 当前RVV实现
-for (int k_local = 0; k_local < 4; k_local++) {
-    for (int j = 0; j < ncols_interleaved; j++) {
-        int32_t sumi_lo = 0;
-        int32_t sumi_hi = 0;
-        for (int i = 0; i < blocklen; i++) {  // blocklen=8
-            const int v0 = q4_ptr[b].qs[q4_idx] & 0xF;   // scalar nibble extract
-            const int v1 = q4_ptr[b].qs[q4_idx] >> 4;    // scalar nibble extract
-            sumi_lo += v0 * q8_ptr[b].qs[q8_idx_lo];     // scalar multiply
-            sumi_hi += v1 * q8_ptr[b].qs[q8_idx_hi];     // scalar multiply
+// 核心K循环 - 当前RVV实现（标量核心，匹配ARM NEON正确性）
+for (int cp = 0; cp < col_pairs; cp++) {
+    for (int vec_idx = 0; vec_idx < 4; vec_idx++) {
+        const uint8_t * q4_vec = q4_base + 16 * cp + vec_idx * 64;
+        for (int sum_idx = 0; sum_idx < 4; sum_idx++) {
+            int nibble_base = sum_idx * 4;
+            int q8_half = (sum_idx % 2) * 4;  // ARM NEON广播语义
+            int32_t sum_lo = 0, sum_hi = 0;
+            for (int n = 0; n < 4; n++) {
+                uint8_t nibble_lo = q4_vec[nibble_base + n] & 0x0F;
+                uint8_t nibble_hi = q4_vec[nibble_base + n] >> 4;
+                int8_t q8_val_lo = q8_base[vec_idx * 8 + q8_half + n];
+                int8_t q8_val_hi = q8_base[vec_idx * 8 + 32 + q8_half + n];
+                sum_lo += nibble_lo * q8_val_lo;  // scalar MAC
+                sum_hi += nibble_hi * q8_val_hi;  // scalar MAC
+            }
+            acc_lo[cp][sum_idx] += sum_lo;
+            acc_hi[cp][sum_idx] += sum_hi;
         }
-        acc_f32[j] += (float)(sumi_lo * scales_lo[j] + sumi_hi * scales_hi[j]) * sb_scale[j];
     }
 }
+
+// Pairwise add - 匹配ARM NEON vpaddq_s32语义
+sum_lo[0] = acc_lo[p][0] + acc_lo[p][1];
+sum_lo[1] = acc_lo[p][2] + acc_lo[p][3];
+sum_lo[2] = acc_lo[p+1][0] + acc_lo[p+1][1];
+sum_lo[3] = acc_lo[p+1][2] + acc_lo[p+1][3];
 ```
 
-**指令统计（每K迭代）**:
-- nibble提取: 2条标量运算 × 8元素 × 8列 = 128条
-- 点积累加: 2条乘法 × 8元素 × 8列 = 128条
-- 缩放乘法: 3条浮点运算 × 8列 = 24条
-- **总计: 约280条标量指令/K迭代**
+**实现设计说明**:
+
+该实现选择标量核心循环的原因：
+1. **ARM NEON语义精确匹配**: NEON的`vdotq_s32`和`vpaddq_s32`有特定的广播和pairwise语义，RVV无直接等效指令
+2. **pairwise add关键差异**: ARM NEON `vpaddq_s32`在向量内部相邻元素相加 `[a0+a1, a2+a3, b0+b1, b2+b3]`，而非跨向量 `[a0+b0, a1+b1]`
+3. **int8点积缺失**: RVV的Zvdot4a8i扩展使用`vuint32` packed格式，不支持signed×signed int8直接点积
+
+**指令统计（每subblock，4个K迭代）**:
+- nibble提取: 2条标量 × 4元素 × 4sum_idx × 4vec_idx × 4cp = 128条
+- 点积累加: 2条乘法 × 4元素 × 4sum_idx × 4vec_idx × 4cp = 128条
+- pairwise add: 8条标量加法 (4 sum_lo + 4 sum_hi)
+- scales乘法: 8条 × 2 (lo/hi) = 16条
+- 浮点累加: 8条 × 2组 = 16条
+- **K循环小计: 约290条标量指令/subblock**
+
+**vs ARM NEON DOTPROD**: NEON使用`vdot.s8`一次完成4个int8×int8→int32点积，核心循环约36条归一化指令
+**效率差距**: 约**8倍** (290/36)
+
+### RVV指令使用清单
+
+当前实现使用的RVV intrinsics：
+- **无**（核心计算全部为标量）
+
+原因：RVV缺乏以下关键指令，无法向量化核心计算：
+- `vdot4a.vv` (signed×signed int8点积)
+- `vpairadd.vv` (pairwise横向加法)
+- `vwmaccus.pair.vv` (unsigned×signed pairwise MAC)
 
 ### 寄存器宽度归一化
 
@@ -406,36 +447,37 @@ x86 PSHUFB用于4-bit nibble查找表解压，如将nibble值映射到具体scal
 
 ### 关键差距总结
 
-1. **P0级差距 - Pairwise横向乘加**:
+1. **P0级差距 - signed×signed int8点积**:
+   - ARM VSDOT一次完成4个int8×int8→int32点积
+   - Zvdot4a8i可选扩展使用`vuint32` packed格式，不支持signed×signed
+   - 当前RVV实现核心K循环退化为标量，效率差距:
+     - vs ARM NEON DOTPROD: 约**8倍** (NEON归一化~36条 vs RVV标量~290条)
+   - 建议: 设计新的signed×signed点积指令`vdot4a.vv`，直接使用int8向量输入
+
+2. **P0级差距 - Pairwise横向乘加**:
    - x86 PMADDUBSW和PMADDWD/VPMADDWD提供高效的int8/int16 pairwise MAC
-   - RVV缺失此类指令，导致量化矩阵乘法效率差距:
-     - vs AVX2向量化: 约**15.5倍** (AVX2归一化~18条 vs RVV标量280条)
-     - vs RVV理想向量实现: 约3-8倍额外开销
+   - RVV `vwmaccus`仅有vx形式（scalar×vector），无vv形式和pairwise语义
    - 建议: 新增`vwmaccus.pair.vv`和`vwmacc.pair.vv`扩展
 
-2. **P0级差距 - 整数点积**:
-   - ARM VSDOT一次完成4个int8×int8→int32点积
-   - Zvdot4a8i可选扩展语义不完全匹配(无signed×signed)
-   - 建议: 设计新的signed×signed点积指令并纳入mandatory扩展
-
-3. **P1级差距 - Pairwise缩减**:
-   - ARM VPADD用于高效向量缩减
-   - RVV需vrgather+vadd组合，效率损失约**3倍**
+3. **P1级差距 - Pairwise横向加法**:
+   - ARM NEON `vpaddq_s32`在向量内部相邻元素相加 `[a0+a1, a2+a3, b0+b1, b2+b3]`
+   - 当前RVV实现需4条标量加法完成pairwise add
+   - RVV `vrgather`+`vadd`组合可实现但效率损失约3倍
    - 建议: 新增`vpairadd.vv`扩展
 
 ### 优先级排序
 
 | 优先级 | 扩展指令 | 预估收益 | 实现复杂度 |
 |--------|----------|----------|-----------|
-| P0 | vdot4a.vv (signed×signed) | 最高(约60%指令减少) | 中(需新设计，Zvdot4a8i语义不匹配) |
+| P0 | vdot4a.vv (signed×signed) | 最高(核心K循环向量化，约60%指令减少) | 中(需新设计，区别于Zvdot4a8i) |
 | P0 | vwmaccus.pair.vv | 高(约40%指令减少) | 高(新增signed/unsigned混合pairwise) |
 | P0 | vwmacc.pair.vv | 高(约20%指令减少) | 中(pairwise MAC) |
-| P1 | vpairadd.vv | 中(约66%缩减指令减少) | 低(pairwise add) |
+| P1 | vpairadd.vv | 中(pairwise add向量化) | 低(pairwise add) |
 | P1 | vshuffle.b.imm | 中(约50%shuffle指令减少) | 高(新编码空间) |
 
 ### 实现路径建议
 
-1. **短期**: 设计新的signed×signed int8点积指令(区别于Zvdot4a8i)，作为mandatory扩展
+1. **短期**: 设计新的signed×signed int8点积指令`vdot4a.vv`（直接使用int8向量输入），作为mandatory扩展
 2. **中期**: 新增`vwmaccus.pair.vv`和`vwmacc.pair.vv`扩展指令
 3. **长期**: 新增`vpairadd.vv`和`vshuffle.b.imm`扩展指令
 
@@ -446,6 +488,8 @@ x86 PSHUFB用于4-bit nibble查找表解压，如将nibble值映射到具体scal
 | 轮次 | 发现问题数 | 已修复 | 剩余 |
 |------|-----------|--------|------|
 | R1 | 10 | 10 | 0 |
+| R2 | 1 | 1 | 0 |
+| R3 | 6 | 6 | 0 |
 | R2 | 1 | 1 | 0 |
 
 **R1修复详情**:
@@ -462,6 +506,14 @@ x86 PSHUFB用于4-bit nibble查找表解压，如将nibble值映射到具体scal
 **R2修复详情**:
 - Issue R2-1: NEON归一化指令数算术错误 - 修正为36条(4+4+4+4+8+8+4)，效率差距7.8x
 
-**最终审查结论**: 所有R1和R2问题均已修复，报告通过审查。核心差距分析准确，扩展指令建议合理。
+**R3修复详情** (RVV实现完成后更新):
+- Issue R3-1: 概述中实现状态描述过时 - 更新为"已实现，采用correctness-first策略"
+- Issue R3-2: 标量实现描述与实际代码不符 - 更新为精确匹配ARM NEON语义的标量核心循环
+- Issue R3-3: 指令统计不准确 - 更新为每subblock 290条（含pairwise add）
+- Issue R3-4: RVV指令使用清单缺失 - 新增章节列出当前实现使用的RVV intrinsics（无，核心计算全标量）
+- Issue R3-5: 效率差距数字更新 - vs NEON约8倍（而非原先估算的15.5倍）
+- Issue R3-6: pairwise add语义说明 - 明确ARM NEON `vpaddq_s32`在向量内部相加而非跨向量
 
-最终审查结论: 待R2审查
+**最终审查结论**: 所有R1、R2、R3问题均已修复，报告准确反映当前RVV实现状态。核心差距分析准确：RVV缺乏signed×signed int8点积和pairwise指令，导致核心K循环退化为标量实现。扩展指令建议合理。
+
+最终审查结论: **已通过R3审查**
