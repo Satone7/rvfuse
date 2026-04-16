@@ -177,6 +177,35 @@ clone_source() {
 
 clone_source
 
+# --- Step 2.5: Apply patches ---
+apply_patches() {
+    local riscv_dir="${LLAMA_SOURCE}/ggml/src/ggml-cpu/arch/riscv"
+    local inl_src="${SCRIPT_DIR}/include/rvv_gemm_q4_K_8x4.inl"
+    local inl_dst="${riscv_dir}/rvv_gemm_q4_K_8x4.inl"
+
+    [ -f "${inl_src}" ] || { warn "No .inl found at ${inl_src}, skipping patch application."; return 0; }
+
+    # Copy .inl to vendor tree (single source of truth for production + test)
+    mkdir -p "${riscv_dir}"
+    cp -f "${inl_src}" "${inl_dst}"
+    info "Copied rvv_gemm_q4_K_8x4.inl to ${riscv_dir}/"
+
+    # Apply patch if not already applied
+    local patch_file="${SCRIPT_DIR}/patches/rvv-gemm-q4_K-8x4-q8_K.patch"
+    if [ -f "${patch_file}" ]; then
+        if git -C "${LLAMA_SOURCE}" apply --check "${patch_file}" 2>/dev/null; then
+            git -C "${LLAMA_SOURCE}" apply "${patch_file}"
+            info "Applied patch: rvv-gemm-q4_K-8x4-q8_K.patch"
+        else
+            info "Patch already applied or not applicable, skipping."
+        fi
+    else
+        warn "Patch file not found at ${patch_file}"
+    fi
+}
+
+apply_patches
+
 # --- Step 3: Cross-compile llama.cpp ---
 cross_compile() {
     local llama_build="${OUTPUT_DIR}/.build"
