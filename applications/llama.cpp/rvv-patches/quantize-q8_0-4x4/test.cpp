@@ -124,8 +124,14 @@ static void ggml_quantize_mat_q8_0_4x4_generic(
                 if (vi < -127) vi = -127;
                 if (vi > 127) vi = 127;
 
-                // Store in interleaved format: position j*4 + r
-                y[i].qs[j * 4 + r] = (int8_t)vi;
+                // Store in interleaved format matching RVV vsseg4e32 layout.
+                // vsseg4e32 stores 4 segments with stride=4:
+                //   segment_r elements at int32 positions r, r+4, r+8, ...
+                // Each int32 contains 4 consecutive elements from same row.
+                // For row r, element j: int32_index = r + (j/4)*4, byte = j%4
+                // pos = int32_index * 4 + byte_offset = 4*r + (j/4)*16 + (j%4)
+                int pos = 4 * r + (j / 4) * 16 + (j % 4);
+                y[i].qs[pos] = (int8_t)vi;
             }
         }
     }
@@ -201,8 +207,10 @@ static int run_test(int n_blocks, const char * label) {
 
             // Compare quantized values
             for (int j = 0; j < QK8_0; j++) {
-                int q_gen = (int)out_generic[b].qs[j * 4 + r];
-                int q_rvv = (int)out_rvv[b].qs[j * 4 + r];
+                // Use same indexing formula as vsseg4e32 layout
+                int pos = 4 * r + (j / 4) * 16 + (j % 4);
+                int q_gen = (int)out_generic[b].qs[pos];
+                int q_rvv = (int)out_rvv[b].qs[pos];
                 int q_diff = abs(q_gen - q_rvv);
                 if (q_diff > max_q_diff) max_q_diff = q_diff;
 
