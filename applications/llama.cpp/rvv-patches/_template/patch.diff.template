@@ -1,0 +1,13 @@
+diff --git a/ggml/src/ggml-cpu/arch/riscv/repack.cpp b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+index <base-hash>..<result-hash> 100644
+--- a/ggml/src/ggml-cpu/arch/riscv/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+@@ -<line-number>,6 +<line-number>,10 @@
+
+ #define UNUSED GGML_UNUSED
+
++// RVV implementation: single source of truth is rvv_<name>.inl
++// (copied to this directory by build.sh before patch is applied)
++#include "rvv_<name>.inl"
++
+ // <context: surrounding function or code block where this patch applies>
