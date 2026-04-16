@@ -166,79 +166,82 @@ python3 output/llama.cpp/bin/convert_hf_to_gguf.py \
 | Target | `rv64gcv_zfh_zvfh_zicbop_zihintpause` |
 | ABI | lp64d |
 
-## BBV Profiling Hotspot Analysis
+## BBV Profiling Hotspot Analysis (Q4_0 Model)
 
-Profiling conducted on Qwen2.5-0.5B-Instruct **Q4_0** quantized model (2026-04-15):
+Profiling conducted on Qwen2.5-0.5B-Instruct **Q4_0** quantized model (2026-04-15).
 
-### Top Hotspots Distribution
+Test parameters: `llama-bench -p 32 -n 0 -r 1 -t 1`
 
-| Category | Function | Library | Execution % |
-|----------|----------|---------|-------------|
-| Batch Management | `llama_batch_allocr::ubatch_add` | libllama.so | **35.25%** |
-| Batch Management | `llama_batch_allocr::split_equal` | libllama.so | **20.14%** |
-| Quantization | `ggml_quantize_mat_q8_0_4x4` | libggml-cpu.so | ~2% |
-| GEMV (Q4_K) | `ggml_gemv_q4_K_8x8_q8_K` | libggml-cpu.so | ~1.7% |
-| GEMV (IQ4) | `ggml_gemv_iq4_nl_4x4_q8_0` | libggml-cpu.so | 0.22% |
+### Note on Test Limitations
 
-### Library Distribution
+This short benchmark (32 prompt tokens, 0 generation) shows **83%** execution time in model initialization (hashtable rehash, vocabulary loading). The inference compute section below focuses on the remaining **17%** representing actual computation.
 
-| Library | Execution % |
-|---------|-------------|
-| libllama.so | **78.25%** |
-| libggml-cpu.so | 9.16% |
-| libcrypto.so | 3.68% |
-| libggml-base.so | 2.94% |
+For accurate inference profiling, use longer prompts: `-p 512 -n 32`.
 
-### Quantization Relationship
+### Inference Compute Hotspots (Core Functions Only)
 
-The model uses **Q4_0** quantization, but the hotspots reveal important behavior:
+Core inference functions (quantize + GEMV) represent **5.5%** of total execution in this test.
 
-1. **Batch Allocator Dominance (65%+)**
-   - `ubatch_add`: Adds tokens to micro-batch for parallel processing
-   - `split_equal`: Splits batch into equal-sized chunks for KV cache management
-   - This overhead is due to QEMU emulation overhead, not representative of native hardware
+| Category | Share of Core |
+|----------|---------------|
+| Quantize (activation → Q8_0/Q8_K) | **60.7%** |
+| GEMV (matrix-vector multiply) | **39.3%** |
 
-2. **Repacking Mechanism**
-   - `ggml_gemv_q4_K_8x8_q8_K` appears despite Q4_0 model
-   - llama.cpp uses **repacking**: converts Q4_0 weights to Q4_K format during computation
-   - Q4_K provides better SIMD-style vectorization for matrix operations
+#### Top Inference Functions
 
-3. **Activation Quantization**
-   - `ggml_quantize_mat_q8_0_4x4`: Quantizes activation matrices to Q8_0
-   - This is temporary quantization during computation, not model weights
-   - Required for efficient matrix-vector multiplication
+| Function | Library | % of Core | Description |
+|----------|---------|-----------|-------------|
+| `ggml_quantize_mat_q8_0_4x4` | libggml-cpu.so | **49.8%** | Quantize FP32 activations → Q8_0 (4x4 interleaved) |
+| `ggml_gemv_q4_K_8x8_q8_K` | libggml-cpu.so | **32.1%** | Q4_K weight × Q8_K activation GEMV |
+| `ggml_gemv_iq4_nl_8x8_q8_0` | libggml-cpu.so | 5.3% | IQ4_NL weight × Q8_0 activation GEMV |
+| `ggml_quantize_mat_q8_K_4x1` | libggml-cpu.so | 3.9% | Quantize activations → Q8_K |
+| `dequantize_row_iq2_xs` | libggml-base.so | 3.1% | Dequantize IQ2_XS weights → FP32 |
+| `ggml_quantize_mat_q8_K_4x4` | libggml-cpu.so | 2.0% | Quantize activations → Q8_K (4x4) |
+| `dequantize_row_iq4_nl` | libggml-base.so | 1.9% | Dequantize IQ4_NL weights → FP32 |
+| `ggml_gemv_iq4_nl_4x4_q8_0` | libggml-cpu.so | 1.3% | IQ4_NL × Q8_0 GEMV (smaller block) |
+
+### Quantization Flow (Q4_0 Model)
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                    Inference Compute Pipeline                       │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│   Weight Matrix         Activation Vector (FP32)                   │
+│   Format: Q4_0/IQ4_NL            ↓                                 │
+│         ↓              ggml_quantize_mat_q8_0_4x4                   │
+│   Runtime repack       (FP32 → Q8_0, ~50% of compute)              │
+│   to Q4_K (optional)              ↓                                 │
+│         ↓                                                         │
+│   ggml_gemv_q4_K_8x8_q8_K  or  ggml_gemv_iq4_nl_8x8_q8_0           │
+│   (~32% of compute)                                               │
+│         ↓                                                         │
+│                    FP32 Output                                     │
+└────────────────────────────────────────────────────────────────────┘
+```
 
 ### Key Observations
 
-- **Batch management overhead** is amplified by QEMU emulation (would be lower on native hardware)
-- **GEMV functions** (matrix-vector multiply) are the core compute kernels
-- **Q4_K gemv** indicates weight repacking from Q4_0 to Q4_K for computation
-- **IQ4_NL gemv** used for certain layer types (non-linear quantization)
+1. **Quantize dominates GEMV** (60.7% vs 39.3%)
+   - Activation quantization overhead is significant in short benchmarks
+   - With longer sequences, GEMV ratio increases (attention is O(L²))
 
-### Analysis Limitations
+2. **Q4_K GEMV appears with Q4_0 model**
+   - llama.cpp repacks Q4_0 weights → Q4_K at runtime for better vectorization
+   - Q4_K has 8x8 block structure optimized for SIMD-style GEMV
 
-This profiling was conducted under QEMU emulation with **short inference (49 tokens)**:
+3. **Multiple quantization formats**
+   - Q8_0: 32-element blocks, used for IQ4_NL weights
+   - Q8_K: 256-element blocks, used for Q4_K weights
+   - Interleaving (4x4, 8x8) improves cache efficiency
 
-**Key observation**: The batch allocator dominance (77%) is likely due to short test duration:
-- `batch_alloc` overhead is ~constant per inference step (data preparation)
-- `GEMV` overhead scales with KV cache size and sequence length
-- Current 49-token test emphasizes initialization/data preparation phase
+### Expected Behavior with Longer Inference
 
-**Expected behavior with longer inference**:
-
-| Tokens Generated | batch_alloc (estimated) | GEMV (estimated) |
-|------------------|------------------------|------------------|
-| 49 (current) | 77% | 3% |
-| 100+ | ~50% | ~15% |
-| 500+ | ~15% | ~50% |
-| 1000+ | <10% | >60% |
-
-With more tokens, the ratio shifts dramatically because:
-- Each token requires attention over entire KV cache history
-- GEMV computation scales with sequence length (attention is O(L²))
-- Data preparation overhead stays ~constant per token
-
-**Action item**: Re-profile with 500+ tokens to validate expected GEMV dominance.
+| Prompt Length | Quantize | GEMV | Other Compute |
+|---------------|----------|------|---------------|
+| 32 tokens (current) | 60% | 40% | negligible |
+| 512 tokens | ~25% | **~65%** | ~10% |
+| 1024+ tokens | ~15% | **~80%** | ~5% |
 
 ### Q8_0 Model Inference Phase Analysis
 

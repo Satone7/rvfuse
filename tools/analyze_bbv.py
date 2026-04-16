@@ -252,7 +252,16 @@ def _collect_so_files(sysroot):
     sysroot_path = Path(sysroot)
     if not sysroot_path.is_dir():
         return []
-    all_so = sorted(sysroot_path.rglob("*.so*"), key=lambda p: p.stat().st_size, reverse=True)
+    # Collect .so files, filtering out broken symlinks first
+    so_candidates = list(sysroot_path.rglob("*.so*"))
+    valid_so = []
+    for sf in so_candidates:
+        try:
+            if sf.exists() and sf.is_file():
+                valid_so.append(sf)
+        except OSError:
+            continue
+    all_so = sorted(valid_so, key=lambda p: p.stat().st_size, reverse=True)
     seen_inodes = set()
     unique = []
     for sf in all_so:
@@ -495,8 +504,9 @@ def _resolve_so_addresses_strict(blocks, so_files):
                 base = (raw_base - page_adj) & ~0xFFF
                 if base <= 0:
                     continue
-                # Validate base is in reasonable region (0x7f*)
-                if (base >> 40) != 0x7f:
+                # Validate base is in reasonable high memory region (user space)
+                # Addresses typically in 0x7f*, 0x79*, 0x7a* ranges depending on ASLR
+                if (base >> 32) < 0x7f:
                     continue
                 # Count how many addresses match this base and total weight
                 matches = [(a, c) for a, c in remaining
