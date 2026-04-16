@@ -45,6 +45,12 @@ applications/llama.cpp/
 │   │   ├── test.cpp
 │   │   └── README.md
 │   │
+│   ├── gemv-q4_K-8x8-q8_K/  # Q4_K × Q8_K GEMV (8x8 tile)
+│   │   ├── rvv_gemv_q4_K_8x8_q8_K.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
 │   ├── quantize-q8_0-4x4/   # FP32 → Q8_0 quantize (4x4 interleaved)
 │   │   ├── rvv_quantize_q8_0_4x4.inl
 │   │   ├── patch.diff
@@ -198,10 +204,14 @@ python3 output/llama.cpp/bin/convert_hf_to_gguf.py \
 
 | Component | Version |
 |-----------|---------|
-| llama.cpp | `b8783` (2026-04-14 release) |
+| llama.cpp | **`b8783`** ( pinned, commit `e21cdc11`) |
 | LLVM | 22.1.3 |
 | Target | `rv64gcv_zfh_zvfh_zicbop_zihintpause` |
 | ABI | lp64d |
+
+> **Do not upgrade `vendor/llama.cpp`** without verifying that the RVV GEMV implementations
+> in `ggml/src/ggml-cpu/arch/riscv/repack.cpp` still match the expected function signatures.
+> The `ggml_gemv_q4_K_8x8_q8_K` analysis and patches in this branch are based on `b8783`.
 
 ## BBV Profiling Hotspot Analysis (Q4_0 Model)
 
