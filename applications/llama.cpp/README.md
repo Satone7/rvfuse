@@ -39,7 +39,7 @@ applications/llama.cpp/
 ├── riscv64-linux-toolchain.cmake
 │
 ├── rvv-patches/             # RVV implementations (inl + patch + test)
-│   ├── gemm-q4_K-8x4/       # Q4_K × Q8_K GEMM (4x4 tile)
+│   ├── gemm-q4_K-8x4-q8_K/   # Q4_K × Q8_K GEMM (4x4 tile)
 │   │   ├── rvv_gemm_q4_K_8x4.inl
 │   │   ├── patch.diff
 │   │   ├── test.cpp
