@@ -23,17 +23,19 @@ resources without duplicating them. This skill creates symlinks to:
 
 ## Resource Categories
 
-### 1. Always Shared (Read-only)
+### 1. Always Shared (Read-only, Symlinked)
 
-These resources are large and should always be symlinked:
+These resources are large and should always be symlinked to the main repo:
 
 | Resource | Size | Main Repo Path | Symlink Target |
 |----------|------|---------------|----------------|
-| QEMU build | ~250MB | `third_party/qemu/build/` | Same path |
+| QEMU source | ~431MB | `third_party/qemu/` | Main repo path |
+| LLVM source | ~3.6GB | `third_party/llvm-project/` | Main repo path |
+| QEMU build | ~250MB | `third_party/qemu/build/` | Included in QEMU source symlink |
 | LLVM install | ~1.5GB | `third_party/llvm-install/` | Same path |
 | BBV plugin | ~22KB | `tools/bbv/libbbv.so` | Same path |
 | Local LLVM | ~5KB | `tools/local-llvm/` | Same path |
-| RVV intrinsic doc | Reference | `third_party/riscv-rvv-intrinsic-doc/` | Git submodule |
+| RVV intrinsic doc | ~141MB | `third_party/riscv-rvv-intrinsic-doc/` | Main repo path |
 
 ### 2. Flexibly Shared
 
@@ -71,53 +73,48 @@ MAIN_REPO=$(dirname "$WORKTREE_GIT")
 If using Claude's EnterWorktree, the main repo is the original working directory
 before the worktree was created.
 
-### Step 2: Initialize Submodules
+### Step 2: Create Symlinks for Submodules and Read-only Resources
 
-Git submodules are NOT automatically initialized in worktrees. Run this in the worktree:
-
-```bash
-cd <worktree-path>
-git submodule update --init
-```
-
-This is fast because git worktrees share the `.git` objects — no re-download needed.
-
-### Step 3: Create Symlinks for Read-only Resources
-
-Create symlinks pointing to the main repo's compiled resources:
+Git submodules are NOT automatically initialized in worktrees. Instead of running
+`git submodule update --init` (which would check out ~4GB of submodule files), create
+symlinks to the main repo's submodule directories — this is instant and uses zero extra
+disk space. Since submodules are treated as read-only in worktrees, symlinks are the
+correct approach.
 
 ```bash
 # Define paths
 MAIN_REPO=/path/to/main/rvfuse  # Replace with actual path
 WORKTREE=$(pwd)
 
-# QEMU build (if main repo has it)
-if [ -d "$MAIN_REPO/third_party/qemu/build" ]; then
-    mkdir -p "$WORKTREE/third_party/qemu"
-    ln -s "$MAIN_REPO/third_party/qemu/build" "$WORKTREE/third_party/qEMU/build"
-fi
+# Submodule source directories (symlink entire directory)
+for sub in qemu llvm-project riscv-rvv-intrinsic-doc; do
+    if [ -d "$MAIN_REPO/third_party/$sub" ]; then
+        mkdir -p "$WORKTREE/third_party"
+        ln -sfn "$MAIN_REPO/third_party/$sub" "$WORKTREE/third_party/$sub"
+    fi
+done
 
 # LLVM install (if main repo has it)
 if [ -d "$MAIN_REPO/third_party/llvm-install" ]; then
-    ln -s "$MAIN_REPO/third_party/llvm-install" "$WORKTREE/third_party/llvm-install"
+    ln -sfn "$MAIN_REPO/third_party/llvm-install" "$WORKTREE/third_party/llvm-install"
 fi
 
 # BBV plugin (always symlink)
 if [ -f "$MAIN_REPO/tools/bbv/libbbv.so" ]; then
     mkdir -p "$WORKTREE/tools/bbv"
-    ln -s "$MAIN_REPO/tools/bbv/libbbv.so" "$WORKTREE/tools/bbv/libbbv.so"
+    ln -sfn "$MAIN_REPO/tools/bbv/libbbv.so" "$WORKTREE/tools/bbv/libbbv.so"
 fi
 
 # Local LLVM tools (always symlink)
 if [ -d "$MAIN_REPO/tools/local-llvm" ]; then
-    ln -s "$MAIN_REPO/tools/local-llvm" "$WORKTREE/tools/local-llvm"
+    ln -sfn "$MAIN_REPO/tools/local-llvm" "$WORKTREE/tools/local-llvm"
 fi
 ```
 
-**Note**: Some symlinks may already exist if the worktree was created with files
-already in place. Check before creating: `ls -la third_party/qemu/build 2>/dev/null`
+**Note**: Use `ln -sfn` (force + no-dereference) to safely replace existing symlinks
+or directories. Check existing symlinks: `ls -la third_party/qemu 2>/dev/null`
 
-### Step 4: Sysroot Setup (Choose Option)
+### Step 3: Sysroot Setup (Choose Option)
 
 #### Option A: Shared Sysroot (Recommended for most work)
 
@@ -147,7 +144,7 @@ mkdir -p "$WORKTREE/output/sysroot"
 # Or copy from Docker image if needed
 ```
 
-### Step 5: Model/Test Data (Optional)
+### Step 4: Model/Test Data (Optional)
 
 If working on YOLO or similar inference workloads:
 
@@ -158,7 +155,7 @@ ln -s "$MAIN_REPO/output/test.jpg" "$WORKTREE/output/test.jpg"
 ln -s "$MAIN_REPO/output/yolo11n.onnx" "$WORKTREE/output/yolo11n.onnx"
 ```
 
-### Step 6: Verify Setup
+### Step 5: Verify Setup
 
 Check that symlinks are working:
 
@@ -192,25 +189,27 @@ WORKTREE=$(pwd)
 echo "Main repo: $MAIN_REPO"
 echo "Worktree: $WORKTREE"
 
-# Initialize submodules
-git submodule update --init
+# Symlink submodule source directories (instant, zero disk overhead)
+mkdir -p third_party
+for sub in qemu llvm-project riscv-rvv-intrinsic-doc; do
+    [ -d "$MAIN_REPO/third_party/$sub" ] && ln -sfn "$MAIN_REPO/third_party/$sub" third_party/$sub
+done
 
-# Create symlinks
-mkdir -p third_party/qemu output tools/bbv
+# Symlink compiled tools and resources
+mkdir -p output tools/bbv
 
-[ -d "$MAIN_REPO/third_party/qemu/build" ] && ln -sf "$MAIN_REPO/third_party/qEMU/build" third_party/qemu/build
-[ -d "$MAIN_REPO/third_party/llvm-install" ] && ln -sf "$MAIN_REPO/third_party/llvm-install" third_party/llvm-install
-[ -f "$MAIN_REPO/tools/bbv/libbbv.so" ] && ln -sf "$MAIN_REPO/tools/bbv/libbbv.so" tools/bbv/libbbv.so
-[ -d "$MAIN_REPO/tools/local-llvm" ] && ln -sf "$MAIN_REPO/tools/local-llvm" tools/local-llvm
+[ -d "$MAIN_REPO/third_party/llvm-install" ] && ln -sfn "$MAIN_REPO/third_party/llvm-install" third_party/llvm-install
+[ -f "$MAIN_REPO/tools/bbv/libbbv.so" ] && ln -sfn "$MAIN_REPO/tools/bbv/libbbv.so" tools/bbv/libbbv.so
+[ -d "$MAIN_REPO/tools/local-llvm" ] && ln -sfn "$MAIN_REPO/tools/local-llvm" tools/local-llvm
 
-# Sysroot (ask user or use default)
+# Sysroot (shared by default)
 if [ -d "$MAIN_REPO/output/sysroot-new" ]; then
-    ln -sf "$MAIN_REPO/output/sysroot-new" output/sysroot
+    ln -sfn "$MAIN_REPO/output/sysroot-new" output/sysroot
 fi
 
-# Model files
-[ -f "$MAIN_REPO/output/yolo11n.ort" ] && ln -sf "$MAIN_REPO/output/yolo11n.ort" output/
-[ -f "$MAIN_REPO/output/test.jpg" ] && ln -sf "$MAIN_REPO/output/test.jpg" output/
+# Model files (read-only)
+[ -f "$MAIN_REPO/output/yolo11n.ort" ] && ln -sfn "$MAIN_REPO/output/yolo11n.ort" output/
+[ -f "$MAIN_REPO/output/test.jpg" ] && ln -sfn "$MAIN_REPO/output/test.jpg" output/
 
 echo "Worktree setup complete!"
 ```
@@ -219,20 +218,22 @@ echo "Worktree setup complete!"
 
 ### Git Worktree Behavior
 
-- Worktrees share `.git` objects — `git submodule update --init` is fast
+- Worktrees share `.git` objects — submodules are symlinked, not re-checked-out
 - Each worktree has its own working directory and can checkout different branches
 - Deleting a worktree (`git worktree remove`) does NOT affect the main repo
 
 ### Symlink Safety
 
 - Symlinks to read-only resources are safe — no risk of accidental modification
+- Submodule directories are symlinked as-is (including their build artifacts)
 - Never symlink directories that will be written to (like `output/dfg/`)
 - If a symlink target doesn't exist, the symlink will be a dangling link
 
 ### When to NOT Use Symlinks
 
+- If you need to modify submodule source code in this worktree (changes would affect
+  all worktrees sharing the symlink)
 - If the main repo's sysroot is incomplete or broken for your use case
-- If you need to modify files that would affect other worktrees
 - If the main repo is on a different filesystem (symlinks may not work)
 
 ## Cleanup
