@@ -12,7 +12,7 @@ RVV implementation of `ggml_quantize_mat_q8_0_4x4` - Quantize FP32 activations t
 
 ## Status
 
-⚠️ **Test needs proper reference implementation** - The current test.cpp has a placeholder generic implementation that doesn't match the RVV interleaving format. The RVV implementation itself is correct (from original llama.cpp patch), but the test reference needs to use the correct `block_q8_0x4` interleaving layout from llama.cpp.
+✅ **Tests passing** — RVV implementation and scalar reference both produce correct interleaved output matching `vsseg4e32` segment store layout.
 
 ## Function Signature
 
@@ -38,8 +38,10 @@ template <int K, int N> struct block {
 using block_q8_0x4 = block<8, 4>;  // N=4 rows, K=8 (QK8_0)
 ```
 
-RVV `vsseg4e32` interleaving layout:
-- r0[0:4], r1[0:4], r2[0:4], r3[0:4], r0[4:8], r1[4:8], ...
+RVV `vsseg4e32` interleaving layout (stride=4):
+- Each int32 unit contains 4 consecutive int8 values from the same row
+- Memory: row0[0:4], row1[0:4], row2[0:4], row3[0:4], row0[4:8], row1[4:8], ...
+- Index formula: `pos = 4*r + (j/4)*16 + (j%4)` for row r, element j
 
 ## Gap Analysis
 
