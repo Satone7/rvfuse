@@ -157,7 +157,7 @@ static void ggml_gemm_q4_K_8x4_q8_K_scalar(
 // ---------------------------------------------------------------------------
 // RVV vectorized implementation — single source of truth
 // ---------------------------------------------------------------------------
-#include "../include/rvv_gemm_q4_K_8x4.inl"
+#include "rvv_gemm_q4_K_8x4.inl"
 
 // ---------------------------------------------------------------------------
 // Pseudo-random data generator (LCG, deterministic)

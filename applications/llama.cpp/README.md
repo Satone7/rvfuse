@@ -26,6 +26,43 @@ This directory contains build scripts for cross-compiling llama.cpp to RISC-V rv
 
 Target architecture: `rv64gcv_zfh_zvfh_zicbop_zihintpause` (lp64d ABI)
 
+## Directory Structure
+
+```
+applications/llama.cpp/
+├── README.md
+├── build.sh                 # Cross-compile orchestrator
+├── models/                  # GGUF model files
+├── output/                  # Build artifacts
+├── vendor/                  # llama.cpp source (git submodule)
+├── qwen                     # Qwen inference wrapper
+├── riscv64-linux-toolchain.cmake
+│
+├── rvv-patches/             # RVV implementations (inl + patch + test)
+│   ├── gemm-q4_K-8x4/       # Q4_K × Q8_K GEMM (4x4 tile)
+│   │   ├── rvv_gemm_q4_K_8x4.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
+│   ├── quantize-q8_0-4x4/   # FP32 → Q8_0 quantize (4x4 interleaved)
+│   │   ├── rvv_quantize_q8_0_4x4.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
+│   └── _template/           # Template for new RVV implementations
+│       ├── rvv_<name>.inl.template
+│       ├── patch.diff.template
+│       ├── test.cpp.template
+│       └── README.md.template
+```
+
+Each RVV implementation follows the **single source of truth** principle:
+- `.inl` file contains the RVV implementation code
+- `patch.diff` applies changes to llama.cpp (includes the .inl file)
+- `test.cpp` validates correctness against scalar reference
+
 ## Prerequisites
 
 - LLVM 22 installation at `third_party/llvm-install/`

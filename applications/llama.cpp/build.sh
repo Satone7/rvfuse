@@ -23,7 +23,6 @@ LLVM_INSTALL="${PROJECT_ROOT}/third_party/llvm-install"
 LLAMA_SOURCE="${VENDOR_DIR}/llama.cpp"
 TOOLCHAIN_FILE="${SCRIPT_DIR}/riscv64-linux-toolchain.cmake"
 QEMU_RISCV64="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
-TEST_DIR="${SCRIPT_DIR}/tests"
 TEST_BUILD_DIR="${OUTPUT_DIR}/.test-build"
 
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp.git"
@@ -219,28 +218,47 @@ clone_source
 # --- Step 2.5: Apply patches ---
 apply_patches() {
     local riscv_dir="${LLAMA_SOURCE}/ggml/src/ggml-cpu/arch/riscv"
-    local inl_src="${SCRIPT_DIR}/include/rvv_gemm_q4_K_8x4.inl"
-    local inl_dst="${riscv_dir}/rvv_gemm_q4_K_8x4.inl"
+    local patches_dir="${SCRIPT_DIR}/rvv-patches"
 
-    [ -f "${inl_src}" ] || { warn "No .inl found at ${inl_src}, skipping patch application."; return 0; }
+    [ -d "${patches_dir}" ] || { warn "No rvv-patches directory found, skipping."; return 0; }
 
-    # Copy .inl to vendor tree (single source of truth for production + test)
     mkdir -p "${riscv_dir}"
-    cp -f "${inl_src}" "${inl_dst}"
-    info "Copied rvv_gemm_q4_K_8x4.inl to ${riscv_dir}/"
 
-    # Apply patch if not already applied
-    local patch_file="${SCRIPT_DIR}/patches/rvv-gemm-q4_K-8x4-q8_K.patch"
-    if [ -f "${patch_file}" ]; then
-        if git -C "${LLAMA_SOURCE}" apply --check "${patch_file}" 2>/dev/null; then
-            git -C "${LLAMA_SOURCE}" apply "${patch_file}"
-            info "Applied patch: rvv-gemm-q4_K-8x4-q8_K.patch"
-        else
-            info "Patch already applied or not applicable, skipping."
+    # Iterate over each patch directory (skip _template)
+    local patch_count=0
+    for patch_subdir in "${patches_dir}"/*/; do
+        [ -d "${patch_subdir}" ] || continue
+        local name="$(basename "${patch_subdir}")"
+        [[ "${name}" == "_template" ]] && continue
+
+        local inl_file="${patch_subdir}${name}.inl"
+        local patch_file="${patch_subdir}patch.diff"
+
+        # Find .inl file (may have different naming convention)
+        for f in "${patch_subdir}"*.inl; do
+            [ -f "${f}" ] && inl_file="${f}" && break
+        done
+
+        if [ -f "${inl_file}" ]; then
+            local inl_dst="${riscv_dir}/$(basename "${inl_file}")"
+            cp -f "${inl_file}" "${inl_dst}"
+            info "Copied $(basename "${inl_file}") to ${riscv_dir}/"
         fi
-    else
-        warn "Patch file not found at ${patch_file}"
-    fi
+
+        if [ -f "${patch_file}" ]; then
+            if git -C "${LLAMA_SOURCE}" apply --check "${patch_file}" 2>/dev/null; then
+                git -C "${LLAMA_SOURCE}" apply "${patch_file}"
+                info "Applied patch: ${name}/patch.diff"
+                patch_count=$((patch_count + 1))
+            else
+                info "Patch ${name}/patch.diff already applied or not applicable, skipping."
+            fi
+        else
+            warn "No patch.diff found in ${patch_subdir}"
+        fi
+    done
+
+    info "Applied ${patch_count} RVV patch(es)"
 }
 
 apply_patches
@@ -305,28 +323,28 @@ cross_compile
 # --- Step 4: Build and run tests ---
 build_and_run_tests() {
     local cc="${LLVM_INSTALL}/bin/clang++"
-    local test_common_flags=(
-        -std=c++17 -O2
-        --target=riscv64-unknown-linux-gnu
-        --sysroot="${SYSROOT}"
-        -march=rv64gcv_zvl512b_zfh_zvfh
-        -mabi=lp64d
-        -fuse-ld=lld
-        -DGGML_USE_RISCV_V
-        -D__riscv_v_fixed_vlen=512
-        -I"${SCRIPT_DIR}/include"
-    )
+    local patches_dir="${SCRIPT_DIR}/rvv-patches"
 
     mkdir -p "${TEST_BUILD_DIR}"
     rm -rf "${TEST_BUILD_DIR}"/*
 
+    # Collect test.cpp files from each rvv-patches subdirectory
     local test_files=()
-    while IFS= read -r -d '' f; do
-        test_files+=("$f")
-    done < <(find "${TEST_DIR}" -name 'test_*.cpp' -print0 | sort -z)
+    local test_dirs=()
+    for patch_subdir in "${patches_dir}"/*/; do
+        [ -d "${patch_subdir}" ] || continue
+        local name="$(basename "${patch_subdir}")"
+        [[ "${name}" == "_template" ]] && continue
+
+        local test_file="${patch_subdir}test.cpp"
+        if [ -f "${test_file}" ]; then
+            test_files+=("${test_file}")
+            test_dirs+=("${patch_subdir}")
+        fi
+    done
 
     if [[ ${#test_files[@]} -eq 0 ]]; then
-        warn "No test files found in ${TEST_DIR}"
+        warn "No test.cpp files found in ${patches_dir}"
         return 0
     fi
 
@@ -334,21 +352,36 @@ build_and_run_tests() {
     local passed=0
     local skipped=0
 
-    for test_src in "${test_files[@]}"; do
-        local test_name="$(basename "${test_src}" .cpp)"
-        local test_bin="${TEST_BUILD_DIR}/${test_name}"
+    for i in "${!test_files[@]}"; do
+        local test_src="${test_files[$i]}"
+        local test_dir="${test_dirs[$i]}"
+        local test_name="$(basename "${test_dir}")"
 
-        info "Compiling ${test_name}..."
-        if "${cc}" "${test_common_flags[@]}" -o "${test_bin}" "${test_src}" -lm 2>&1; then
-            info "Running ${test_name} under QEMU..."
+        local test_bin="${TEST_BUILD_DIR}/test_${test_name}"
+
+        local test_flags=(
+            -std=c++17 -O2
+            --target=riscv64-unknown-linux-gnu
+            --sysroot="${SYSROOT}"
+            -march=rv64gcv_zvl512b_zfh_zvfh
+            -mabi=lp64d
+            -fuse-ld=lld
+            -DGGML_USE_RISCV_V
+            -D__riscv_v_fixed_vlen=512
+            -I"${test_dir}"  # Include the patch directory for .inl files
+        )
+
+        info "Compiling test_${test_name}..."
+        if "${cc}" "${test_flags[@]}" -o "${test_bin}" "${test_src}" -lm 2>&1; then
+            info "Running test_${test_name} under QEMU..."
             if "${QEMU_RISCV64}" -L "${SYSROOT}" "${test_bin}" 2>&1; then
                 passed=$((passed + 1))
             else
-                error "${test_name} failed (exit code $?)"
+                error "test_${test_name} failed (exit code $?)"
                 failures=$((failures + 1))
             fi
         else
-            warn "${test_name} compilation failed (likely non-RVV test on x86 host)"
+            warn "test_${test_name} compilation failed (likely non-RVV test on x86 host)"
             skipped=$((skipped + 1))
         fi
         echo ""
