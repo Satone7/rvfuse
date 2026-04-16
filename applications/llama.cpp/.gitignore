@@ -1,0 +1,20 @@
+# Large model files
+models/*.gguf
+models/*.ort
+models/*.onnx
+models/*.jpg
+models/*.png
+
+# llama.cpp vendor source (too large)
+applications/rv64gcv-llama.cpp/vendor/
+
+# ONNX Runtime cross-compile output
+output/llama.cpp/
+output/cross-ort/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.so.*
+.build/

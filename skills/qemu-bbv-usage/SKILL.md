@@ -173,19 +173,160 @@ The script:
 4. Runs the demo with BBV profiling
 5. Validates output file generation
 
-## Downstream Pipeline
+## BBV Output Analysis
 
-After BBV profiling, use RVFuse analysis tools:
+After BBV profiling, analyze the output with `tools/analyze_bbv.py`:
 
 ```bash
 # Generate hotspot report
-python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference --sysroot output/sysroot
+python3 tools/analyze_bbv.py \
+  --bbv output/yolo.bbv.0.bb \
+  --elf output/yolo_inference \
+  --sysroot output/sysroot \
+  --top 20 \
+  --json-output output/hotspot.json \
+  -o output/hotspot-report.txt
+```
 
-# Generate DFG from hot basic blocks
-./tools/profile_to_dfg.sh --bbv output/yolo.bbv.0.bb --elf output/yolo_inference --sysroot output/sysroot --top 50 --output-dir output/dfg
+This resolves basic block addresses to source locations (function names) using addr2line, producing a ranked hotspot report. See **Hotspot Analysis Best Practices** below for correct usage.
 
-# Or generate DFG directly from .disas file
-python -m tools.dfg --disas output/yolo.bbv.disas --isa I,F,M --top 20
+## Hotspot Analysis Best Practices
+
+### Correct Sysroot Path
+
+**Critical**: The sysroot path must contain all shared libraries used by the profiled binary. Using an incorrect sysroot leads to misidentification of hotspots.
+
+```bash
+# Example: llama.cpp has its own sysroot with libllama.so, libggml*.so
+python3 tools/analyze_bbv.py \
+  --bbv output/llama.bbv.0.bb \
+  --elf output/llama.cpp/bin/llama-cli \
+  --sysroot output/llama.cpp/sysroot   # NOT output/sysroot!
+```
+
+**Verification**: Check that application-specific libraries exist in the sysroot:
+```bash
+# For llama.cpp
+ls output/llama.cpp/sysroot/lib/riscv64-linux-gnu/libllama*.so
+ls output/llama.cpp/sysroot/lib/riscv64-linux-gnu/libggml*.so
+
+# For ONNX Runtime
+ls output/sysroot/lib/riscv64-linux-gnu/libonnx*.so
+```
+
+### PIE Executable Address Resolution
+
+Modern binaries are often PIE (Position Independent Executable). Runtime addresses differ from static file offsets, requiring base address detection.
+
+The `analyze_bbv.py` script handles this automatically:
+- Detects PIE executables via `file` command output
+- Analyzes address distribution to estimate runtime base
+- Converts runtime addresses to file offsets for addr2line
+
+**Manual verification** (if needed):
+```bash
+# Check if binary is PIE
+file output/llama.cpp/bin/llama-cli
+# Should show: "DYN ... PIE executable"
+
+# Estimated PIE base appears in stderr during analysis
+python3 tools/analyze_bbv.py --bbv ... 2>&1 | grep -i "pie"
+```
+
+### Application Library Matching Priority
+
+The analysis prioritizes application-specific libraries (llama, ggml, onnx, ort) over system libraries (libc, libcrypto). This prevents hotspots being incorrectly attributed to system libraries.
+
+**Common misidentification patterns** (before fix):
+- libcrypto.so showing 80%+ of execution (incorrect)
+- libgnutls.so showing most hotspots (incorrect)
+
+**Expected patterns** (after proper analysis):
+- libllama.so showing majority of inference hotspots
+- libggml-cpu.so showing quantization/computation hotspots
+- libonnxruntime.so showing ML inference hotspots
+
+### Verifying Analysis Results
+
+#### 1. Library Distribution Check
+
+```bash
+python3 -c "
+import json
+with open('output/hotspot.json') as f:
+    data = json.load(f)
+libs = {}
+for b in data['blocks']:
+    loc = b['location']
+    if '[' in loc:
+        lib = loc.split('[')[1].split(']')[0]
+        libs[lib] = libs.get(lib, 0) + b['count']
+total = sum(libs.values())
+for lib, cnt in sorted(libs.items(), key=lambda x: -x[1])[:5]:
+    print(f'{lib}: {cnt/total*100:.2f}%')
+"
+```
+
+**Expected**: Application libraries (libllama, libggml, libonnx) should dominate, not system libraries.
+
+#### 2. Symbol Resolution Check
+
+Hotspots should show meaningful function names, not `??`:
+
+```bash
+# Check top 10 hotspots for symbol quality
+head -20 output/hotspot-report.txt | grep -E "^\s*[0-9]+"
+```
+
+**Good result**: `[libggml-cpu.so] ggml_quantize_mat_q8_0_4x4`
+**Bad result**: `[libcrypto.so.3] ?? (??:0)` (wrong library + no symbol)
+
+#### 3. Address-to-Library Mapping Verification
+
+For suspicious hotspot addresses, manually verify which library they belong to:
+
+```bash
+# Check if address 0x7f290b083500 belongs to libggml-cpu.so
+addr=0x7f290b083500
+base=0x7f290b04f000  # Estimated from analysis
+offset=$((addr - base))
+addr2line -f -e output/llama.cpp/sysroot/lib/riscv64-linux-gnu/libggml-cpu.so.0.9.11 $offset
+```
+
+If this gives a valid symbol, but the report shows libcrypto.so, the analysis has a matching error.
+
+### Common Issues and Solutions
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| Wrong sysroot | Hotspots in system libraries | Use application-specific sysroot |
+| Missing .so files | `<unknown-so>@0x...` labels | Add libraries to sysroot |
+| Stripped libraries | `??` for all symbols | Use debug builds or accept symbol unknowns |
+| PIE not detected | Main binary addresses unmatched | Check `file` output shows "PIE" |
+| Library overlap | Multiple libraries matched | Analysis uses symbol validation bonus |
+
+### Analysis Algorithm Details
+
+The `analyze_bbv.py` script uses these techniques for accurate matching:
+
+1. **PIE base detection**: Analyzes low-address cluster (0x55* region) to estimate base
+2. **Application library priority**: Processes llama/ggml/onnx libs before libc/libcrypto
+3. **Execution count weighting**: Weights candidate bases by total execution count, not address count
+4. **Symbol validation bonus**: Uses addr2line to verify symbols, giving 50% bonus to correct library
+
+### Stripped Binary Handling
+
+Most RISC-V libraries are stripped (no debug symbols). The analysis still works because:
+- Dynamic symbol table (`nm -D`) provides function names
+- Library matching uses LOAD segment address ranges
+- Hotspots are attributed to correct libraries even without file/line info
+
+```bash
+# Check if library is stripped
+file output/llama.cpp/sysroot/lib/riscv64-linux-gnu/libllama.so.0.0.1
+# Shows: "stripped" - but nm -D still shows exported symbols
+
+nm -D output/llama.cpp/sysroot/lib/riscv64-linux-gnu/libllama.so.0.0.1 | head
 ```
 
 ## Running Vector (V Extension) Programs

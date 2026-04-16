@@ -114,8 +114,9 @@ def parse_bbv(bbv_path):
 def resolve_addresses(blocks, elf_path, sysroot=None):
     """Resolve addresses to source locations via addr2line.
 
-    For shared library addresses (addresses not in the main ELF .text),
-    attempts to match against .so files in sysroot.
+    For PIE executables, first detects the runtime base address by analyzing
+    address distribution. For shared library addresses, uses stricter matching
+    requiring multiple addresses to agree on the same base.
     """
     if not blocks:
         return []
@@ -123,29 +124,98 @@ def resolve_addresses(blocks, elf_path, sysroot=None):
     # Collect .so files from sysroot
     so_files = _collect_so_files(sysroot)
 
-    # Determine main ELF .text range via readelf
+    # Determine main ELF .text range via readelf (static offsets)
     main_ranges = _get_elf_text_range(elf_path)
+
+    # For PIE executables, detect runtime base from address distribution
+    pie_base = _detect_pie_base(blocks, main_ranges, elf_path)
 
     # Separate main binary vs shared library addresses
     main_blocks = []
     so_blocks = []
     for addr, count in blocks:
-        if any(lo <= addr < hi for lo, hi in main_ranges):
+        if pie_base:
+            # PIE: check if addr - pie_base falls within static .text range
+            offset = addr - pie_base
+            if any(lo <= offset < hi for lo, hi in main_ranges):
+                main_blocks.append((addr, count))
+            else:
+                so_blocks.append((addr, count))
+        elif any(lo <= addr < hi for lo, hi in main_ranges):
+            # Non-PIE: direct address match
             main_blocks.append((addr, count))
         else:
             so_blocks.append((addr, count))
 
     resolved = []
 
-    # Resolve main binary addresses
+    # Resolve main binary addresses (adjust for PIE)
     if main_blocks:
-        resolved.extend(_batch_resolve(main_blocks, elf_path))
+        if pie_base:
+            # Convert runtime addresses to file offsets for PIE
+            offset_blocks = [(addr - pie_base, count, addr) for addr, count in main_blocks]
+            main_resolved = _batch_resolve([(off, c) for off, c, _ in offset_blocks], elf_path)
+            for (_, count, orig_addr), (_, _, loc) in zip(offset_blocks, main_resolved):
+                resolved.append((orig_addr, count, loc))
+        else:
+            resolved.extend(_batch_resolve(main_blocks, elf_path))
 
-    # Resolve shared library addresses
+    # Resolve shared library addresses with stricter matching
     if so_blocks:
-        resolved.extend(_resolve_so_addresses(so_blocks, so_files))
+        resolved.extend(_resolve_so_addresses_strict(so_blocks, so_files))
 
     return resolved
+
+
+def _detect_pie_base(blocks, static_ranges, elf_path):
+    """Detect PIE executable runtime base from address distribution.
+
+    For PIE, runtime addresses are base + static_offset. Analyzes low-address
+    cluster to estimate base. Returns None for non-PIE or indeterminate cases.
+    """
+    if not static_ranges:
+        return None
+
+    # Check if ELF is PIE (DYN type with INTERP)
+    try:
+        result = subprocess.run(
+            ["file", elf_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if "DYN" not in result.stdout or "PIE" not in result.stdout.lower():
+            return None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Get the lowest .text static address
+    text_start = min(lo for lo, hi in static_ranges)
+
+    # Find addresses that could be from main binary (lower region)
+    # PIE binaries are typically loaded in 0x55* region
+    sorted_addrs = sorted([a for a, _ in blocks])
+    low_addrs = [a for a in sorted_addrs if (a >> 40) <= 0x60]
+
+    if not low_addrs:
+        return None
+
+    # Estimate base: lowest address - text_start, page-aligned
+    lowest_addr = min(low_addrs)
+    estimated_base = lowest_addr - text_start
+    # Align to page boundary (PIE loads are page-aligned)
+    pie_base = estimated_base & ~0xFFF
+
+    # Validate: most low addresses should map to within .text range
+    valid_count = 0
+    for addr in low_addrs[:100]:  # Check sample
+        offset = addr - pie_base
+        if any(lo <= offset < hi for lo, hi in static_ranges):
+            valid_count += 1
+
+    if valid_count < len(low_addrs[:100]) * 0.5:
+        # Less than 50% valid, likely not correct base
+        return None
+
+    return pie_base
 
 
 def build_report_data(resolved, addr_to_bb_id=None):
@@ -182,7 +252,16 @@ def _collect_so_files(sysroot):
     sysroot_path = Path(sysroot)
     if not sysroot_path.is_dir():
         return []
-    all_so = sorted(sysroot_path.rglob("*.so*"), key=lambda p: p.stat().st_size, reverse=True)
+    # Collect .so files, filtering out broken symlinks first
+    so_candidates = list(sysroot_path.rglob("*.so*"))
+    valid_so = []
+    for sf in so_candidates:
+        try:
+            if sf.exists() and sf.is_file():
+                valid_so.append(sf)
+        except OSError:
+            continue
+    all_so = sorted(valid_so, key=lambda p: p.stat().st_size, reverse=True)
     seen_inodes = set()
     unique = []
     for sf in all_so:
@@ -348,6 +427,149 @@ def _resolve_so_addresses(blocks, so_files):
         remaining = [(a, c) for a, c in remaining if a not in matched_addrs]
 
     resolved.extend([(a, c, f"<unknown-so>@0x{a:x}") for a, c in remaining])
+    return resolved
+
+
+def _resolve_so_addresses_strict(blocks, so_files):
+    """Resolve shared library addresses with stricter matching.
+
+    Key improvements over _resolve_so_addresses:
+    1. Prioritize application-specific libraries (llama, ggml, onnx, etc.)
+    2. Base address must be in high memory region (0x7f* prefix typical)
+    3. Multiple addresses must agree on the same base (clustering)
+    4. Minimum match threshold before accepting a .so
+
+    Returns resolved addresses with stricter validation to avoid false matches.
+    """
+    so_loads = _get_so_loads(so_files)
+    if not so_loads:
+        return [(a, c, f"<unknown-so>@0x{a:x}") for a, c in blocks]
+
+    # Pre-filter: only consider addresses in high memory region (0x7f*)
+    # Lower addresses (0x55*) likely belong to main PIE binary
+    high_region_blocks = [(a, c) for a, c in blocks if (a >> 32) >= 0x7f]
+    low_region_blocks = [(a, c) for a, c in blocks if (a >> 32) < 0x7f]
+
+    resolved = []
+    remaining = list(high_region_blocks)
+
+    # Group .so by name for matching (avoid duplicates from symlinks)
+    unique_so = {}
+    for so_path, load_vaddr, load_size in so_loads:
+        name = so_path.name
+        # Keep the actual file (not symlink) with largest size
+        if name not in unique_so or load_size > unique_so[name][2]:
+            unique_so[name] = (so_path, load_vaddr, load_size)
+
+    so_loads_unique = list(unique_so.values())
+
+    # PRIORITY: Application-specific libraries first, then system libraries
+    # Application libs: llama, ggml, onnx, ort, ml-related
+    app_lib_patterns = ['llama', 'ggml', 'onnx', 'ort', 'mlas', 'proto', 'sentencepiece']
+    app_libs = []
+    sys_libs = []
+    for so_path, load_vaddr, load_size in so_loads_unique:
+        name_lower = so_path.name.lower()
+        if any(p in name_lower for p in app_lib_patterns):
+            app_libs.append((so_path, load_vaddr, load_size))
+        else:
+            sys_libs.append((so_path, load_vaddr, load_size))
+
+    # Sort: app libs by size (largest first), sys libs by size (largest first)
+    app_libs.sort(key=lambda x: x[2], reverse=True)
+    sys_libs.sort(key=lambda x: x[2], reverse=True)
+    # Combined: app libs first
+    so_loads_ordered = app_libs + sys_libs
+
+    for so_path, load_vaddr, load_size in so_loads_ordered:
+        if not remaining:
+            break
+
+        # Find candidate bases by clustering address differences
+        # A valid base should have many addresses mapping to within LOAD range
+        candidate_bases = {}
+        # Use larger sample: top addresses by execution count + random sample
+        # Sort remaining by count descending to prioritize hot addresses
+        sorted_remaining = sorted(remaining, key=lambda x: -x[1])
+        # Take top 50 hot addresses plus a random sample
+        hot_sample = sorted_remaining[:50]
+        random_sample = remaining[:: max(1, len(remaining) // 10)][:50]
+        sample = hot_sample + random_sample
+
+        for addr, _ in sample:
+            # Calculate potential base (page-aligned)
+            raw_base = addr - load_vaddr
+            # Align down to page
+            for page_adj in range(0, 0x10000, 0x1000):
+                base = (raw_base - page_adj) & ~0xFFF
+                if base <= 0:
+                    continue
+                # Validate base is in reasonable high memory region (user space)
+                # Addresses typically in 0x7f*, 0x79*, 0x7a* ranges depending on ASLR
+                if (base >> 32) < 0x7f:
+                    continue
+                # Count how many addresses match this base and total weight
+                matches = [(a, c) for a, c in remaining
+                           if load_vaddr <= a - base < load_vaddr + load_size]
+                if matches:
+                    # Weight by execution count
+                    total_weight = sum(c for a, c in matches)
+                    # Bonus for valid addr2line symbols
+                    symbol_bonus = 0
+                    for check_addr, _ in matches[:3]:
+                        offset = check_addr - base
+                        result = subprocess.run(
+                            ['addr2line', '-f', '-e', str(so_path), f'{offset:#x}'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if result.returncode == 0:
+                            lines = result.stdout.strip().split('\n')
+                            if lines and lines[0] != '??':
+                                symbol_bonus += total_weight * 0.5
+                                break
+                    score = total_weight + symbol_bonus
+                    candidate_bases[base] = candidate_bases.get(base, 0) + score
+
+        if not candidate_bases:
+            continue
+
+        # Pick the base with most matches
+        # Use lower threshold for app libs (1%), higher for sys libs (10%)
+        is_app_lib = any(p in so_path.name.lower() for p in app_lib_patterns)
+        threshold = 0.01 if is_app_lib else 0.10
+
+        best_base = max(candidate_bases.items(), key=lambda x: x[1])
+        if best_base[1] < len(remaining) * threshold:
+            continue  # Too few matches, likely false positive
+
+        base = best_base[0]
+        matches = [(a, c) for a, c in remaining
+                   if load_vaddr <= a - base < load_vaddr + load_size]
+
+        if not matches:
+            continue
+
+        # Resolve matched addresses
+        file_blocks = [(a - base, c, a) for a, c in matches]
+        so_resolved = _batch_resolve(
+            [(fv, c) for fv, c, _ in file_blocks], str(so_path)
+        )
+        so_name = so_path.name
+        matched_addrs = set(a for a, _ in matches)
+        for (_, count, orig_addr), (_, _, loc) in zip(file_blocks, so_resolved):
+            if loc != "??":
+                resolved.append((orig_addr, count, f"[{so_name}] {loc}"))
+            else:
+                resolved.append((orig_addr, count, f"[{so_name}] 0x{orig_addr:x}"))
+
+        remaining = [(a, c) for a, c in remaining if a not in matched_addrs]
+
+    # Unmatched high-region addresses
+    resolved.extend([(a, c, f"<unknown-so>@0x{a:x}") for a, c in remaining])
+
+    # Low-region addresses (likely main binary) - mark separately
+    resolved.extend([(a, c, f"<main-binary-region>@0x{a:x}") for a, c in low_region_blocks])
+
     return resolved
 
 

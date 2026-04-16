@@ -1,0 +1,15 @@
+diff --git a/ggml/src/ggml-cpu/arch/riscv/repack.cpp b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+index c37488c..dabf717 100644
+--- a/ggml/src/ggml-cpu/arch/riscv/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+@@ -24,6 +24,10 @@
+
+ #define UNUSED GGML_UNUSED
+
++// RVV implementation: single source of truth is rvv_quantize_q8_0_4x4.inl
++// (copied to this directory by build.sh before patch is applied)
++#include "rvv_quantize_q8_0_4x4.inl"
++
+ void ggml_quantize_mat_q8_0_4x8(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
+     assert(QK8_0 == 32);
+     assert(k % QK8_0 == 0);

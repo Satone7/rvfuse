@@ -1,0 +1,38 @@
+diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
+index c589a21..8946ac4 100644
+--- a/ggml/src/ggml-cpu/arch-fallback.h
++++ b/ggml/src/ggml-cpu/arch-fallback.h
+@@ -230,7 +230,7 @@
+ #define ggml_gemm_q4_0_4x8_q8_0_generic ggml_gemm_q4_0_4x8_q8_0
+ #define ggml_gemm_q2_K_8x8_q8_K_generic ggml_gemm_q2_K_8x8_q8_K
+ #define ggml_gemm_q4_K_8x4_q8_K_generic ggml_gemm_q4_K_8x4_q8_K
+-#define ggml_gemm_q4_K_8x8_q8_K_generic ggml_gemm_q4_K_8x8_q8_K
++// ggml_gemv_q4_K_8x8_q8_K: native RISC-V RVV implementation in arch/riscv/repack.cpp
+ #define ggml_gemm_q5_K_8x4_q8_K_generic ggml_gemm_q5_K_8x4_q8_K
+ #define ggml_gemm_q5_K_8x8_q8_K_generic ggml_gemm_q5_K_8x8_q8_K
+ #define ggml_gemm_q6_K_16x4_q8_K_generic ggml_gemm_q6_K_16x4_q8_K
+diff --git a/ggml/src/ggml-cpu/arch/riscv/repack.cpp b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+index c37488c..e899792 100644
+--- a/ggml/src/ggml-cpu/arch/riscv/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+@@ -1263,6 +1263,20 @@ void ggml_gemm_q4_K_8x4_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+ #endif
+ }
+
++// RVV implementation: single source of truth is rvv_gemv_q4_K_8x8_q8_K.inl
++// (copied to this directory by build.sh before patch is applied)
++#include "rvv_gemv_q4_K_8x8_q8_K.inl"
++
++void ggml_gemv_q4_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
++    const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,
++    int nr, int nc) {
++#if defined(__riscv_v_intrinsic)
++    ggml_gemv_q4_K_8x8_q8_K_rvv(n, s, bs, vx, vy, nr, nc);
++#else
++    ggml_gemv_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
++#endif
++}
++
+ void ggml_gemm_iq4_nl_16x1_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK8_0;
+     const int nb = n / qk;
