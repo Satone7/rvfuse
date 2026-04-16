@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cassert>
 #include <cmath>
+#include <math.h>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,11 @@ static_assert(sizeof(block_q8_Kx4) == sizeof(float) * 4 + QK_K * 4 + (QK_K / 4) 
 // ---------------------------------------------------------------------------
 // Scalar (generic) reference implementation
 // ---------------------------------------------------------------------------
+// Clang -O2 miscompiles this scalar reference on RISC-V (auto-vectorizer bug),
+// so disable optimization for this function when targeting RVV.
+#if defined(__riscv_v_intrinsic)
+__attribute__((optnone))
+#endif
 static void ggml_gemm_q4_K_8x4_q8_K_scalar(
     int n, float * GGML_RESTRICT s, size_t bs,
     const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,
@@ -187,9 +193,9 @@ static float fp32_from_bits(uint32_t u) {
 }
 
 static ggml_half rng_f16() {
-    // Generate a reasonable FP16 value: small magnitude, positive or negative
+    // Generate a normal FP16 value (exponent 1..30, bias 15)
     uint32_t sign = rng_next() & 1;
-    uint32_t exp  = (rng_next() % 20) + 15; // 15..34, avoiding subnormals/inf most of the time
+    uint32_t exp  = (rng_next() % 29) + 1;  // 1..29, well within normal range
     uint32_t frac = rng_next() & 0x3FF;
     return (ggml_half)((sign << 15) | (exp << 10) | frac);
 }
@@ -295,7 +301,8 @@ static int run_test(int n_blocks, int n_col_groups, int n_row_groups,
 
         // Tolerance: absolute 0.5 (half-ULP of int32->float at typical magnitudes)
         // or relative 1e-4 for large values
-        if (abs_diff > 0.5f && rel_diff > 1e-4f) {
+        // Also detect NaN/inf via isnan() check
+        if ((abs_diff > 0.5f && rel_diff > 1e-4f) || isnan(out_scalar[i]) || isnan(out_rvv[i])) {
             n_mismatch++;
             if (n_mismatch <= 5) {
                 int row = i / nc;

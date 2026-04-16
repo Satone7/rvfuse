@@ -43,8 +43,9 @@ static void ggml_gemm_q4_K_8x4_q8_K_rvv(
     static const uint32_t kmask2 = 0x0f0f0f0f;
     static const uint32_t kmask3 = 0x03030303;
 
-    // Helper: decode 12 raw bytes into 8 int8_t scales and 8 int16_t mins (sign-extended 6-bit).
-    // Same algorithm as ARM NEON decode_q_Kx8_6bit_scales.
+    // Helper: decode 12 raw bytes into 8 int8_t scales and 8 int16_t mins.
+    // Scales and mins are 6-bit unsigned (0..63), matching ARM NEON decode_q_Kx8_6bit_scales
+    // and the scalar get_scale_min_k4 path.  Mins are zero-extended, NOT sign-extended.
     auto decode_scales = [&](const uint8_t * raw, int8_t * out_scales, int16_t * out_mins) {
         uint32_t sm[3];
         memcpy(sm, raw, 12);
@@ -54,8 +55,9 @@ static void ggml_gemm_q4_K_8x4_q8_K_rvv(
         sc[0] = sm[0] & kmask1;
         sc[1] = (sm[2] & kmask2) | (((sm[0] >> 6) & kmask3) << 4);
         memcpy(out_scales, sc, 8);
-        for (int j = 0; j < 4; j++) { int v = (m03 >> (j*8)) & 0xFF; out_mins[j]   = (int16_t)(int8_t)(v > 31 ? v - 64 : v); }
-        for (int j = 0; j < 4; j++) { int v = (m47 >> (j*8)) & 0xFF; out_mins[4+j] = (int16_t)(int8_t)(v > 31 ? v - 64 : v); }
+        // Zero-extend 6-bit mins (0..63) — matches ARM NEON vmovl_u8 path
+        for (int j = 0; j < 4; j++) { int v = (m03 >> (j*8)) & 0xFF; out_mins[j]   = (int16_t)(v & 0x3F); }
+        for (int j = 0; j < 4; j++) { int v = (m47 >> (j*8)) & 0xFF; out_mins[4+j] = (int16_t)(v & 0x3F); }
     };
 
     for (int y = 0; y < nr / 4; y++) {
