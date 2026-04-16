@@ -189,12 +189,20 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
                         group_scales_hi[k] = scales_hi[scale_offset + k];
                     }
 
-                    // Pairwise add: sum_lo[k] = acc_lo[p][k] + acc_lo[p+1][k]
+                    // Pairwise add: matches ARM NEON vpaddq_s32 behavior
+                    // vpaddq_s32([a0,a1,a2,a3], [b0,b1,b2,b3]) = [a0+a1, a2+a3, b0+b1, b2+b3]
+                    // So: sum_lo[k] = acc_lo[p][2k] + acc_lo[p][2k+1] for first 2, then p+1
                     int32_t sum_lo[4], sum_hi[4];
-                    for (int k = 0; k < 4; k++) {
-                        sum_lo[k] = acc_lo[p][k] + acc_lo[p+1][k];
-                        sum_hi[k] = acc_hi[p][k] + acc_hi[p+1][k];
-                    }
+                    // First 2 from column pair p
+                    sum_lo[0] = acc_lo[p][0] + acc_lo[p][1];
+                    sum_lo[1] = acc_lo[p][2] + acc_lo[p][3];
+                    sum_hi[0] = acc_hi[p][0] + acc_hi[p][1];
+                    sum_hi[1] = acc_hi[p][2] + acc_hi[p][3];
+                    // Next 2 from column pair p+1
+                    sum_lo[2] = acc_lo[p+1][0] + acc_lo[p+1][1];
+                    sum_lo[3] = acc_lo[p+1][2] + acc_lo[p+1][3];
+                    sum_hi[2] = acc_hi[p+1][0] + acc_hi[p+1][1];
+                    sum_hi[3] = acc_hi[p+1][2] + acc_hi[p+1][3];
 
                     // Multiply by scales and accumulate
                     for (int k = 0; k < 4; k++) {
@@ -265,7 +273,7 @@ inline void ggml_gemv_q4_K_8x8_q8_K_rvv(int n, float * GGML_RESTRICT s, size_t b
         const block_q4_Kx8 * GGML_RESTRICT q4_ptr = (const block_q4_Kx8 *) vx + (x * nb);
 
         float acc_f32[2][4] = {{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}};
-        float bias_acc_f32[2][4] = {{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}};
+        int32_t bias_acc[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};  // Use int32, matching scalar
 
         for (int b = 0; b < nb; b++) {
             // Load scales and convert to float
@@ -343,35 +351,47 @@ inline void ggml_gemv_q4_K_8x8_q8_K_rvv(int n, float * GGML_RESTRICT s, size_t b
                     int scale_offset = (p == 0) ? 0 : 4;
                     float * sb_scale = (p == 0) ? sb_scale_0 : sb_scale_1;
 
-                    // Pairwise add and scale application
+                    // Widen scales to int16 (matching ARM NEON vmovl_s8)
+                    int16_t group_scales_lo[4], group_scales_hi[4];
                     for (int k = 0; k < 4; k++) {
-                        int32_t sum_lo = acc_lo[p][k] + acc_lo[p+1][k];
-                        int32_t sum_hi = acc_hi[p][k] + acc_hi[p+1][k];
-                        float scaled_lo = (float)(scales_lo[scale_offset + k] * sum_lo);
-                        float scaled_hi = (float)(scales_hi[scale_offset + k] * sum_hi);
+                        group_scales_lo[k] = (int16_t)scales_lo[scale_offset + k];
+                        group_scales_hi[k] = (int16_t)scales_hi[scale_offset + k];
+                    }
+
+                    // Pairwise add and scale application
+                    // Matches ARM NEON vpaddq_s32: [a0+a1, a2+a3, b0+b1, b2+b3]
+                    int32_t sum_lo[4], sum_hi[4];
+                    sum_lo[0] = acc_lo[p][0] + acc_lo[p][1];
+                    sum_lo[1] = acc_lo[p][2] + acc_lo[p][3];
+                    sum_lo[2] = acc_lo[p+1][0] + acc_lo[p+1][1];
+                    sum_lo[3] = acc_lo[p+1][2] + acc_lo[p+1][3];
+                    sum_hi[0] = acc_hi[p][0] + acc_hi[p][1];
+                    sum_hi[1] = acc_hi[p][2] + acc_hi[p][3];
+                    sum_hi[2] = acc_hi[p+1][0] + acc_hi[p+1][1];
+                    sum_hi[3] = acc_hi[p+1][2] + acc_hi[p+1][3];
+
+                    for (int k = 0; k < 4; k++) {
+                        float scaled_lo = (float)(group_scales_lo[k] * sum_lo[k]);
+                        float scaled_hi = (float)(group_scales_hi[k] * sum_hi[k]);
                         acc_f32[i][k] += sb_scale[k] * (scaled_lo + scaled_hi);
                     }
                 }
 
-                // Bias accumulation
+                // Bias accumulation (matching scalar, use int32)
                 for (int k = 0; k < 4; k++) {
-                    bias_acc_f32[0][k] += (float)(mins_lo[k] * bsums_arr[2*sb] + mins_hi[k] * bsums_arr[2*sb+1]);
-                    bias_acc_f32[1][k] += (float)(mins_lo[k + 4] * bsums_arr[2*sb] + mins_hi[k + 4] * bsums_arr[2*sb+1]);
+                    bias_acc[0][k] += mins_lo[k] * bsums_arr[2*sb];
+                    bias_acc[0][k] += mins_hi[k] * bsums_arr[2*sb+1];
+                }
+                for (int k = 0; k < 4; k++) {
+                    bias_acc[1][k] += mins_lo[k + 4] * bsums_arr[2*sb];
+                    bias_acc[1][k] += mins_hi[k + 4] * bsums_arr[2*sb+1];
                 }
             }
 
-            // Final bias subtraction (using RVV vectors)
-            for (int i = 0; i < 2; i++) {
-                float * sb_min = (i == 0) ? sb_min_0 : sb_min_1;
-                vfloat32m1_t acc_vec = __riscv_vle32_v_f32m1(acc_f32[i], vl4);
-                vfloat32m1_t bias_vec = __riscv_vle32_v_f32m1(bias_acc_f32[i], vl4);
-                vfloat32m1_t sb_min_vec = __riscv_vle32_v_f32m1(sb_min, vl4);
-
-                // acc_f32 = acc_f32 - bias_acc * sb_min
-                vfloat32m1_t scaled_bias = __riscv_vfmul_vv_f32m1(bias_vec, sb_min_vec, vl4);
-                acc_vec = __riscv_vfsub_vv_f32m1(acc_vec, scaled_bias, vl4);
-
-                __riscv_vse32_v_f32m1(acc_f32[i], acc_vec, vl4);
+            // Final bias subtraction: acc_f32 -= bias_acc * sb_min (scalar computation, then RVV store)
+            for (int k = 0; k < 4; k++) {
+                acc_f32[0][k] -= (float)bias_acc[0][k] * sb_min_0[k];
+                acc_f32[1][k] -= (float)bias_acc[1][k] * sb_min_1[k];
             }
         }
 
