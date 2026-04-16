@@ -39,6 +39,22 @@ output[m][j] = Σ(blocks) [Σ(K) q4_value × q8_value × scale - min × bsum]
 
 ### RVV VLEN=512实现关键特征
 
+**VLEN物理宽度与活跃数据的关系**:
+
+VLEN=512指**物理向量寄存器宽度**（512位），而非每次操作的活跃数据宽度。实际配置`vl=8, SEW=32`意味着：
+- vl (vector length) = 8个活跃元素
+- SEW (standard element width) = 32位每元素
+- 每tile活跃数据 = 8 × 32 = **256位**
+
+**Dual-tile并行度实现512位利用**:
+
+VLEN=512实现通过**双tile并行**充分利用物理向量宽度：
+- Tile 0处理列0-7：vl=8, 活跃256位
+- Tile 1处理列8-15：vl=8, 活跃256位
+- **总活跃数据** = 256 + 256 = **512位** (并发执行)
+
+这解释了输出4×16列（双tile各8列）vs VLEN=256版本4×8列的吞吐量差异：2×并行度带来2×输出宽度。
+
 **数据布局**:
 - 输入A (Q8_K): block_q8_Kx4格式，每块32字节qs + 4×float16 d + 64×int16 bsums
 - 输入B (Q4_K): block_q4_Kx8格式，每块144字节qs + scales/dmin
@@ -97,10 +113,11 @@ acc0_lo_3 = __riscv_vwmacc_vx_i16m1(acc0_lo_3, q8v3_lo, q4_lo0, vl8);
 ```
 
 **Register usage**:
-- `vl=8`: 内层操作 (每tile 8列)
+- `vl=8`: 内层操作 (每tile 8列, 活跃256位/tile)
 - `vl=16`: 输出累加器
-- LMUL: m1 for i16 accumulators (16个独立的vint16m1_t寄存器变量: acc0_lo_0...acc1_hi_3)
-- LMUL: m2 for i32/float accumulators (8个: sumi0_0...sumi1_3)
+- LMUL=m1 for i16 accumulators: 单个512位寄存器可容纳32个i16值，但vl=8仅使用8个活跃元素（256位）
+- LMUL=m2 for i32/float: 组合2个物理寄存器（共1024位），vl=8活跃256位/logical group
+- 双tile并发执行充分利用VLEN=512物理宽度
 
 ---
 
@@ -413,8 +430,13 @@ vunpack_epi8_i16.vv vd, vs1, mask, vm
    | MAC int8×int8→i16 | 1 op | 1 op | 8 ops (**8×差距**) |
    | VNNI路径 int8→i32 | 1 op | 1 op (vdot) | 不支持 (**需扩展**) |
    | Scale i16×i16→i32 | 1 op | 1 op | 1 op (相当) |
-   
+
    **注**: "8 ops"指每i迭代最内层循环的16条vwmacc指令归一化到等效吞吐量。RVV vl=8处理8列需16次标量广播MAC；x86/ARM可通过lane-indexed或broadcast减少此开销。
+
+5. **VLEN=512设计要点**: RVV实现采用双tile并行（每tile vl=8×SEW=32=256位活跃）而非单tile大vl（如vl=16），原因：
+   - 保持与VLEN=256实现兼容的算法结构
+   - LMUL=m1/m2分组适配现有累加器布局
+   - 双tile并发充分利用512位物理宽度，输出16列vs VLEN=256的8列
 
 5. **优先级建议**:
    - P0: vdpusd.vx (int8×int8→i32单步dot) — 最大收益，消除两级widening开销
@@ -429,6 +451,7 @@ vunpack_epi8_i16.vv vd, vs1, mask, vm
 |------|-----------|--------|------|
 | R1 | 15 (2 CRITICAL, 7 MAJOR, 6 MINOR) | 15 | 0 |
 | R2 | 3 NEW MINOR | 3 | 0 |
+| R3 | 1 MINOR (VLEN利用说明) | 1 | 0 |
 
 **最终审查结论**: PASS
 
@@ -437,4 +460,6 @@ vunpack_epi8_i16.vv vd, vs1, mask, vm
 - 结论段落"8倍"改为"5倍"（与P0分析一致）
 - 代码示例补充reinterpret注释
 
-报告现已通过审查，内容准确，收益计算一致，平台指令命名正确。
+R3补充：
+- 明确VLEN=512物理宽度与vl=8活跃数据的区别
+- 解释双tile并行实现512位利用的设计选择
