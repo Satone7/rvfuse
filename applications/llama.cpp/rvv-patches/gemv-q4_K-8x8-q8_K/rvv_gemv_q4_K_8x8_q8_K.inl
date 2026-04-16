@@ -96,23 +96,23 @@ inline void ggml_gemv_q4_K_8x8_q8_K_rvv(int n, float * GGML_RESTRICT s, size_t b
 
         for (int b = 0; b < nb; b++) {
             // Load d[8] and dmin[8] and convert to float
-            float q4_d[ncols_interleaved];
-            float q4_dmin[ncols_interleaved];
+            float q4_d[ncols_interleaved] = {0};
+            float q4_dmin[ncols_interleaved] = {0};
             for (int j = 0; j < ncols_interleaved; j++) {
                 q4_d[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].d[j]);
                 q4_dmin[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].dmin[j]);
             }
 
             float q8_d = q8_ptr[b].d;
-            float sb_scale[ncols_interleaved];
-            float sb_min[ncols_interleaved];
+            float sb_scale[ncols_interleaved] = {0};
+            float sb_min[ncols_interleaved] = {0};
             for (int j = 0; j < ncols_interleaved; j++) {
                 sb_scale[j] = q4_d[j] * q8_d;
                 sb_min[j] = q4_dmin[j] * q8_d;
             }
 
             // Compute bsums pairwise (16 bsums -> 8)
-            int16_t bsums_arr[8];
+            int16_t bsums_arr[8] = {0};
             const int16_t * bsums_ptr = q8_ptr[b].bsums;
             for (int i = 0; i < 8; i++) {
                 bsums_arr[i] = bsums_ptr[2 * i] + bsums_ptr[2 * i + 1];
@@ -121,10 +121,10 @@ inline void ggml_gemv_q4_K_8x8_q8_K_rvv(int n, float * GGML_RESTRICT s, size_t b
             // Process 4 sub-blocks (QK_K / 64 = 4)
             // Each subblock: 24 bytes scales/mins
             for (int sb = 0; sb < QK_K / 64; sb++) {
-                uint8_t scales_lo[ncols_interleaved];
-                uint8_t scales_hi[ncols_interleaved];
-                uint8_t mins_lo[ncols_interleaved];
-                uint8_t mins_hi[ncols_interleaved];
+                uint8_t scales_lo[ncols_interleaved] = {0};
+                uint8_t scales_hi[ncols_interleaved] = {0};
+                uint8_t mins_lo[ncols_interleaved] = {0};
+                uint8_t mins_hi[ncols_interleaved] = {0};
 
                 decode_q_Kx8_6bit_scales_rvv(&q4_ptr[b].scales[sb * 24], scales_lo, mins_lo);
                 decode_q_Kx8_6bit_scales_rvv(&q4_ptr[b].scales[sb * 24 + 12], scales_hi, mins_hi);

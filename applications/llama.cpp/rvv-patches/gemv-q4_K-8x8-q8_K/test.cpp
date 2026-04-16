@@ -88,7 +88,7 @@ static const uint32_t kmask1 = 0x3f3f3f3f;
 static const uint32_t kmask2 = 0x0f0f0f0f;
 static const uint32_t kmask3 = 0x03030303;
 
-#if defined(__riscv_v_intrinsic)
+#if defined(__riscv_v)
 __attribute__((optnone))
 #endif
 static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs,
@@ -108,6 +108,9 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
     float sumf[8];
     float sum_minf[8];
     uint32_t utmp[32];
+    int sumi1;
+    int sumi2;
+    int sumi;
 
     const block_q8_K * a_ptr = (const block_q8_K *) vy;
     for (int x = 0; x < nc / ncols_interleaved; x++) {
@@ -129,18 +132,20 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
                 utmp[sb * 4 + 0] &= kmask1;
             }
 
-            // Process 16 k iterations
-            for (int k = 0; k < 16; k++) {
+            // Process 16 k iterations (qk/(2*blocklen) = 256/16 = 16)
+            for (int k = 0; k < (qk / (2 * blocklen)); k++) {
                 uint8_t * scales_0 = (uint8_t*) utmp + (k / 4) * 32;
                 uint8_t * scales_1 = (uint8_t*) utmp + (k / 4) * 32 + 16;
 
                 for (int j = 0; j < ncols_interleaved; j++) {
-                    int sumi1 = 0, sumi2 = 0, sumi = 0;
-                    for (int i = 0; i < blocklen; i++) {
-                        int v0 = (int8_t)(b_ptr[l].qs[k * 64 + j * 8 + i] & 0xF);
-                        int v1 = (int8_t)(b_ptr[l].qs[k * 64 + j * 8 + i] >> 4);
-                        sumi1 = (v0 * a_ptr[l].qs[(k >> 2) * 64 + (k % 4) * 8 + i]);
-                        sumi2 = (v1 * a_ptr[l].qs[(k >> 2) * 64 + (k % 4) * 8 + i + 32]);
+                    sumi1 = 0;
+                    sumi2 = 0;
+                    sumi = 0;
+                    for (int i = 0; i < blocklen; ++i) {
+                        const int v0 = (int8_t) (b_ptr[l].qs[k * ncols_interleaved * blocklen + j * blocklen + i] & 0xF);
+                        const int v1 = (int8_t) (b_ptr[l].qs[k * ncols_interleaved * blocklen + j * blocklen + i] >> 4);
+                        sumi1 = (v0 * a_ptr[l].qs[(k >> 2) * 64 + (k % 4) * blocklen + i]);
+                        sumi2 = (v1 * a_ptr[l].qs[(k >> 2) * 64 + (k % 4) * blocklen + i + 32]);
                         sumi1 = sumi1 * scales_0[j];
                         sumi2 = sumi2 * scales_1[j];
                         sumi += sumi1 + sumi2;
@@ -193,6 +198,34 @@ static uint8_t rng_uint6() {
 }
 
 // ---------------------------------------------------------------------------
+// 6-bit scales/mins encoder for Q4_Kx8 layout
+// ---------------------------------------------------------------------------
+// Encodes 8 scales and 8 mins (each 6-bit, 0-63) into 12 bytes packed format
+// This is the inverse of the decode function
+static inline void encode_q_Kx8_6bit_scales(const uint8_t * scales_in,  // 8 values (0-63)
+                                            const uint8_t * mins_in,    // 8 values (0-63)
+                                            uint8_t * packed_out) {    // 12 bytes output
+    uint32_t sm[3] = {0};
+
+    // sm[0]: scales 0-3 in bits 0-5, scales 4-7 upper 2 bits in bits 6-7
+    for (int i = 0; i < 4; i++) {
+        ((uint8_t*)&sm[0])[i] = (scales_in[i] & 0x3F) | ((scales_in[4+i] >> 4) << 6);
+    }
+
+    // sm[1]: mins 0-3 in bits 0-5, mins 4-7 upper 2 bits in bits 6-7
+    for (int i = 0; i < 4; i++) {
+        ((uint8_t*)&sm[1])[i] = (mins_in[i] & 0x3F) | ((mins_in[4+i] >> 4) << 6);
+    }
+
+    // sm[2]: scales 4-7 lower 4 bits in bits 0-3, mins 4-7 lower 4 bits in bits 4-7
+    for (int i = 0; i < 4; i++) {
+        ((uint8_t*)&sm[2])[i] = (scales_in[4+i] & 0x0F) | ((mins_in[4+i] & 0x0F) << 4);
+    }
+
+    memcpy(packed_out, sm, 12);
+}
+
+// ---------------------------------------------------------------------------
 // Test data initialization
 // ---------------------------------------------------------------------------
 static void init_test_block(block_q4_Kx8 * q4, block_q8_K * q8, uint32_t seed) {
@@ -203,8 +236,19 @@ static void init_test_block(block_q4_Kx8 * q4, block_q8_K * q8, uint32_t seed) {
         q4->dmin[j] = ggml_fp32_to_fp16(0.01f + rng_next() / 327680.0f);
     }
 
-    for (int i = 0; i < 96; i++) {
-        q4->scales[i] = rng_uint6();
+    // Generate raw scales and mins, then encode them properly
+    uint8_t raw_scales[8];
+    uint8_t raw_mins[8];
+    for (int i = 0; i < 8; i++) {
+        raw_scales[i] = rng_uint6();
+        raw_mins[i] = rng_uint6();
+    }
+    // Encode for 8 scalar subblocks (12 bytes each)
+    // Or equivalently 4 RVV subblocks (24 bytes each)
+    // Layout: 8 subblocks × 12 bytes = 96 bytes total
+    for (int sb = 0; sb < 8; sb++) {
+        // Each scalar subblock has the same scales/mins for all 8 columns
+        encode_q_Kx8_6bit_scales(raw_scales, raw_mins, q4->scales + sb * 12);
     }
 
     for (int i = 0; i < 1024; i++) {
@@ -243,14 +287,14 @@ static int run_test(int n_blocks, uint32_t seed, float rel_tolerance, const char
     }
 
     // Scalar reference
-    float temp_scalar[8];
+    float temp_scalar[8] = {0};
     for (int b = 0; b < n_blocks; b++) {
         ggml_gemv_q4_K_8x8_q8_K_generic(QK_K, temp_scalar, 0, &q4[b], &q8[b], 1, 8);
         for (int j = 0; j < 8; j++) scalar_out[j] += temp_scalar[j];
     }
 
     // RVV implementation (will fallback to generic if not on RVV)
-    float temp_rvv[8];
+    float temp_rvv[8] = {0};
     for (int b = 0; b < n_blocks; b++) {
         ggml_gemv_q4_K_8x8_q8_K(QK_K, temp_rvv, 0, &q4[b], &q8[b], 1, 8);
         for (int j = 0; j < 8; j++) rvv_out[j] += temp_rvv[j];
