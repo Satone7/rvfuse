@@ -93,10 +93,11 @@ static void ggml_gemm_q4_K_8x4_q8_K_rvv(
                     decode_scales(&q4_ptr[b].scales[sb * 24 + 12], scales_hi, mins_hi);
 
                     // Load scales: 8 int8_t -> widen to 8 int16_t (sign-extend each byte)
+                    // i8mf2 because vwadd_vx_i16m1 expects i8mf2 input (LMUL=0.5 for e8)
                     const vint16m1_t v_sc_lo = __riscv_vwadd_vx_i16m1(
-                        __riscv_vle8_v_i8mf4(scales_lo, vl), 0, vl);
+                        __riscv_vle8_v_i8mf2(scales_lo, vl), 0, vl);
                     const vint16m1_t v_sc_hi = __riscv_vwadd_vx_i16m1(
-                        __riscv_vle8_v_i8mf4(scales_hi, vl), 0, vl);
+                        __riscv_vle8_v_i8mf2(scales_hi, vl), 0, vl);
 
                     // i32 scale accumulators (persist across both inner-loop halves)
                     vint32m2_t sumi_0 = __riscv_vmv_v_x_i32m2(0, vl);
