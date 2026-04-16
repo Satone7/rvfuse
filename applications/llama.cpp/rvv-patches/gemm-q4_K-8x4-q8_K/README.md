@@ -1,4 +1,4 @@
-# gemm-q4_K-8x4
+# gemm-q4_K-8x4-q8_K
 
 RVV implementation of `ggml_gemm_q4_K_8x4_q8_K` - Q4_K weights × Q8_K activations GEMM with 4x4 tile blocking.
 
@@ -25,7 +25,7 @@ void ggml_gemm_q4_K_8x4_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
 
 ## Gap Analysis
 
-See: `docs/report/llama.cpp/rvv-gap-analysis-gemm-q4_K-8x4-2026-04-16.md`
+See: `docs/report/llama.cpp/rvv-gap-analysis-gemm-q4_K-8x4-q8_K-2026-04-16.md`
 
 ## Build & Test
 
