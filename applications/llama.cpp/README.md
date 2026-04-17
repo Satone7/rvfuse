@@ -57,6 +57,12 @@ applications/llama.cpp/
 │   │   ├── test.cpp
 │   │   └── README.md
 │   │
+│   ├── vec-dot-q5_0-q8_0/  # Q5_0 × Q8_0 vector dot product
+│   │   ├── rvv_vec_dot_q5_0_q8_0.inl
+│   │   ├── patch.diff
+│   │   ├── test.cpp
+│   │   └── README.md
+│   │
 │   └── _template/           # Template for new RVV implementations
 │       ├── rvv_<name>.inl.template
 │       ├── patch.diff.template
@@ -360,6 +366,138 @@ Profiling conducted on Qwen2.5-0.5B-Instruct **Q8_0** quantized model (2026-04-1
 
 4. **Crypto overhead**: libcrypto.so accounts for 13.94% (checksum validation)
    - More prominent in Q8 due to larger model file validation
+
+## Verifying RVV Kernel Execution
+
+The standalone correctness tests (`test.cpp`) validate numerical accuracy against the scalar reference, but they do not prove the kernel is used in actual inference. This section describes how to confirm a patched kernel is called at runtime, and pitfalls to avoid.
+
+### Why This Is Non-Trivial
+
+llama.cpp loads `libggml-cpu.so` dynamically at runtime via `dlopen`. The build system has two artifact directories with separate copies of this library:
+
+| Directory | Contents | Used by |
+|-----------|----------|---------|
+| `output/llama.cpp/.build/bin/` | Build output (raw) | `ninja` link step only |
+| `output/llama.cpp/lib/` | Installed output | `qemu-riscv64` via `LD_LIBRARY_PATH` |
+
+**Critical**: `ninja` alone does NOT update the installed `lib/` directory. Running the binary after `ninja` will load the **old** library without your changes. You must either:
+- Run `build.sh` (which includes the install step), or
+- Manually copy the rebuilt `.so` to `output/llama.cpp/lib/`
+
+Additionally, the compiler inlines `static` functions (like `_rvv` suffix functions) and may eliminate trace code if not written carefully.
+
+### Method 1: One-Time Trace Marker (Recommended)
+
+Add a `volatile` guarded `write()` call inside the RVV function in the `.inl` file. `volatile` prevents the compiler from optimizing away the check; `write()` bypasses stdio buffering.
+
+```c
+#include <unistd.h>  // for write(), STDERR_FILENO
+
+static void ggml_vec_dot_q5_0_q8_0_rvv(...) {
+    // ... existing code ...
+
+    // One-time trace: prints on first call, then silences
+    {
+        static volatile int _called = 0;
+        if (_called == 0) {
+            _called = 1;
+            char buf[128];
+            int len = snprintf(buf, sizeof(buf),
+                "[RVV-TRACE] %s: n=%d, nb=%d, vlenb=%zu (VLEN=%zu)\n",
+                __FUNCTION__, n, nb, vlenb, vlenb * 8);
+            write(STDERR_FILENO, buf, len);
+        }
+    }
+
+    // ... rest of function ...
+}
+```
+
+**Why `volatile`**: Without `volatile`, LLVM 22 at `-O2` evaluates `static int _called = 0` as a compile-time constant and removes the entire branch, even though the variable would change at runtime. The trace silently disappears.
+
+**Why `write()` not `fprintf()`**: `fprintf(stderr, ...)` may be buffered and not flushed before QEMU exits, especially when piping output through `grep` or `tee`.
+
+**Build and run**:
+
+```bash
+# 1. Copy .inl to vendor source
+cp rvv-patches/vec-dot-q5_0-q8_0/rvv_vec_dot_q5_0_q8_0.inl \
+   vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/
+
+# 2. Force recompile (inl changes don't update .o timestamps)
+touch vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/quants.c
+
+# 3. Rebuild
+cd output/llama.cpp/.build && ninja -j4
+
+# 4. IMPORTANT: copy rebuilt .so to installed location
+cp bin/libggml-cpu.so.0.9.11 ../../lib/
+
+# 5. Run with Q5_0-containing model (Q4_K_M uses mixed precision with Q5_0 tensors)
+qemu-riscv64 -L output/llama.cpp/sysroot \
+    -E LD_LIBRARY_PATH=output/llama.cpp/lib \
+    output/llama.cpp/bin/llama-completion \
+    -m models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf \
+    -p "Hi" -n 4 -t 1 2>&1 | grep "RVV-TRACE"
+```
+
+Expected output:
+
+```
+[RVV-TRACE] ggml_vec_dot_q5_0_q8_0_rvv: n=896, nb=28, vlenb=16 (VLEN=128)
+```
+
+- `n=896`: Qwen2.5-0.5B embedding dimension (vector length)
+- `nb=28`: 896 / 32 = 28 Q5_0 blocks per call
+- `vlenb=16`: QEMU emulates VLEN=128 bit (16 bytes)
+- The trace prints only once; the function is actually called thousands of times per inference
+
+**Choosing the right model**: The kernel is only called for tensors quantized as Q5_0. Not all Q4 models contain Q5_0 tensors. `Q4_K_M` is a mixed-precision format where FFN layers use Q5_0 (~55% of compute, see `temp/perf_q4_hotspot_analysis.md`). A pure `Q4_0` model will NOT trigger `vec_dot_q5_0_q8_0` at all.
+
+### Method 2: Disassembly Verification
+
+If you cannot modify the source, verify the binary directly:
+
+```bash
+# Check that the function symbol exists and points to RVV instructions
+llvm-objdump -d --start-address=<addr> --stop-address=<addr>+0x50 \
+    output/llama.cpp/lib/libggml-cpu.so
+
+# Or find the address first
+nm -D output/llama.cpp/lib/libggml-cpu.so | grep "vec_dot_q5_0_q8_0$"
+```
+
+Expected: RVV instructions (`vle8.v`, `vlm.v`, `vwmul.vv`, `vwredsum.vs`) should appear in the disassembly, confirming the compiler chose the `#if defined(__riscv_v)` path.
+
+### Method 3: Symbol Table Verification
+
+Confirm the RVV function exists in the loaded library:
+
+```bash
+nm -D output/llama.cpp/lib/libggml-cpu.so | grep "vec_dot_q5_0_q8_0"
+```
+
+Expected output:
+
+```
+00000000000a77b6 T ggml_vec_dot_q5_0_q8_0           # arch-specific (calls _rvv)
+0000000000066162 T ggml_vec_dot_q5_0_q8_0_generic   # scalar fallback
+```
+
+The `_generic` version is the fallback. If only `_generic` exists (no arch-specific symbol), the patch was not applied or the arch source was not compiled.
+
+### Checklist for Adding New RVV Kernels
+
+| Step | Command / Action | Pitfall |
+|------|-----------------|---------|
+| 1. Copy `.inl` | `cp rvv-patches/<name>/<name>.inl vendor/.../arch/riscv/` | File may already exist from previous build |
+| 2. Apply patch | `git apply rvv-patches/<name>/patch.diff` | Patch format must match exact line counts |
+| 3. Touch source | `touch vendor/.../arch/riscv/quants.c` (or repack.cpp) | `.inl` changes alone don't trigger recompile |
+| 4. Rebuild | `cd output/llama.cpp/.build && ninja -j4` | `ninja` only updates `.build/bin/` |
+| 5. Install `.so` | `cp bin/libggml-cpu.so.* ../../lib/` | **Most commonly missed step** |
+| 6. Verify string | `strings output/llama.cpp/lib/libggml-cpu.so \| grep "RVV-TRACE"` | Confirms the new code is in the loaded library |
+| 7. Run inference | Use a model that contains the target quant format | Wrong model = kernel never called, no trace output |
+| 8. Remove trace | Restore clean `.inl` before committing | Don't leave debug code in production |
 
 ## References
 
