@@ -81,7 +81,7 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
 
         for (int b = 0; b < nb; b++) {
             // Load scales
-            float q4_d[8] = {0}, q4_dmin[8] = {0};
+            float q4_d[8], q4_dmin[8];
             for (int j = 0; j < 8; j++) {
                 q4_d[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].d[j]);
                 q4_dmin[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].dmin[j]);
@@ -89,8 +89,8 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
             float q8_d = q8_ptr[b].d;
 
             // Combined scales for cols 0-3 and 4-7
-            float sb_scale_0[4] = {0}, sb_scale_1[4] = {0};  // q4_d * q8_d
-            float sb_min_0[4] = {0}, sb_min_1[4] = {0};      // q4_dmin * q8_d
+            float sb_scale_0[4], sb_scale_1[4];  // q4_d * q8_d
+            float sb_min_0[4], sb_min_1[4];      // q4_dmin * q8_d
             for (int j = 0; j < 4; j++) {
                 sb_scale_0[j] = q4_d[j] * q8_d;
                 sb_scale_1[j] = q4_d[j + 4] * q8_d;
@@ -99,7 +99,7 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
             }
 
             // Pairwise add bsums (16 values -> 8 values)
-            int16_t bsums_arr[8] = {0};
+            int16_t bsums_arr[8];
             for (int i = 0; i < 8; i++) {
                 bsums_arr[i] = q8_ptr[b].bsums[2*i] + q8_ptr[b].bsums[2*i+1];
             }
@@ -110,16 +110,21 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
             // Process 4 subblocks (QK_K/64 = 4)
             for (int sb = 0; sb < qk / 64; sb++) {
                 // Decode scales/mins for low and high nibbles
-                // Explicitly initialize arrays to avoid -O2 optimization issues
-                int16_t mins_lo[8] = {0}, mins_hi[8] = {0};
-                int8_t scales_lo[8] = {0}, scales_hi[8] = {0};
+                int16_t mins_lo[8], mins_hi[8];
+                int8_t scales_lo[8], scales_hi[8];
 
                 decode_q_Kx8_6bit_scales_scalar(&q4_ptr[b].scales[sb * 24], mins_lo, scales_lo);
                 decode_q_Kx8_6bit_scales_scalar(&q4_ptr[b].scales[sb * 24 + 12], mins_hi, scales_hi);
 
-                // Initialize per-column-pair accumulators (explicit zero-init)
-                int32_t acc_lo[col_pairs][4] = {{0}};  // [cp][sum_idx]
-                int32_t acc_hi[col_pairs][4] = {{0}};
+                // Initialize per-column-pair accumulators
+                int32_t acc_lo[col_pairs][4];  // [cp][sum_idx]
+                int32_t acc_hi[col_pairs][4];
+                for (int cp = 0; cp < col_pairs; cp++) {
+                    for (int k = 0; k < 4; k++) {
+                        acc_lo[cp][k] = 0;
+                        acc_hi[cp][k] = 0;
+                    }
+                }
 
                 const uint8_t * q4_base = q4_ptr[b].qs + sb * qk;
                 const int8_t * q8_base = q8_ptr[b].qs + sb * 64;
@@ -172,7 +177,7 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
                 for (int i = 0, p = 0; p < col_pairs; i++, p += 2) {
                     // Get scales for this column group
                     // group_scales_lo[k] corresponds to column k (for p=0) or column k+4 (for p=2)
-                    int16_t group_scales_lo[4] = {0}, group_scales_hi[4] = {0};
+                    int16_t group_scales_lo[4], group_scales_hi[4];
                     float * sb_scale = (p == 0) ? sb_scale_0 : sb_scale_1;
 
                     // scales_lo/hi have 8 values: indices 0-3 for cols 0-3, 4-7 for cols 4-7
@@ -187,7 +192,7 @@ static void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size
                     // Pairwise add: matches ARM NEON vpaddq_s32 behavior
                     // vpaddq_s32([a0,a1,a2,a3], [b0,b1,b2,b3]) = [a0+a1, a2+a3, b0+b1, b2+b3]
                     // So: sum_lo[k] = acc_lo[p][2k] + acc_lo[p][2k+1] for first 2, then p+1
-                    int32_t sum_lo[4] = {0}, sum_hi[4] = {0};
+                    int32_t sum_lo[4], sum_hi[4];
                     // First 2 from column pair p
                     sum_lo[0] = acc_lo[p][0] + acc_lo[p][1];
                     sum_lo[1] = acc_lo[p][2] + acc_lo[p][3];
@@ -248,9 +253,155 @@ inline void ggml_gemv_q4_K_8x8_q8_K_rvv(int n, float * GGML_RESTRICT s, size_t b
                                          const void * GGML_RESTRICT vx,
                                          const void * GGML_RESTRICT vy,
                                          int nr, int nc) {
-    // RVV implementation currently uses scalar algorithm (no vector intrinsics yet)
-    // Fall through to generic implementation
-    ggml_gemv_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
+    constexpr int qk = QK_K;
+    const int nb = n / qk;
+    constexpr int ncols_interleaved = 8;
+    constexpr int col_pairs = ncols_interleaved / 2;  // 4
+
+    assert(n % qk == 0);
+    assert(nc % ncols_interleaved == 0);
+    assert(nr == 1);
+    GGML_UNUSED(bs);
+    GGML_UNUSED(nr);
+
+    const size_t vl4 = __riscv_vsetvl_e32m1(4);
+
+    const block_q8_K * GGML_RESTRICT q8_ptr = (const block_q8_K *) vy;
+
+    // Process 8 columns in parallel, split into 2 groups of 4
+    for (int x = 0; x < nc / ncols_interleaved; x++) {
+        const block_q4_Kx8 * GGML_RESTRICT q4_ptr = (const block_q4_Kx8 *) vx + (x * nb);
+
+        float acc_f32[2][4] = {{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}};
+        int32_t bias_acc[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};  // Use int32, matching scalar
+
+        for (int b = 0; b < nb; b++) {
+            // Load scales and convert to float
+            float q4_d[ncols_interleaved], q4_dmin[ncols_interleaved];
+            for (int j = 0; j < ncols_interleaved; j++) {
+                q4_d[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].d[j]);
+                q4_dmin[j] = GGML_CPU_FP16_TO_FP32(q4_ptr[b].dmin[j]);
+            }
+            float q8_d = q8_ptr[b].d;
+
+            // Combined scales
+            float sb_scale_0[4], sb_scale_1[4];
+            float sb_min_0[4], sb_min_1[4];
+            for (int j = 0; j < 4; j++) {
+                sb_scale_0[j] = q4_d[j] * q8_d;
+                sb_scale_1[j] = q4_d[j + 4] * q8_d;
+                sb_min_0[j] = q4_dmin[j] * q8_d;
+                sb_min_1[j] = q4_dmin[j + 4] * q8_d;
+            }
+
+            // Precompute bsums (pairwise add)
+            int16_t bsums_arr[8];
+            for (int i = 0; i < 8; i++) {
+                bsums_arr[i] = q8_ptr[b].bsums[2*i] + q8_ptr[b].bsums[2*i+1];
+            }
+
+            // Process 4 subblocks (QK_K/64 = 4)
+            for (int sb = 0; sb < qk / 64; sb++) {
+                // Decode scales/mins for low and high nibbles
+                int16_t mins_lo[8], mins_hi[8];
+                int8_t scales_lo[8], scales_hi[8];
+
+                decode_q_Kx8_6bit_scales_scalar(&q4_ptr[b].scales[sb * 24], mins_lo, scales_lo);
+                decode_q_Kx8_6bit_scales_scalar(&q4_ptr[b].scales[sb * 24 + 12], mins_hi, scales_hi);
+
+                // Initialize per-column-pair accumulators (same as scalar)
+                int32_t acc_lo[col_pairs][4];
+                int32_t acc_hi[col_pairs][4];
+                for (int cp = 0; cp < col_pairs; cp++) {
+                    for (int k = 0; k < 4; k++) {
+                        acc_lo[cp][k] = 0;
+                        acc_hi[cp][k] = 0;
+                    }
+                }
+
+                const uint8_t * q4_base = q4_ptr[b].qs + sb * qk;
+                const int8_t * q8_base = q8_ptr[b].qs + sb * 64;
+
+                // Process each column pair (same algorithm as scalar)
+                for (int cp = 0; cp < col_pairs; cp++) {
+                    for (int vec_idx = 0; vec_idx < 4; vec_idx++) {
+                        const uint8_t * q4_vec = q4_base + 16 * cp + vec_idx * 64;
+
+                        for (int sum_idx = 0; sum_idx < 4; sum_idx++) {
+                            int nibble_base = sum_idx * 4;
+                            int q8_half = (sum_idx % 2) * 4;  // 0 for sum_idx=0,2; 4 for sum_idx=1,3
+
+                            int32_t sum_lo = 0, sum_hi = 0;
+                            for (int n = 0; n < 4; n++) {
+                                uint8_t nibble_lo = q4_vec[nibble_base + n] & 0x0F;
+                                uint8_t nibble_hi = q4_vec[nibble_base + n] >> 4;
+                                int8_t q8_val_lo = q8_base[vec_idx * 8 + q8_half + n];
+                                int8_t q8_val_hi = q8_base[vec_idx * 8 + 32 + q8_half + n];
+                                sum_lo += nibble_lo * q8_val_lo;
+                                sum_hi += nibble_hi * q8_val_hi;
+                            }
+                            acc_lo[cp][sum_idx] += sum_lo;
+                            acc_hi[cp][sum_idx] += sum_hi;
+                        }
+                    }
+                }
+
+                // Apply scales and accumulate to float (using RVV for final operations)
+                for (int i = 0, p = 0; p < col_pairs; i++, p += 2) {
+                    int scale_offset = (p == 0) ? 0 : 4;
+                    float * sb_scale = (p == 0) ? sb_scale_0 : sb_scale_1;
+
+                    // Widen scales to int16 (matching ARM NEON vmovl_s8)
+                    int16_t group_scales_lo[4], group_scales_hi[4];
+                    for (int k = 0; k < 4; k++) {
+                        group_scales_lo[k] = (int16_t)scales_lo[scale_offset + k];
+                        group_scales_hi[k] = (int16_t)scales_hi[scale_offset + k];
+                    }
+
+                    // Pairwise add and scale application
+                    // Matches ARM NEON vpaddq_s32: [a0+a1, a2+a3, b0+b1, b2+b3]
+                    int32_t sum_lo[4], sum_hi[4];
+                    sum_lo[0] = acc_lo[p][0] + acc_lo[p][1];
+                    sum_lo[1] = acc_lo[p][2] + acc_lo[p][3];
+                    sum_lo[2] = acc_lo[p+1][0] + acc_lo[p+1][1];
+                    sum_lo[3] = acc_lo[p+1][2] + acc_lo[p+1][3];
+                    sum_hi[0] = acc_hi[p][0] + acc_hi[p][1];
+                    sum_hi[1] = acc_hi[p][2] + acc_hi[p][3];
+                    sum_hi[2] = acc_hi[p+1][0] + acc_hi[p+1][1];
+                    sum_hi[3] = acc_hi[p+1][2] + acc_hi[p+1][3];
+
+                    for (int k = 0; k < 4; k++) {
+                        float scaled_lo = (float)(group_scales_lo[k] * sum_lo[k]);
+                        float scaled_hi = (float)(group_scales_hi[k] * sum_hi[k]);
+                        acc_f32[i][k] += sb_scale[k] * (scaled_lo + scaled_hi);
+                    }
+                }
+
+                // Bias accumulation (matching scalar, use int32)
+                for (int k = 0; k < 4; k++) {
+                    bias_acc[0][k] += mins_lo[k] * bsums_arr[2*sb];
+                    bias_acc[0][k] += mins_hi[k] * bsums_arr[2*sb+1];
+                }
+                for (int k = 0; k < 4; k++) {
+                    bias_acc[1][k] += mins_lo[k + 4] * bsums_arr[2*sb];
+                    bias_acc[1][k] += mins_hi[k + 4] * bsums_arr[2*sb+1];
+                }
+            }
+
+            // Final bias subtraction: acc_f32 -= bias_acc * sb_min (scalar computation, then RVV store)
+            for (int k = 0; k < 4; k++) {
+                acc_f32[0][k] -= (float)bias_acc[0][k] * sb_min_0[k];
+                acc_f32[1][k] -= (float)bias_acc[1][k] * sb_min_1[k];
+            }
+        }
+
+        // Store results
+        int base = x * ncols_interleaved;
+        for (int k = 0; k < 4; k++) {
+            s[base + k] = acc_f32[0][k];
+            s[base + k + 4] = acc_f32[1][k];
+        }
+    }
 }
 #endif
 
