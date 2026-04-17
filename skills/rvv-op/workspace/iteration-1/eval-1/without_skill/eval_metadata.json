@@ -1,0 +1,7 @@
+{
+  "eval_id": 1,
+  "eval_name": "llama-cpp-vec-dot-q6k-english",
+  "prompt": "I need to vectorize vec_dot_q6_K_q8_K for RISC-V RVV in applications/llama.cpp. VLEN=512.",
+  "config": "without_skill",
+  "assertions": []
+}

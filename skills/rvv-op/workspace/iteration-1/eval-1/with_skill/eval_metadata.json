@@ -1,0 +1,77 @@
+{
+  "eval_id": 1,
+  "eval_name": "llama-cpp-vec-dot-q6k-english",
+  "prompt": "I need to vectorize vec_dot_q6_K_q8_K for RISC-V RVV in applications/llama.cpp. VLEN=512.",
+  "assertions": [
+    {
+      "name": "created_rvv_patches_dir",
+      "text": "Created rvv-patches directory for the operator",
+      "check": "File exists: applications/llama.cpp/rvv-patches/vec_dot_q6_K_q8_K/ or similar operator-name directory under rvv-patches/"
+    },
+    {
+      "name": "created_inl_file",
+      "text": "Created .inl file with RVV implementation",
+      "check": "File exists matching rvv-patches/*/rvv_*.inl under applications/llama.cpp/"
+    },
+    {
+      "name": "inl_has_rvv_guard",
+      "text": ".inl file uses __riscv_v_intrinsic compile-time guard",
+      "check": "Content of .inl file contains '#if defined(__riscv_v_intrinsic)' or similar conditional compilation for RVV"
+    },
+    {
+      "name": "inl_has_rvv_header",
+      "text": ".inl file includes riscv_vector.h",
+      "check": "Content of .inl file contains '#include <riscv_vector.h>' or '#include <riscv_vector.h>'"
+    },
+    {
+      "name": "created_test_cpp",
+      "text": "Created test.cpp with correctness test",
+      "check": "File exists matching rvv-patches/*/test.cpp under applications/llama.cpp/"
+    },
+    {
+      "name": "test_has_scalar_ref",
+      "text": "test.cpp includes scalar reference implementation",
+      "check": "test.cpp content contains a scalar/generic reference function (not just the RVV version)"
+    },
+    {
+      "name": "test_has_rng",
+      "text": "test.cpp uses deterministic data generation",
+      "check": "test.cpp content contains rng, random, LCG, or pseudo-random data generation with a fixed seed"
+    },
+    {
+      "name": "created_patch_diff",
+      "text": "Created patch.diff for integration",
+      "check": "File exists matching rvv-patches/*/patch.diff under applications/llama.cpp/"
+    },
+    {
+      "name": "patch_targets_riscv",
+      "text": "patch.diff targets the RISC-V arch source file",
+      "check": "patch.diff content references 'arch/riscv' or a riscv-specific source path"
+    },
+    {
+      "name": "created_readme",
+      "text": "Created README.md with documentation",
+      "check": "File exists matching rvv-patches/*/README.md under applications/llama.cpp/"
+    },
+    {
+      "name": "readme_has_signature",
+      "text": "README.md includes function signature",
+      "check": "README.md content contains the operator function name and signature"
+    },
+    {
+      "name": "cross_platform_analysis",
+      "text": "Analyzed cross-platform (ARM/x86) implementations",
+      "check": "Any output file mentions ARM, NEON, x86, AVX, or cross-platform analysis"
+    },
+    {
+      "name": "mentions_gap_analysis",
+      "text": "Describes gap analysis step",
+      "check": "Any output file mentions 'gap analysis', 'rvv-gap-analysis', or cross-platform gap"
+    },
+    {
+      "name": "test_uses_optnone",
+      "text": "test.cpp uses __attribute__((optnone)) for scalar reference",
+      "check": "test.cpp content contains 'optnone' or attribute that disables optimization for scalar reference"
+    }
+  ]
+}

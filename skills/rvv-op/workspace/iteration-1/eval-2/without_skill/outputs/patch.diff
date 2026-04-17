@@ -1,0 +1,175 @@
+diff --git a/cmake/onnxruntime_mlas.cmake b/cmake/onnxruntime_mlas.cmake
+index e3f4a5b..f1a2b3c 100644
+--- a/cmake/onnxruntime_mlas.cmake
++++ b/cmake/onnxruntime_mlas.cmake
+@@ -835,6 +835,7 @@
+      if(RISCV64 AND MLAS_SOURCE_IS_NOT_SET)
+          set(mlas_platform_srcs
++          ${MLAS_SRC_DIR}/riscv64/SoftmaxKernelRvvFp16.cpp
+           ${MLAS_SRC_DIR}/riscv64/SgemmKernelRvv512.cpp
+           ${MLAS_SRC_DIR}/riscv64/SgemmPackB16.cpp
+           ${MLAS_SRC_DIR}/riscv64/SgemmKernelRvv.cpp
+@@ -843,6 +844,8 @@
+          )
+          # Define VLEN_512 for 512-bit vector register builds
+          add_compile_definitions(VLEN_512)
++        # Enable FP16 vector extension for softmax kernels
++        string(APPEND CMAKE_CXX_FLAGS " -march=rv64gcv_zvfh")
+          if(NOT ONNXRUNTIME_MLAS_MULTI_ARCH)
+            set(MLAS_SOURCE_IS_NOT_SET 0)
+          endif()
+diff --git a/onnxruntime/core/mlas/lib/mlasi.h b/onnxruntime/core/mlas/lib/mlasi.h
+index c1fde9e..d4e5f6a 100644
+--- a/onnxruntime/core/mlas/lib/mlasi.h
++++ b/onnxruntime/core/mlas/lib/mlasi.h
+@@ -1376,6 +1376,10 @@
+ #if defined(MLAS_TARGET_RISCV)
+     MLAS_GEMM_FLOAT_KERNEL* GemmFloatKernel;
+     MLAS_SGEMM_PACKB16_KERNEL* PackB16Kernel;
++    struct MLAS_SOFTMAX_DISPATCH* SoftmaxDispatch;
++#endif
++
++#if defined(MLAS_TARGET_RISCV) && defined(MLAS_RVV_VLEN_512)
++    bool HasFp16Softmax;
+ #endif
+ #if defined(MLAS_TARGET_AMD64_IX86)
+     const MLAS_GEMM_QUANT_DISPATCH* GemmU8S8Dispatch;
+diff --git a/onnxruntime/core/mlas/lib/platform.cpp b/onnxruntime/core/mlas/lib/platform.cpp
+index 2c0e1f0..a5b6c7d 100644
+--- a/onnxruntime/core/mlas/lib/platform.cpp
++++ b/onnxruntime/core/mlas/lib/platform.cpp
+@@ -800,6 +800,16 @@
+
+ #if defined(MLAS_TARGET_RISCV)
+
++    //
++    // Setup FP16 softmax dispatch if Zvfh extension is available.
++    //
++
++#if defined(MLAS_RVV_VLEN_512) && defined(__riscv_zvfh)
++    this->HasFp16Softmax = true;
++    this->SoftmaxDispatch = &SoftmaxDispatchRvvFp16;
++#else
++    this->HasFp16Softmax = false;
++    this->SoftmaxDispatch = nullptr;
++#endif
++
+     //
+     // Use the RVV GEMM kernel for float matrix multiplication.
+     // Select VL=16 kernel for 512-bit VLEN implementations.
+diff --git a/onnxruntime/core/mlas/lib/riscv64/SoftmaxKernelRvvFp16.cpp b/onnxruntime/core/mlas/lib/riscv64/SoftmaxKernelRvvFp16.cpp
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/onnxruntime/core/mlas/lib/riscv64/SoftmaxKernelRvvFp16.cpp
+@@ -0,0 +1,108 @@
++/*++
++
++Copyright (c) RVFuse Project. All rights reserved.
++
++Licensed under the MIT License.
++
++Module Name:
++
++    SoftmaxKernelRvvFp16.cpp
++
++Abstract:
++
++    RVV FP16 softmax kernel registration for MLAS dispatch.
++
++    This file includes the RVV softmax implementation (softmax_fp16_rvv512.inl)
++    and creates the MLAS_SOFTMAX_DISPATCH function pointer table that
++    MLAS uses to dispatch FP16 softmax operations.
++
++    Target: VLEN=512, SEW=16 (FP16), LMUL=1, VL=32 elements.
++    Requires: __riscv_zvfh (half-precision floating-point vector extension)
++
++--*/
++
++#include "mlasi.h"
++#include "softmax.h"
++
++#if defined(MLAS_TARGET_RISCV) && defined(MLAS_RVV_VLEN_512) && defined(__riscv_zvfh)
++
++#include <riscv_vector.h>
++
++// Include the core RVV FP16 softmax implementation
++// This contains: ExpVectorFp16, SumExpVectorFp16, ReduceMax_Kernel_Fp16_Rvv512,
++//                SumExp_Kernel_Fp16_Rvv512, Softmax_Kernel_Fp16_Rvv512,
++//                Exp_Kernel_Fp16_Rvv512, LogSoftmax_Kernel_Fp16_Rvv512
++#include "softmax_fp16_rvv512.inl"
++
++//
++// MLAS dispatch wrapper functions.
++// These functions match the MLAS_SOFTMAX_DISPATCH function pointer signatures.
++//
++
++namespace {
++
++MLAS_FP16
++ReduceMaxWrapper(const MLAS_FP16* Input, size_t N) {
++    return softmax_rvv512::ReduceMax_Kernel_Fp16_Rvv512(Input, N);
++}
++
++MLAS_FP16
++SumExpWrapper(const MLAS_FP16* Input, MLAS_FP16* Output, size_t N,
++              const MLAS_FP16 NegativeMaximum) {
++    return softmax_rvv512::SumExp_Kernel_Fp16_Rvv512(Input, Output, N,
++                                                         NegativeMaximum);
++}
++
++void
++SoftmaxWrapper(const MLAS_FP16* Input, MLAS_FP16* Output, size_t N,
++               const MLAS_FP16 Sum) {
++    softmax_rvv512::Softmax_Kernel_Fp16_Rvv512(Input, Output, N, Sum);
++}
++
++void
++LogSoftmaxWrapper(const MLAS_FP16* Input, MLAS_FP16* Output, size_t N,
++                  const MLAS_FP16 NegativeMaximum, const MLAS_FP16 LogSum) {
++    softmax_rvv512::LogSoftmax_Kernel_Fp16_Rvv512(Input, Output, N,
++                                                     NegativeMaximum, LogSum);
++}
++
++void
++ExpWrapper(const MLAS_FP16* Input, MLAS_FP16* Output, size_t N) {
++    softmax_rvv512::Exp_Kernel_Fp16_Rvv512(Input, Output, N);
++}
++
++//
++// Static dispatch table for RVV FP16 softmax kernels.
++// Tanh_Fp16 and Softcap_Fp16 are not yet implemented.
++//
++
++MLAS_SOFTMAX_DISPATCH SoftmaxDispatchRvvFp16Storage = {
++    /*Tanh_Fp16*/       nullptr,           // TODO: implement Tanh_Fp16
++    /*Softcap_Fp16*/    nullptr,           // TODO: implement Softcap_Fp16
++    /*Exp_Fp16*/        ExpWrapper,
++    /*ReduceMax_Fp16*/  ReduceMaxWrapper,
++    /*SumExp_Fp16*/     SumExpWrapper,
++    /*Softmax_Fp16*/    SoftmaxWrapper,
++    /*LogSoftmax_Fp16*/ LogSoftmaxWrapper,
++};
++
++}  // anonymous namespace
++
++//
++// Global dispatch pointer accessible from platform.cpp.
++//
++
++MLAS_SOFTMAX_DISPATCH* SoftmaxDispatchRvvFp16 = &SoftmaxDispatchRvvFp16Storage;
++
++#endif // MLAS_TARGET_RISCV && MLAS_RVV_VLEN_512 && __riscv_zvfh
+diff --git a/onnxruntime/core/mlas/lib/softmax.h b/onnxruntime/core/mlas/lib/softmax.h
+index a1b2c3d..e4f5g6h 100644
+--- a/onnxruntime/core/mlas/lib/softmax.h
++++ b/onnxruntime/core/mlas/lib/softmax.h
+@@ -79,6 +79,8 @@
+
+     LogSoftmax_Fp16_Fn* LogSoftmax_Fp16 = nullptr;
+ };
++
++// RVV FP16 softmax dispatch (defined in SoftmaxKernelRvvFp16.cpp)
++extern MLAS_SOFTMAX_DISPATCH* SoftmaxDispatchRvvFp16;
+
+ #endif  // SOFTMAX_H

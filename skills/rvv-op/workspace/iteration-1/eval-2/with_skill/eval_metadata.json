@@ -1,0 +1,57 @@
+{
+  "eval_id": 2,
+  "eval_name": "yolo-softmax-greenfield",
+  "prompt": "对applications/yolo中的softmax_fp16算子实现RVV向量化，VLEN=512。这个应用还没有rvv-patches目录，需要先建立。",
+  "assertions": [
+    {
+      "name": "created_rvv_patches_dir",
+      "text": "Created rvv-patches directory for the operator under applications/yolo/",
+      "check": "File exists: applications/yolo/rvv-patches/ directory was created"
+    },
+    {
+      "name": "created_inl_file",
+      "text": "Created .inl file with RVV implementation",
+      "check": "File exists matching applications/yolo/rvv-patches/*/rvv_*.inl"
+    },
+    {
+      "name": "inl_has_rvv_guard",
+      "text": ".inl file uses __riscv_v_intrinsic compile-time guard",
+      "check": "Content of .inl file contains '#if defined(__riscv_v_intrinsic)' or similar conditional compilation for RVV"
+    },
+    {
+      "name": "created_test_cpp",
+      "text": "Created test.cpp with correctness test",
+      "check": "File exists matching applications/yolo/rvv-patches/*/test.cpp"
+    },
+    {
+      "name": "test_has_scalar_ref",
+      "text": "test.cpp includes scalar reference implementation",
+      "check": "test.cpp content contains a scalar/generic reference function (not just the RVV version)"
+    },
+    {
+      "name": "created_patch_diff",
+      "text": "Created patch.diff for integration",
+      "check": "File exists matching applications/yolo/rvv-patches/*/patch.diff"
+    },
+    {
+      "name": "created_readme",
+      "text": "Created README.md with documentation",
+      "check": "File exists matching applications/yolo/rvv-patches/*/README.md"
+    },
+    {
+      "name": "cross_platform_analysis",
+      "text": "Attempted cross-platform analysis",
+      "check": "Any output file mentions analyzing ARM, NEON, x86, AVX, or cross-platform SIMD implementations"
+    },
+    {
+      "name": "mentions_gap_analysis",
+      "text": "Describes gap analysis step",
+      "check": "Any output file mentions 'gap analysis', 'rvv-gap-analysis', or cross-platform gap"
+    },
+    {
+      "name": "discovered_app_structure",
+      "text": "Explored applications/yolo/ structure before implementing",
+      "check": "Any output file references the yolo application directory structure, README, or build files"
+    }
+  ]
+}

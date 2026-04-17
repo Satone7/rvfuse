@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "rvv-op", "runs": [{"id": "eval-0-with_skill", "prompt": "\u4e3allama.cpp\u5b9e\u73b0ggml_gemv_q5_0_q8_0\u7b97\u5b50\u7684RISC-V RVV\u5411\u91cf\u5316\uff0c\u5411\u91cf\u5bc4\u5b58\u5668512bit", "eval_id": 0, "outputs": [{"name": "SUMMARY.md", "type": "text", "content": "# Implementation Summary: ggml_gemv_q5_0_q8_0 RVV Vectorization\n\n## Task\n\nImplement RISC-V RVV vectorized `ggml_gemv_q5_0_q8_0` operator for llama.cpp with VLEN=512.\n\n## Steps Taken\n\n### Step 1: Read Application README\n\nRead `/home/pren/wsp/cx/rvfuse/applications/llama.cpp/README.md`. Key findings:\n- llama.cpp pinned at commit `e21cdc11` (b8783)\n- Target: rv64gcv_zfh_zvfh_zicbop_zihintpause (lp64d ABI)\n- Existing rvv-patches: gemm-q4_K-8x4-q8_K, gemv-q4_K-8x8-q8_K, quantize-q8_0-4x4\n- Template directory exists at rvv-patches/_template/\n- Build system: build.sh orchestrator, LLVM 22 cross-compilation\n- Patch target: `ggml/src/ggml-cpu/arch/riscv/repack.cpp`\n\n### Step 2: Discover Application Structure\n\n| Item | Location |\n|------|----------|\n| RISC-V arch source | `vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/` |\n| Arch files | quants.c, repack.cpp, cpu-feats.cpp, rvv_*.inl |\n| Existing RVV Q5_0 | `rvv_vec_dot_q5_0_q8_0.inl` (vec_dot only, not GEMV) |\n| Generic Q5_0 dot | `quants.c:308` (`ggml_vec_dot_q5_0_q8_0_generic`) |\n| Q4_0 GEMV patterns | `repack.cpp` has `ggml_gemv_q4_0_8x8_q8_0`, `ggml_gemv_q4_0_16x1_q8_0` |\n| GEMV function declarations | `repack.h` (no Q5_0 GEMV exists) |\n\n### Step 3: Cross-Platform Analysis\n\n**Critical finding**: `ggml_gemv_q5_0_q8_0` does NOT exist in upstream llama.cpp. Only `ggml_vec_dot_q5_0_q8_0` (a per-block vector dot product) exists. The GEMV pattern (processing multiple output columns) only exists for Q4_0 and Q4_K/Q5_K/Q6_K formats.\n\nCross-platform implementations of `ggml_vec_dot_q5_0_q8_0` (used as reference):\n\n| Platform | File | Lines | Key Operations |\n|----------|------|-------|----------------|\n| **ARM NEON** | `arch/arm/quants.c:840` | ~60 lines | `vld1q_u8`, `vandq_u8`, `vshrq_n_u8`, `table_b2b_1` lookup for 5th bit, `ggml_vdotq_s32` (i8*i8 dot), `vmlaq_n_f32` FMA, processes 2 blocks at once |\n| **x86 AVX2** | `arch/x86/quants.c:846` | ~40 lines | `bytes_from_nibbles_32`, `bytes_from_bits_32`, `_mm256_andnot_si256` for 5th bit, `_mm256_or_si256`, `mul_sum_i8_pairs_float` (i8*i8 pairs), `_mm256_fmadd_ps` FMA |\n| **RISC-V RVV (existing)** | `arch/riscv/rvv_vec_dot_q5_0_q8_0.inl` | ~90 lines | Dual-path: VLEN>=256 (m1-based) and VLEN=128 (m2-based). Uses `vle8_v_u8mf2`, `vand_vx`, `vsrl_vx`, `vlm_v_b8` for bitmask, `vmnand_mm` for invert, `vsub_vx` masked subtract for sign extension, `vwmul_vv` widening MAC, `vwredsum_vs` reduction |\n| **Generic (scalar)** | `quants.c:308` | ~30 lines | Bit extraction loops, nibble unpack, signed multiply-accumulate |\n\n**Q5_0 format specifics**:\n- `block_q5_0`: 32 elements per block (QK5_0=32)\n- `d`: FP16 scale (2 bytes)\n- `qh[4]`: 5th bit for each element (4 bytes = 32 bits)\n- `qs[16]`: Packed 4-bit nibbles (16 bytes)\n- Value decoding: lower nibble = (qs[j] & 0x0F) | (qh bit j << 4) - 16; upper nibble = (qs[j] >> 4) | (qh bit (j+16) << 4) - 16\n\n### Step 4: Create Operator Package\n\nCreated 4 files in `rvv-patches/gemv-q5_0-q8_0/`:\n\n#### File 1: `rvv_gemv_q5_0_q8_0.inl` (12.9 KB)\n- **RVV implementation** (`ggml_gemv_q5_0_q8_0_rvv`):\n  - 16x1 tile: processes 16 output columns simultaneously\n  - Requires VLEN >= 512 (vlenb >= 64)\n  - Uses `__riscv_zvfh` for FP16 scale operations\n  - Per-block processing:\n    1. Load packed nibbles via `vle8_v_u8mf2`\n    2. Extract lower/upper nibbles via `vand_vx`/`vsrl_vx`\n    3. Load qh bitmask via `vlm_v_b8`\n    4. Invert mask via `vmnand_mm_b16`\n    5. Apply sign extension via masked `vsub_vx` (subtract 0x10 where qh bit is 0)\n    6. Compute dot product with Q8_0 activation block\n    7. Reduce int16 partials to int32 via `vwadd_vv`\n    8. Convert to float via `vfcvt_f_x_v`\n    9. Apply combined scale via `vfmul_vf` + `vfmacc_vv`\n  - Falls back to generic for VLEN < 512\n- **Generic implementation** (`ggml_gemv_q5_0_q8_0_generic`):\n  - Column-sequential scalar loop\n  - Bit extraction per element, nibble unpack, signed MAC\n- **Wrapper** (`ggml_gemv_q5_0_q8_0`):\n  - Compile-time dispatch: RVV+Zvfh or generic fallback\n\n#### File 2: `test.cpp` (12.0 KB)\n- FP16 conversion helpers (IEEE 754 half <-> single)\n- Scalar reference with `__attribute__((optnone))` for RVV targets\n- LCG-based deterministic RNG (seed=42)\n- 8 test cases:\n  - 1x32, 4x32, 16x64, 32x64, 48x128, 1x128, 16x256, 64x128\n- Tolerance: 1.0 (exact integer computation, small FP rounding in scale)\n\n#### File 3: `patch.diff` (601 B)\n- Targets: `ggml/src/ggml-cpu/arch/riscv/repack.cpp`\n- Adds `#include \"rvv_gemv_q5_0_q8_0.inl\"` after `#define UNUSED GGML_UNUSED`\n- 4 lines of context (standard git diff format)\n\n#### File 4: `README.md` (4.3 KB)\n- Function signature, parameter documentation\n- Algorithm description (8 steps)\n- Q5_0 and Q8_0 format specifications\n- Cross-platform reference table\n- Comparison with Q4_0 GEMV pattern\n- Build and test instructions\n- LLVM bug considerations\n\n### Step 5: What the Gap Analysis Would Do (Phase 4, Step 7)\n\nThe `rvv-gap-analysis` skill would:\n\n1. **Parse the RVV implementation** in `rvv_gemv_q5_0_q8_0.inl` to extract all RVV intrinsics used\n\n2. **Launch parallel subagent analysis** for each reference platform:\n   - x86 AVX2: Identify AVX2 intrinsics used in `arch/x86/quants.c:846` that have no RVV equivalent\n   - ARM NEON: Identify NEON intrinsics used in `arch/arm/quants.c:840` that have no RVV equivalent\n   - LoongArch LASX: Check for LoongArch vector extensions\n   - PowerPC VSX: Check for PowerPC vector extensions\n   - S390X VXE: Check for S390X vector extensions\n   - WASM SIMD: Check for WebAssembly SIMD128\n\n3. **Identify missing RVV instructions**, such as:\n   - No native nibble-to-byte expansion (x86 `pshufb`/`pmovzxbw` equivalent)\n   - No fused nibble-unpack-and-duplicate (ARM `table_b2b_1` equivalent)\n   - No direct masked byte subtract with sign extension\n   - No native int8xint8->int16 pairwise dot product with reduction (need separate `vwmul` + `vwredsum`)\n   - Missing 4-bit shuffle capabilities\n\n4. **Propose new RVV extensions** with benefit estimates:\n   - E.g., a nibble-expand instruction that converts 16 packed nibbles to 16 sign-extended bytes\n   - E.g., a 5th-bit-merge instruction for Q5 formats\n   - Benefit: reduce instruction count by ~30% for Q5_0 GEMV inner loop\n\n5. **Generate gap analysis report** at `docs/report/llama.cpp/rvv-gap-analysis-gemv-q5_0-q8_0-2026-04-17.md`\n\n### Step 6: What the PDF Report Would Do (Phase 4, Step 8)\n\nThe `lovstudio-any2pdf` skill would:\n\n1. Convert the gap analysis markdown report to a professionally typeset PDF\n2. Theme: `github-light`\n3. Skip cover page, skip watermark, skip frontispiece\n4. Output: `docs/report/llama.cpp/pdf/rvv-gap-analysis-gemv-q5_0-q8_0-2026-04-17.pdf`\n\n## Key Design Decisions\n\n1. **No interleaved Q5_0 format**: Unlike Q4_0 which has `block_q4_0x16` (16 columns interleaved in memory), Q5_0 has no upstream interleaved format. The implementation processes columns sequentially but accumulates 16 results simultaneously using vector registers.\n\n2. **16x1 tile**: Chosen to match the `ggml_gemv_q4_0_16x1_q8_0` pattern (requires Zvfh for FP16 scale operations). This tile size processes 16 output columns in parallel using m1/m2 vector registers.\n\n3. **Zvfh requirement**: FP16 scale conversion (`GGML_CPU_FP16_TO_FP32`) needs hardware FP16 support. Alternative: compute scales on host and pass as FP32.\n\n4. **Sign extension via masked subtract**: The existing `rvv_vec_dot_q5_0_q8_0.inl` uses this same technique (invert qh mask, then `vsub_vx_mu` with 0x10). This is the canonical RVV approach for Q5_0 sign extension.\n\n5. **Column-sequential memory access**: Without interleaved Q5_0 blocks, weight data is accessed column-by-column. This is less cache-friendly than interleaved formats but is a limitation of the existing Q5_0 storage layout.\n\n## Files Created\n\n| File | Path |\n|------|------|\n| RVV Implementation | `/home/pren/wsp/cx/rvfuse/applications/llama.cpp/rvv-patches/gemv-q5_0-q8_0/rvv_gemv_q5_0_q8_0.inl` |\n| Test | `/home/pren/wsp/cx/rvfuse/applications/llama.cpp/rvv-patches/gemv-q5_0-q8_0/test.cpp` |\n| Patch | `/home/pren/wsp/cx/rvfuse/applications/llama.cpp/rvv-patches/gemv-q5_0-q8_0/patch.diff` |\n| README | `/home/pren/wsp/cx/rvfuse/applications/llama.cpp/rvv-patches/gemv-q5_0-q8_0/README.md` |\n| Summary | `/home/pren/wsp/cx/rvfuse/skills/rvv-op/workspace/iteration-1/eval-0/with_skill/outputs/SUMMARY.md` |\n\n## Caveats\n\n- This is a **plan-and-implement evaluation** -- no builds or QEMU execution were performed\n- The implementation has not been compiled or tested against actual RISC-V hardware or QEMU\n- The patch has not been verified with `git apply --check` against the actual source tree\n- The RVV path in the .inl file contains a partially vectorized inner loop (per-column scalar extraction of dot product results) that could be further optimized with proper lane management"}], "grading": {"eval_id": 0, "eval_name": "llama-cpp-gemv-q5-q8-chinese", "config": "with_skill", "assertions": [{"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator", "passed": true, "evidence": "Files in rvv-patches/ subdir AND at applications/llama.cpp/rvv-patches/gemv-q5_0-q8_0/"}, {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": true, "evidence": "rvv_gemv_q5_0_q8_0.inl exists (11.4 KB)"}, {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": true, "evidence": "2 occurrences in .inl"}, {"name": "inl_has_rvv_header", "text": ".inl file includes riscv_vector.h", "passed": true, "evidence": "14 references in .inl"}, {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": true, "evidence": "test.cpp exists (12.3 KB)"}, {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "32 matches for generic/scalar in test.cpp"}, {"name": "test_has_rng", "text": "test.cpp uses deterministic data generation", "passed": true, "evidence": "33 RNG/seed/random matches in test.cpp"}, {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": true, "evidence": "patch.diff exists"}, {"name": "patch_targets_riscv", "text": "patch.diff targets the RISC-V arch source file", "passed": true, "evidence": "3 arch/riscv refs in patch.diff"}, {"name": "created_readme", "text": "Created README.md with documentation", "passed": true, "evidence": "README.md exists (4.3 KB)"}, {"name": "readme_has_signature", "text": "README.md includes function signature", "passed": true, "evidence": "Cross-platform function comparison present"}, {"name": "cross_platform_analysis", "text": "Analyzed cross-platform (ARM/x86) implementations", "passed": true, "evidence": "9 ARM/NEON/x86 matches across 4 files"}, {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": true, "evidence": "3 gap analysis matches in SUMMARY.md and README.md"}, {"name": "test_uses_optnone", "text": "test.cpp uses __attribute__((optnone))", "passed": true, "evidence": "5 optnone occurrences in test.cpp"}], "summary": {"passed": 14, "failed": 0, "total": 14}}}, {"id": "eval-0-without_skill", "prompt": "\u4e3allama.cpp\u5b9e\u73b0ggml_gemv_q5_0_q8_0\u7b97\u5b50\u7684RISC-V RVV\u5411\u91cf\u5316\uff0c\u5411\u91cf\u5bc4\u5b58\u5668512bit", "eval_id": 0, "outputs": [{"name": "README.md", "type": "text", "content": "# gemv-q5_0-8x8-q8_0\n\nRVV implementation of `ggml_gemv_q5_0_q8_0` - Q5_0 weights x Q8_0 activations GEMV (matrix-vector multiplication) with 8x8 interleaved tile blocking.\n\n## Status\n\n**Implementation Complete** - Ready for testing on RISC-V hardware with VLEN >= 256.\n\n## Motivation\n\nBased on the Qwen2.5-0.5B Q4_K_M profiling analysis (`perf_q4_hotspot_analysis.md`), `ggml_vec_dot_q5_0_q8_0_generic` accounts for **55.45%** of total inference time on the Banana Pi K1 (rv64imafdcv). This is the single largest hotspot in the entire inference pipeline.\n\nWhile llama.cpp already has an RVV implementation of `ggml_vec_dot_q5_0_q8_0` (single vector dot product), the GEMV variant (`ggml_gemv_q5_0_q8_0`) does not exist in the codebase. The GEMV approach provides better performance through:\n\n1. **Interleaved data layout**: 8 columns are processed together, improving cache locality\n2. **Reduced function call overhead**: One GEMV call replaces multiple vec_dot calls\n3. **Vector register reuse**: Q8_0 activations are loaded once and reused across 8 columns\n\n## Files\n\n| File | Purpose |\n|------|---------|\n| `rvv_gemv_q5_0_q8_0.inl` | RVV implementation (single source of truth) |\n| `patch.diff` | Patch to integrate into llama.cpp |\n| `test.cpp` | Correctness test (RVV vs scalar reference) |\n| `README.md` | This file |\n\n## Function Signature\n\n```cpp\nvoid ggml_gemv_q5_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs,\n    const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,\n    int nr, int nc);\n```\n\n**Parameters:**\n- `n`: Total number of elements per column (must be multiple of QK8_0=32)\n- `s`: Output vector of `nc` float results\n- `bs`: Stride between output elements (unused, `nc` columns are contiguous)\n- `vx`: Interleaved Q5_0 weight blocks (`block_q5_0x8[]`, nc/8 groups of n/QK blocks)\n- `vy`: Q8_0 activation blocks (`block_q8_0[]`, n/QK blocks)\n- `nr`: Number of rows (unused, always 1 for GEMV)\n- `nc`: Total number of columns (must be multiple of 8)\n\n## VLEN Requirement\n\n- **VLEN >= 256**: Uses optimized RVV intrinsics (m1 for 32-element ops, m2 for 128-element ops)\n- **VLEN < 256**: Falls back to scalar generic implementation\n- **Target**: 512-bit VLEN (vlenb = 64 bytes) for optimal performance\n\n## Data Structures\n\n### block_q5_0x8 (new, 176 bytes)\n\n```cpp\nstruct block_q5_0x8 {\n    ggml_half d[8];       // 8 half-precision scale factors (16 bytes)\n    uint8_t qh[8][4];     // 8 x 4-byte qh bitmasks (32 bytes)\n    uint8_t qs[128];      // interleaved nibble-packed quants (128 bytes)\n};\n```\n\nThis is a custom structure (not derived from the `template<K,N>` in repack.h) because Q5_0 requires a qh bitmask for 5-bit encoding, which doesn't fit the template pattern.\n\n### block_q8_0 (existing, 34 bytes)\n\n```cpp\ntypedef struct {\n    ggml_half d;       // delta (scale factor)\n    int8_t  qs[32];    // quantized values\n} block_q8_0;\n```\n\n### Q5_0 Quantization Format\n\nEach element is stored as 5-bit signed integer (range -16 to +15):\n- **qs[]**: Lower 4 bits of each element, packed as nibbles (2 per byte)\n- **qh[]**: 5th bit as a bitmask (1 bit per element, 32 bits per block)\n\nDequantization: `value = ((nibble & 0x0F) | (qh_bit << 4)) - 16`\n\n### Interleaved qs Layout\n\nThe 128-byte qs array stores 8 columns of 32 elements each (4-bit packed = 16 bytes per column):\n\n```\nOffset: k * 8 * 8 + j * 8 + i\n  k: chunk index (0..3, each chunk has 8 bytes = 16 nibbles)\n  j: column index (0..7)\n  i: byte index within chunk (0..7)\n\nEach byte contains two nibbles:\n  Low nibble (bits 0-3): element at position k*8+i (relative to column j)\n  High nibble (bits 4-7): element at position k*8+i+16 (relative to column j)\n```\n\n## Algorithm\n\nBased on ARM NEON `ggml_vec_dot_q5_0_q8_0` and RISC-V RVV `ggml_gemv_q4_0_8x8_q8_0`:\n\n### Per-block, per-chunk processing (2 chunks of 8 elements each):\n\n1. **Load activations**: 8 int8 values from Q8_0 block (low half and high half)\n2. **Load weights**: 32 bytes of interleaved nibbles for 4 columns\n3. **Extract nibbles**: `nib_lo = qs & 0x0F`, `nib_hi = qs >> 4`\n4. **Apply qh bitmask**:\n   - Load 4 bytes of qh per column as b8 mask\n   - Invert mask: `mask = ~qh` (need subtract where bit = 0)\n   - Masked subtract: `v = vsub(mask, nib, nib, 0x10)` where mask=1\n5. **Replicate activations**: Duplicate 8 a_lo values across 4 columns (32 elements)\n6. **Widening multiply**: `i8 * i8 -> i16` for all 32 pairs\n7. **Add high/low products**: `mul_total = mul_lo + mul_hi`\n8. **Horizontal reduction**: Extract 4 groups of 8 i16, reduce each to i32\n9. **Scale and accumulate**: `sumf[j] += sumi[j] * d_x[j] * d_y[l]`\n\n### Two column-pair groups:\n- Group 0: columns 0,1,2,3\n- Group 1: columns 4,5,6,7\n\n## RVV Intrinsics Used\n\n| Operation | Intrinsic | LMUL | Purpose |\n|-----------|-----------|------|---------|\n| Load uint8 | `vle8_v_u8m1` | m1 | Load 32 bytes of interleaved nibbles |\n| AND mask | `vand_vx_u8m1` | m1 | Extract low nibbles (mask 0x0F) |\n| Shift right | `vsrl_vx_u8m1` | m1 | Extract high nibbles (shift by 4) |\n| Load mask | `vlm_v_b8` | - | Load qh bitmask as b8 mask |\n| Mask NOT | `vmnand_mm_b8` | - | Invert mask for sign extension |\n| Masked sub | `vsub_vx_i8m1_mu` | m1 | Subtract 0x10 for sign extension |\n| Load int8 | `vle8_v_i8m1` | m1 | Load Q8_0 activations |\n| Slide-up | `vslideup_vx_i8m1` | m1-m2 | Replicate activations across columns |\n| Widen mul | `vwmul_vv_i16m2` | m2 | i8*i8 -> i16 widening multiply |\n| Add | `vadd_vv_i16m2` | m2 | Add low and high nibble products |\n| Extract | `vget_v_i16m2_i16m1` | m1 | Extract per-column groups |\n| Widen redsum | `vwredsum_vs_i16m1_i32m1` | m1 | Reduce i16 -> i32 |\n\n## Build & Test\n\n```bash\n# Cross-compile with RVV extensions (VLEN=512)\nriscv64-linux-gnu-g++ -std=c++17 -O2 \\\n    -march=rv64gcv_zvl512b -mabi=lp64d \\\n    -DGGML_USE_RISCV_V -D__riscv_v_fixed_vlen=512 \\\n    test.cpp -o test_gemv_q5_0 -lm\n\n# Run under QEMU\nqemu-riscv64 -L /path/to/sysroot ./test_gemv_q5_0\n\n# Scalar build (no RVV, for reference comparison)\ng++ -std=c++17 -O2 test.cpp -o test_scalar -lm\n./test_scalar\n```\n\n### Integration with llama.cpp\n\n```bash\n# Copy .inl to vendor source directory\ncp rvv_gemv_q5_0_q8_0.inl \\\n    vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/\n\n# Apply patch\ncd vendor/llama.cpp\ngit apply ../../rvv-patches/gemv-q5_0-8x8-q8_0/patch.diff\n\n# Rebuild\ncd ../..\n./build.sh --skip-source --skip-sysroot\n```\n\n## Cross-Platform Analysis\n\n| Platform | File | Approach | Key Technique |\n|----------|------|----------|---------------|\n| **RISC-V RVV** (this) | `arch/riscv/rvv_vec_dot_q5_0_q8_0.inl` | Dual-path (m1/m2) | vlm b8 mask + masked subtract for qh |\n| **ARM NEON** | `arch/arm/quants.c:840` | 2-block unrolled | Lookup table for qh, vdotq_s32 |\n| **x86 AVX2** | `arch/x86/quants.c:846` | AVX2 intrinsics | bytes_from_bits_32 for qh, mul_sum_i8_pairs_float |\n| **Generic C** | `quants.c:308` | Scalar loop | Bit extraction + sign extension per element |\n\n### Key Differences in qh Handling\n\n| Platform | qh Extraction Method |\n|----------|---------------------|\n| **RISC-V RVV** (vec_dot) | `vlm_v_b8` + `vmnand_mm` + masked `vsub 0x10` |\n| **ARM NEON** | Lookup table `table_b2b_1` for `(!b) << 4`, then `vsubq` |\n| **x86 AVX2** | `bytes_from_bits_32` (pshufb-based), then `_mm256_or_si256` |\n| **Generic** | `(qh >> j) & 1` per element |\n\n## Relationship to Existing Functions\n\n```\nggml_vec_dot_q5_0_q8_0          (already vectorized in llama.cpp)\n  |-- Single vector dot product\n  |-- Called per-column, per-block in mul_mat\n  |-- Signature: (n, s, bs, vx, bx, vy, by, nrc)\n\nggml_gemv_q5_0_q8_0            (THIS IMPLEMENTATION - new)\n  |-- Matrix-vector multiply, 8 columns interleaved\n  |-- Processes entire matrix row at once\n  |-- Signature: (n, s, bs, vx, vy, nr, nc)\n  |-- Requires block_q5_0x8 interleaved format\n\nggml_gemv_q4_0_8x8_q8_0        (existing RVV in llama.cpp)\n  |-- Same GEMV pattern, Q4_0 weights instead of Q5_0\n  |-- Reference for interleaved layout and algorithm structure\n```\n\n## Performance Expectations\n\nBased on the profiling data:\n- **Current hotspot**: `ggml_vec_dot_q5_0_q8_0_generic` = 55.45% of total execution\n- **Expected speedup**: 4-8x over scalar (RVV vectorization + interleaved cache benefits)\n- **Projected total impact**: Reduce inference time by ~40-50%\n\n## References\n\n- ARM NEON implementation: `vendor/llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (line 840)\n- x86 AVX2 implementation: `vendor/llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (line 846)\n- RISC-V RVV vec_dot: `vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/rvv_vec_dot_q5_0_q8_0.inl`\n- RISC-V RVV gemv_q4_0: `vendor/llama.cpp/ggml/src/ggml-cpu/arch/riscv/repack.cpp` (line 114)\n- Generic scalar: `vendor/llama.cpp/ggml/src/ggml-cpu/quants.c` (line 308)\n- Hotspot analysis: `applications/llama.cpp/temp/perf_q4_hotspot_analysis.md`\n"}, {"name": "patch.diff", "type": "binary", "mime": "text/x-diff", "data_uri": "data:text/x-diff;base64,ZGlmZiAtLWdpdCBhL2dnbWwvc3JjL2dnbWwtY3B1L3JlcGFjay5oIGIvZ2dtbC9zcmMvZ2dtbC1jcHUvcmVwYWNrLmgKaW5kZXggYzU4OWEyMS4uYWJjZGVmMCAxMDA2NDQKLS0tIGEvZ2dtbC9zcmMvZ2dtbC1jcHUvcmVwYWNrLmgKKysrIGIvZ2dtbC9zcmMvZ2dtbC1jcHUvcmVwYWNrLmgKQEAgLTM4LDYgKzM4LDE4IEBAIHVzaW5nIGJsb2NrX3E0XzB4NCA9IGJsb2NrPDQsIDQ+OwogdXNpbmcgYmxvY2tfcTRfMHg4ID0gYmxvY2s8NCwgOD47CiB1c2luZyBibG9ja19xNF8weDE2ID0gYmxvY2s8NCwgMTY+OwogdXNpbmcgYmxvY2tfcThfMHg0ID0gYmxvY2s8OCwgND47CiB1c2luZyBibG9ja19xOF8weDggPSBibG9jazw4LCA4PjsKIHVzaW5nIGJsb2NrX3E4XzB4MTYgPSBibG9jazw4LCAxNj47CgorLy8gUTVfMCBpbnRlcmxlYXZlZCBibG9jayBmb3IgOC1jb2x1bW4gR0VNVgorLy8gQ3VzdG9tIHN0cnVjdHVyZSAobm90IGZyb20gdGVtcGxhdGU8PiBzaW5jZSBRNV8wIGhhcyA1LWJpdCBwYWNraW5nICsgcWggYml0bWFzaykKK3N0cnVjdCBibG9ja19xNV8weDggeworICAgIGdnbWxfaGFsZiBkWzhdOyAgICAgICAvLyA4IGhhbGYtcHJlY2lzaW9uIHNjYWxlIGZhY3RvcnMgKDE2IGJ5dGVzKQorICAgIHVpbnQ4X3QgcWhbOF1bNF07ICAgICAvLyA4IHggNC1ieXRlIHFoIGJpdG1hc2tzICgzMiBieXRlcykKKyAgICB1aW50OF90IHFzWzEyOF07ICAgICAgLy8gaW50ZXJsZWF2ZWQgbmliYmxlLXBhY2tlZCBxdWFudHMgKDEyOCBieXRlcykKKyAgICAgICAgICAgICAgICAgICAgICAgICAgLy8gTGF5b3V0OiBbY29sMF9iMHxjb2wxX2IwfC4uLnxjb2w3X2IwfGNvbDBfYjF8Li4ufGNvbDdfYjNdCit9Oworc3RhdGljX2Fzc2VydChzaXplb2YoYmxvY2tfcTVfMHg4KSA9PSAxNzYsICJ3cm9uZyBxNV8weDggYmxvY2sgc2l6ZS9wYWRkaW5nIik7CisKK3ZvaWQgZ2dtbF9nZW12X3E1XzBfcThfMChpbnQgbiwgZmxvYXQgKiBHR01MX1JFU1RSSUNUIHMsIHNpemVfdCBicywKKyAgICBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eCwgY29uc3Qgdm9pZCAqIEdHTUxfUkVTVFJJQ1QgdnksCisgICAgaW50IG5yLCBpbnQgbmMpOworCiBzdHJ1Y3QgYmxvY2tfcTRfS3g4IHsKZGlmZiAtLWdpdCBhL2dnbWwvc3JjL2dnbWwtY3B1L2FyY2gvcmlzY3YvcmVwYWNrLmNwcCBiL2dnbWwvc3JjL2dnbWwtY3B1L2FyY2gvcmlzY3YvcmVwYWNrLmNwcAppbmRleCBjMzc0ODhjLi5lODk5NzkyIDEwMDY0NAotLS0gYS9nZ21sL3NyYy9nZ21sLWNwdS9hcmNoL3Jpc2N2L3JlcGFjay5jcHAKKysrIGIvZ2dtbC9zcmMvZ2dtbC1jcHUvYXJjaC9yaXNjdi9yZXBhY2suY3BwCkBAIC05NTAsNiArOTUwLDMwIEBAIHZvaWQgZ2dtbF9nZW12X3EyX0tfMTZ4MV9xOF9LKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAogICAgIGdnbWxfZ2Vtdl9xMl9LXzE2eDFfcThfS19nZW5lcmljKG4sIHMsIGJzLCB2eCwgdnksIG5yLCBuYyk7CiAjZW5kaWYKIH0KKworLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCisvLyBnZ21sX2dlbXZfcTVfMF9xOF8wOiBRNV8wIHdlaWdodHMgeCBROF8wIGFjdGl2YXRpb25zIEdFTVYgKDh4OCBpbnRlcmxlYXZlZCkKKy8vIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQorLy8gUlZWIGltcGxlbWVudGF0aW9uOiBzaW5nbGUgc291cmNlIG9mIHRydXRoIGlzIHJ2dl9nZW12X3E1XzBfcThfMC5pbmwKKy8vIChjb3BpZWQgdG8gdGhpcyBkaXJlY3RvcnkgYnkgYnVpbGQuc2ggYmVmb3JlIHBhdGNoIGlzIGFwcGxpZWQpCisjaW5jbHVkZSAicnZ2X2dlbXZfcTVfMF9xOF8wLmlubCIKKwordm9pZCBnZ21sX2dlbXZfcTVfMF9xOF8wKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAorICAgIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ4LCBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eSwKKyAgICBpbnQgbnIsIGludCBuYykgeworI2lmIGRlZmluZWQoX19yaXNjdl92X2ludHJpbnNpYykKKyAgICBnZ21sX2dlbXZfcTVfMF9xOF8wX3J2dihuLCBzLCBicywgdngsIHZ5LCBuciwgbmMpOworI2Vsc2UKKyAgICBnZ21sX2dlbXZfcTVfMF9xOF8wX2dlbmVyaWMobiwgcywgYnMsIHZ4LCB2eSwgbnIsIG5jKTsKKyNlbmRpZgorfQoKIHZvaWQgZ2dtbF9nZW12X3E1X0tfOHg0X3E4X0soaW50IG4sIGZsb2F0ICogR0dNTF9SRVNUUklDVCBzLCBzaXplX3QgYnMsIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ4LCBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eSwgaW50IG5yLCBpbnQgbmMpIHsKICAgICBjb25zdCBpbnQgcWsgPSBRS19LOwpkaWZmIC0tZ2l0IGEvZ2dtbC9zcmMvZ2dtbC1jcHUvcmVwYWNrLmNwcCBiL2dnbWwvc3JjL2dnbWwtY3B1L3JlcGFjay5jcHAKaW5kZXggYzM3NDg4Yy4uZTg5OTc5MiAxMDA2NDQKLS0tIGEvZ2dtbC9zcmMvZ2dtbC1jcHUvcmVwYWNrLmNwcAorKysgYi9nZ21sL3NyYy9nZ21sLWNwdS9yZXBhY2suY3BwCkBAIC01MDAsNiArNTAwLDcgQEAgdm9pZCBnZ21sX2dlbXZfcTRfMF84eDhfcThfMF9nZW5lcmljKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAogfQorCiB2b2lkIGdnbWxfZ2Vtdl9xNF9LXzh4NF9xOF9LX2dlbmVyaWMoaW50IG4sIGZsb2F0ICogR0dNTF9SRVNUUklDVCBzLCBzaXplX3QgYnMsIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ4LCBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eSwgaW50IG5yLCBpbnQgbmMpIHsKICAgICBjb25zdCBpbnQgcWsgPSBRS19LOwogICAgIGNvbnN0IGludCBuYiA9IG4gLyBxazsKQEAgLTg4Myw2ICs4ODQsNDQgQEAgdm9pZCBnZ21sX2dlbXZfcTRfMF84eDhfcThfMF9nZW5lcmljKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAogICAgIH0KIH0KCisvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KKy8vIGdnbWxfZ2Vtdl9xNV8wX3E4XzBfZ2VuZXJpYzogc2NhbGFyIHJlZmVyZW5jZSBmb3IgUTVfMCB4IFE4XzAgR0VNViAoOHg4KQorLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCisvLyBUaGlzIGZvbGxvd3MgdGhlIHNhbWUgcGF0dGVybiBhcyBnZ21sX2dlbXZfcTRfMF84eDhfcThfMF9nZW5lcmljIGJ1dAorLy8gd2l0aCA1LWJpdCBkZXF1YW50aXphdGlvbiAobmliYmxlICsgcWggYml0bWFzaykgaW5zdGVhZCBvZiA0LWJpdC4KK3ZvaWQgZ2dtbF9nZW12X3E1XzBfcThfMF9nZW5lcmljKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAorICAgIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ4LCBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eSwKKyAgICBpbnQgbnIsIGludCBuYykgeworICAgIGNvbnN0IGludCBxayA9IFFLOF8wOyAgLy8gMzIKKyAgICBjb25zdCBpbnQgbmIgPSBuIC8gcWs7CisgICAgY29uc3QgaW50IG5jb2xzX2ludGVybGVhdmVkID0gODsKKyAgICBjb25zdCBpbnQgYmxvY2tsZW4gPSA4OworCisgICAgYXNzZXJ0KG4gJSBxayA9PSAwKTsKKyAgICBhc3NlcnQobmMgJSBuY29sc19pbnRlcmxlYXZlZCA9PSAwKTsKKworICAgIEdHTUxfVU5VU0VEKGJzKTsKKyAgICBHR01MX1VOVVNFRChucik7CisKKyAgICBmbG9hdCBzdW1mWzhdOworICAgIGludCBzdW1pOworCisgICAgY29uc3QgYmxvY2tfcThfMCAqIGFfcHRyID0gKGNvbnN0IGJsb2NrX3E4XzAgKikgdnk7CisgICAgZm9yIChpbnQgeCA9IDA7IHggPCBuYyAvIG5jb2xzX2ludGVybGVhdmVkOyB4KyspIHsKKyAgICAgICAgY29uc3QgYmxvY2tfcTVfMHg4ICogYl9wdHIgPSAoY29uc3QgYmxvY2tfcTVfMHg4ICopIHZ4ICsgKHggKiBuYik7CisKKyAgICAgICAgZm9yIChpbnQgaiA9IDA7IGogPCBuY29sc19pbnRlcmxlYXZlZDsgaisrKSBzdW1mW2pdID0gMC4wOworICAgICAgICBmb3IgKGludCBsID0gMDsgbCA8IG5iOyBsKyspIHsKKyAgICAgICAgICAgIGZvciAoaW50IGsgPSAwOyBrIDwgKHFrIC8gKDIgKiBibG9ja2xlbikpOyBrKyspIHsKKyAgICAgICAgICAgICAgICBmb3IgKGludCBqID0gMDsgaiA8IG5jb2xzX2ludGVybGVhdmVkOyBqKyspIHsKKyAgICAgICAgICAgICAgICAgICAgc3VtaSA9IDA7CisgICAgICAgICAgICAgICAgICAgIGZvciAoaW50IGkgPSAwOyBpIDwgYmxvY2tsZW47ICsraSkgeworICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QgaW50IHFzX2lkeCA9IGsgKiBuY29sc19pbnRlcmxlYXZlZCAqIGJsb2NrbGVuICsgaiAqIGJsb2NrbGVuICsgaTsKKyAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGludCBlbGVtX2xvID0gayAqIGJsb2NrbGVuICsgaTsKKyAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGludCB4aF8wID0gKGJfcHRyW2xdLnFoW2pdW2VsZW1fbG8gLyA4XSA+PiAoZWxlbV9sbyAlIDgpKSAmIDE7CisgICAgICAgICAgICAgICAgICAgICAgICBjb25zdCBpbnQgdjAgPSAoaW50OF90KSgoKGJfcHRyW2xdLnFzW3FzX2lkeF0gJiAweDBGKSB8ICh4aF8wIDw8IDQpKSAtIDE2KTsKKyAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGludCBlbGVtX2hpID0gayAqIGJsb2NrbGVuICsgaSArIHFrIC8gMjsKKyAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGludCB4aF8xID0gKGJfcHRyW2xdLnFoW2pdW2VsZW1faGkgLyA4XSA+PiAoZWxlbV9oaSAlIDgpKSAmIDE7CisgICAgICAgICAgICAgICAgICAgICAgICBjb25zdCBpbnQgdjEgPSAoaW50OF90KSgoKGJfcHRyW2xdLnFzW3FzX2lkeF0gPj4gNCkgfCAoeGhfMSA8PCA0KSkgLSAxNik7CisgICAgICAgICAgICAgICAgICAgICAgICBzdW1pICs9IHYwICogYV9wdHJbbF0ucXNbayAqIGJsb2NrbGVuICsgaV0KKyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICsgdjEgKiBhX3B0cltsXS5xc1trICogYmxvY2tsZW4gKyBpICsgcWsgLyAyXTsKKyAgICAgICAgICAgICAgICAgICAgfQorICAgICAgICAgICAgICAgICAgICBzdW1mW2pdICs9IHN1bWkgKiBHR01MX0NQVV9GUDE2X1RPX0ZQMzIoYl9wdHJbbF0uZFtqXSkKKyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICogR0dNTF9DUFVfRlAxNl9UT19GUDMyKGFfcHRyW2xdLmQpOworICAgICAgICAgICAgICAgIH0KKyAgICAgICAgICAgIH0KKyAgICAgICAgfQorICAgICAgICBmb3IgKGludCBqID0gMDsgaiA8IG5jb2xzX2ludGVybGVhdmVkOyBqKyspIHNbeCAqIG5jb2xzX2ludGVybGVhdmVkICsgal0gPSBzdW1mW2pdOworICAgIH0KK30KKwogdm9pZCBnZ21sX2dlbXZfcTRfS184eDRfcThfS19nZW5lcmljKGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLCBjb25zdCB2b2lkICogR0dNTF9SRVNUUklDVCB2eCwgY29uc3Qgdm9pZCAqIEdHTUxfUkVTVFJJQ1QgdnksIGludCBuciwgaW50IG5jKSB7CiAgICAgY29uc3QgaW50IHFrID0gUUtfSzsKICAgICBjb25zdCBpbnQgbmIgPSBuIC8gcWs7Cg=="}, {"name": "rvv_gemv_q5_0_q8_0.inl", "type": "binary", "mime": "application/octet-stream", "data_uri": "data:application/octet-stream;base64,Ly8gcnZ2X2dlbXZfcTVfMF9xOF8wLmlubCDigJQgUlZWIGltcGxlbWVudGF0aW9uIG9mIFE1XzAgeCBROF8wIEdFTVYgKDh4OCBpbnRlcmxlYXZlZCkKLy8KLy8gQ29tcHV0ZXM6IHNbY29sXSA9IHN1bV9sKCBkX3hbY29sXSAqIGRfeVtsXSAqIHN1bV9rKCBkZXF1YW50X3E1XzAoeCwgY29sLCBrKSAqIHE4XzBfeVtrXSApICkKLy8gZm9yIDggaW50ZXJsZWF2ZWQgY29sdW1ucyBhY3Jvc3MgbXVsdGlwbGUgYmxvY2tzLgovLwovLyBEYXRhIGxheW91dCAoYmxvY2tfcTVfMHg4KToKLy8gICAtIGRbOF06ICAgICAgICAgICAgICA4IGhhbGYtcHJlY2lzaW9uIHNjYWxlIGZhY3RvcnMgKG9uZSBwZXIgY29sdW1uKQovLyAgIC0gcWhbMzJdOiAgICAgICAgICAgIDV0aC1iaXQgYXJyYXlzIGZvciA4IGNvbHVtbnMgKDQgYnl0ZXMgcGVyIGNvbHVtbikKLy8gICAtIHFzWzEyOF06ICAgICAgICAgICBuaWJibGUtcGFja2VkIHF1YW50cyAoMTYgYnl0ZXMgcGVyIGNvbHVtbiwgaW50ZXJsZWF2ZWQpCi8vICAgICBxcyBsYXlvdXQ6IFtjb2wwX2JsazAgfCBjb2wxX2JsazAgfCAuLi4gfCBjb2w3X2JsazAgfCBjb2wwX2JsazEgfCAuLi4gXQovLyAgICAgV2l0aGluIGVhY2ggY29sdW1uJ3MgMTYgYnl0ZXM6IFtuaWJfbG9fZTAuLmUxNSB8IG5pYl9oaV9lMC4uZTE1XQovLwovLyBEYXRhIGxheW91dCAoYmxvY2tfcThfMCk6Ci8vICAgLSBkOiAgICAgICAgICAgICAgICAgaGFsZi1wcmVjaXNpb24gc2NhbGUgZmFjdG9yCi8vICAgLSBxc1szMl06ICAgICAgICAgICAgaW50OCBxdWFudGl6ZWQgdmFsdWVzCi8vCi8vIEFsZ29yaXRobSAoYmFzZWQgb24gQVJNIE5FT04gdmVjX2RvdF9xNV8wX3E4XzAgKyBSVlYgZ2Vtdl9xNF8wXzh4OF9xOF8wKToKLy8gICBQZXIgYmxvY2sgbCwgcGVyIGNodW5rIGsgKDAuLjEpLCBwZXIgY29sdW1uIGdyb3VwICgwLi4zIHBhaXJzKToKLy8gICAxLiBMb2FkIDMyIGJ5dGVzIG9mIGludGVybGVhdmVkIG5pYmJsZXMgKGxvdyBuaWJibGVzIG9mIDQgY29sdW1ucykKLy8gICAyLiBMb2FkIDMyIGJ5dGVzIG9mIGludGVybGVhdmVkIG5pYmJsZXMgKGFub3RoZXIgb2Zmc2V0IGZvciBoaWdoIG5pYmJsZXMpCi8vICAgMy4gU3BsaXQgbmliYmxlczogQU5EIHdpdGggMHgwRiAobG93KSAvIFNIUiBieSA0IChoaWdoKQovLyAgIDQuIEFwcGx5IHFoIGJpdG1hc2s6IG1hc2tlZCBzdWJ0cmFjdCAweDEwIHdoZXJlIHFoIGJpdCA9IDAKLy8gICA1LiBXaWRlbmluZyBtdWx0aXBseSB3aXRoIFE4XzAgYWN0aXZhdGlvbnMKLy8gICA2LiBIb3Jpem9udGFsIHJlZHVjdGlvbiBvZiBpMTYgYWNjdW11bGF0b3IgLT4gNCBzY2FsYXIgaW50MzIgc3VtcwovLyAgIDcuIFNjYWxlIGJ5IGRfeFtqXSAqIGRfeVtsXSBhbmQgYWNjdW11bGF0ZSB0byBmbG9hdAovLwovLyBWTEVOIHRhcmdldDogNTEyLWJpdCAodmxlbmIgPSA2NCkKLy8gICAtIDMyIGJ5dGVzIG9mIHFzIGZpdHMgaW4gbWYyIChoYWxmLWxlbmd0aCB2ZWN0b3IpCi8vICAgLSAzMiBpbnQ4IGVsZW1lbnRzIGZpdHMgaW4gbTEKLy8gICAtIENhbiBwcm9jZXNzIDQgY29sdW1ucyBvZiA4IGVsZW1lbnRzIHNpbXVsdGFuZW91c2x5Ci8vICAgLSBUd28gcGFzc2VzOiBsb3cgbmliYmxlcyAoZWxlbWVudHMgMC4uMTUpICsgaGlnaCBuaWJibGVzIChlbGVtZW50cyAxNi4uMzEpCi8vCi8vIEJhc2VkIG9uOgovLyAgIC0gQVJNIE5FT046IGdnbWxfdmVjX2RvdF9xNV8wX3E4XzAgKGFyY2gvYXJtL3F1YW50cy5jKQovLyAgIC0geDg2IEFWWDI6IGdnbWxfdmVjX2RvdF9xNV8wX3E4XzAgKGFyY2gveDg2L3F1YW50cy5jKQovLyAgIC0gUklTQy1WIFJWVjogZ2dtbF92ZWNfZG90X3E1XzBfcThfMF9ydnYgKGFyY2gvcmlzY3YvcnZ2X3ZlY19kb3RfcTVfMF9xOF8wLmlubCkKLy8gICAtIFJJU0MtViBSVlY6IGdnbWxfZ2Vtdl9xNF8wXzh4OF9xOF8wIChhcmNoL3Jpc2N2L3JlcGFjay5jcHApCi8vCi8vIFByZXJlcXVpc2l0ZXMgKHNhdGlzZmllZCBieSByZXBhY2suY3BwIG9yIHRlc3QuY3BwKToKLy8gICAtIFFLNV8wLCBRSzhfMCBtdXN0IGJlIGRlZmluZWQgKGJvdGggMzIpCi8vICAgLSBibG9ja19xNV8weDgsIGJsb2NrX3E4XzAgc3RydWN0dXJlcyBtdXN0IGJlIGRlZmluZWQKLy8gICAtIEdHTUxfUkVTVFJJQ1QsIEdHTUxfVU5VU0VELCBHR01MX0NQVV9GUDE2X1RPX0ZQMzIgbXVzdCBiZSBkZWZpbmVkCi8vICAgLSBhc3NlcnQoKSBtdXN0IGJlIGF2YWlsYWJsZQovLwovLyBUaGlzIGZpbGUgcHJvdmlkZXMgb25seSB0aGUgUlZWLW9wdGltaXplZCBmdW5jdGlvbiAoX3J2diBzdWZmaXgpLgovLyBUaGUgY2FsbGVyIGlzIHJlc3BvbnNpYmxlIGZvciBzZWxlY3RpbmcgUlZWIHZzIGdlbmVyaWMgZmFsbGJhY2suCgojaW5jbHVkZSA8Y2Fzc2VydD4KI2luY2x1ZGUgPGNzdHJpbmc+CgojaWYgZGVmaW5lZChfX3Jpc2N2X3ZfaW50cmluc2ljKQojaW5jbHVkZSA8cmlzY3ZfdmVjdG9yLmg+CiNlbmRpZgoKLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KLy8gUlZWIGltcGxlbWVudGF0aW9uIOKAlCA1MTItYml0IHRhcmdldCAodmxlbmIgPj0gMzIpCi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09CiNpZiBkZWZpbmVkKF9fcmlzY3Zfdl9pbnRyaW5zaWMpCnN0YXRpYyB2b2lkIGdnbWxfZ2Vtdl9xNV8wX3E4XzBfcnZ2KGludCBuLCBmbG9hdCAqIEdHTUxfUkVTVFJJQ1Qgcywgc2l6ZV90IGJzLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ4LAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IHZvaWQgKiBHR01MX1JFU1RSSUNUIHZ5LAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGludCBuciwgaW50IG5jKSB7CiAgICBjb25zdCBpbnQgcWsgPSBRSzhfMDsgIC8vIDMyCiAgICBjb25zdCBpbnQgbmIgPSBuIC8gcWs7CiAgICBjb25zdCBpbnQgbmNvbHNfaW50ZXJsZWF2ZWQgPSA4OwogICAgY29uc3QgaW50IGJsb2NrbGVuID0gODsKICAgIGNvbnN0IHNpemVfdCB2bGVuYiA9IF9fcmlzY3ZfdmxlbmIoKTsKCiAgICBhc3NlcnQobiAlIHFrID09IDApOwogICAgYXNzZXJ0KG5jICUgbmNvbHNfaW50ZXJsZWF2ZWQgPT0gMCk7CiAgICBHR01MX1VOVVNFRChucik7CiAgICBHR01MX1VOVVNFRChicyk7CgogICAgY29uc3QgYmxvY2tfcThfMCAqIGFfcHRyID0gKGNvbnN0IGJsb2NrX3E4XzAgKikgdnk7CgogICAgaWYgKHZsZW5iID49IDMyKSB7CiAgICAgICAgLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09CiAgICAgICAgLy8gVkxFTiA+PSAyNTYgKG9wdGltaXplZCBwYXRoLCB0YXJnZXQ6IDUxMi1iaXQgdmxlbmI9NjQpCiAgICAgICAgLy8KICAgICAgICAvLyBTdHJhdGVneTogUHJvY2VzcyA4IGNvbHVtbnMgcGVyIG91dGVyIGl0ZXJhdGlvbiwgdXNpbmcgdGhlCiAgICAgICAgLy8gaW50ZXJsZWF2ZWQgcXMgbGF5b3V0IHRvIGxvYWQgMzIgYnl0ZXMgKDQgY29sdW1ucyB4IDggZWxlbWVudHMpCiAgICAgICAgLy8gYXQgYSB0aW1lIHZpYSBtMSBvciBtZjIgdmVjdG9yIHJlZ2lzdGVycy4KICAgICAgICAvLwogICAgICAgIC8vIFBlciBibG9jayBsOgogICAgICAgIC8vICAgRm9yIGNodW5rIGsgaW4gWzAsIDFdOgogICAgICAgIC8vICAgICBMb2FkIGFfcHRyW2xdLnFzW2sqOCAuLiBrKjgrN10gICAtPiBhX2xvIChsb3cgaGFsZiBvZiBxOF8wKQogICAgICAgIC8vICAgICBMb2FkIGFfcHRyW2xdLnFzW2sqOCsxNiAuLiBrKjgrMjNdIC0+IGFfaGkgKGhpZ2ggaGFsZiBvZiBxOF8wKQogICAgICAgIC8vCiAgICAgICAgLy8gICAgIEZvciBjb2x1bW4gcGFpciBncm91cHMgY3AgaW4gWzAsIDEsIDIsIDNdOgogICAgICAgIC8vICAgICAgIExvYWQgNCB4IDggYnl0ZXMgZnJvbSBiX3B0cltsXS5xcyBhdCBpbnRlcmxlYXZlZCBvZmZzZXRzCiAgICAgICAgLy8gICAgICAgRXh0cmFjdCBuaWJibGVzLCBhcHBseSBxaCwgY29tcHV0ZSBkb3QgcHJvZHVjdAogICAgICAgIC8vCiAgICAgICAgLy8gICBNdWx0aXBseSBzdW1pW2pdIGJ5IGRfeFtqXSAqIGRfeVtsXSwgYWNjdW11bGF0ZSB0byBzdW1mW2pdCiAgICAgICAgLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09CgogICAgICAgIGZvciAoaW50IHggPSAwOyB4IDwgbmMgLyBuY29sc19pbnRlcmxlYXZlZDsgeCsrKSB7CiAgICAgICAgICAgIGNvbnN0IGJsb2NrX3E1XzB4OCAqIGJfcHRyID0gKGNvbnN0IGJsb2NrX3E1XzB4OCAqKSB2eCArICh4ICogbmIpOwoKICAgICAgICAgICAgLy8gRmxvYXQgYWNjdW11bGF0b3JzIGZvciA4IG91dHB1dCBjb2x1bW5zCiAgICAgICAgICAgIGZsb2F0IHN1bWZbOF0gPSB7MC4wZn07CgogICAgICAgICAgICBmb3IgKGludCBsID0gMDsgbCA8IG5iOyBsKyspIHsKICAgICAgICAgICAgICAgIGNvbnN0IGZsb2F0IGFfc2NhbGUgPSBHR01MX0NQVV9GUDE2X1RPX0ZQMzIoYV9wdHJbbF0uZCk7CgogICAgICAgICAgICAgICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQogICAgICAgICAgICAgICAgLy8gUHJvY2VzcyAyIGNodW5rcyBvZiA4IGVsZW1lbnRzIGVhY2gKICAgICAgICAgICAgICAgIC8vIGNodW5rIDA6IGVsZW1lbnRzIDAtNyAobG93IG5pYmJsZXMpICsgZWxlbWVudHMgMTYtMjMgKGhpZ2ggbmliYmxlcykKICAgICAgICAgICAgICAgIC8vIGNodW5rIDE6IGVsZW1lbnRzIDgtMTUgKGxvdyBuaWJibGVzKSArIGVsZW1lbnRzIDI0LTMxIChoaWdoIG5pYmJsZXMpCiAgICAgICAgICAgICAgICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgICAgICAgICBmb3IgKGludCBrID0gMDsgayA8IChxayAvICgyICogYmxvY2tsZW4pKTsgaysrKSB7CiAgICAgICAgICAgICAgICAgICAgLy8gUThfMCBhY3RpdmF0aW9uOiA4IGVsZW1lbnRzIGZyb20gbG93IGhhbGYgYW5kIDggZnJvbSBoaWdoIGhhbGYKICAgICAgICAgICAgICAgICAgICAvLyBhX2xvOiBhX3B0cltsXS5xc1trKjggLi4gayo4KzddCiAgICAgICAgICAgICAgICAgICAgLy8gYV9oaTogYV9wdHJbbF0ucXNbayo4KzE2IC4uIGsqOCsyM10KICAgICAgICAgICAgICAgICAgICBjb25zdCBzaXplX3QgdmxfOCA9IDg7CgogICAgICAgICAgICAgICAgICAgIC8vIExvYWQgUThfMCBsb3ctaGFsZiBhY3RpdmF0aW9ucyAoOCBlbGVtZW50cykKICAgICAgICAgICAgICAgICAgICBjb25zdCB2aW50OG0xX3QgYV9sbyA9IF9fcmlzY3ZfdmxlOF92X2k4bTEoCiAgICAgICAgICAgICAgICAgICAgICAgICZhX3B0cltsXS5xc1trICogYmxvY2tsZW5dLCB2bF84KTsKICAgICAgICAgICAgICAgICAgICAvLyBMb2FkIFE4XzAgaGlnaC1oYWxmIGFjdGl2YXRpb25zICg4IGVsZW1lbnRzKQogICAgICAgICAgICAgICAgICAgIGNvbnN0IHZpbnQ4bTFfdCBhX2hpID0gX19yaXNjdl92bGU4X3ZfaThtMSgKICAgICAgICAgICAgICAgICAgICAgICAgJmFfcHRyW2xdLnFzW2sgKiBibG9ja2xlbiArIHFrIC8gMl0sIHZsXzgpOwoKICAgICAgICAgICAgICAgICAgICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KICAgICAgICAgICAgICAgICAgICAvLyBQcm9jZXNzIDIgY29sdW1uLXBhaXIgZ3JvdXBzLCA0IGNvbHVtbnMgcGVyIGdyb3VwCiAgICAgICAgICAgICAgICAgICAgLy8gR3JvdXAgMDogY29sdW1ucyAwLDEsMiwzCiAgICAgICAgICAgICAgICAgICAgLy8gR3JvdXAgMTogY29sdW1ucyA0LDUsNiw3CiAgICAgICAgICAgICAgICAgICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgICAgICAgICAgICAgZm9yIChpbnQgY3AgPSAwOyBjcCA8IDI7IGNwKyspIHsKICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QgaW50IGNvbF9iYXNlID0gY3AgKiA0OwoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gTG9hZCAzMiBieXRlcyBvZiBpbnRlcmxlYXZlZCBxcyBmb3IgNCBjb2x1bW5zCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIExheW91dDogW2NvbDBfYnl0ZXMgfCBjb2wxX2J5dGVzIHwgY29sMl9ieXRlcyB8IGNvbDNfYnl0ZXNdCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIEVhY2ggY29sdW1uIGNvbnRyaWJ1dGVzIDggYnl0ZXMgKGJsb2NrbGVuPTgpCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIE9mZnNldDogayAqIG5jb2xzX2ludGVybGVhdmVkICogYmxvY2tsZW4gKyBjb2xfYmFzZSAqIGJsb2NrbGVuCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGludCBxc19vZmZzZXQgPSBrICogbmNvbHNfaW50ZXJsZWF2ZWQgKiBibG9ja2xlbgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICsgY29sX2Jhc2UgKiBibG9ja2xlbjsKCiAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IHZ1aW50OG0xX3QgcmF3ID0gX19yaXNjdl92bGU4X3ZfdThtMSgKICAgICAgICAgICAgICAgICAgICAgICAgICAgICZiX3B0cltsXS5xc1txc19vZmZzZXRdLCB2bF84ICogNCk7CgogICAgICAgICAgICAgICAgICAgICAgICAvLyBTcGxpdCBpbnRvIGxvd2VyIG5pYmJsZXMgWzAuLjddIHBlciBjb2x1bW4KICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QgdmludDhtMV90IG5pYl9sbyA9IF9fcmlzY3ZfdnJlaW50ZXJwcmV0X3ZfdThtMV9pOG0xKAogICAgICAgICAgICAgICAgICAgICAgICAgICAgX19yaXNjdl92YW5kX3Z4X3U4bTEocmF3LCAweDBGLCB2bF84ICogNCkpOwogICAgICAgICAgICAgICAgICAgICAgICAvLyBTcGxpdCBpbnRvIHVwcGVyIG5pYmJsZXMgWzE2Li4yM10gcGVyIGNvbHVtbgogICAgICAgICAgICAgICAgICAgICAgICBjb25zdCB2aW50OG0xX3QgbmliX2hpID0gX19yaXNjdl92cmVpbnRlcnByZXRfdl91OG0xX2k4bTEoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBfX3Jpc2N2X3ZzcmxfdnhfdThtMShyYXcsIDQsIHZsXzggKiA0KSk7CgogICAgICAgICAgICAgICAgICAgICAgICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQogICAgICAgICAgICAgICAgICAgICAgICAvLyBBcHBseSBxaCBiaXRtYXNrIGZvciBzaWduIGV4dGVuc2lvbgogICAgICAgICAgICAgICAgICAgICAgICAvLyBGb3IgZWFjaCBjb2x1bW4gaiAoMC4uMyk6CiAgICAgICAgICAgICAgICAgICAgICAgIC8vICAgcWhbaio0ICsgYnl0ZV9pZHhdIGJpdCAoayo4K2kpIGNvbnRyb2xzIGVsZW1lbnQgaQogICAgICAgICAgICAgICAgICAgICAgICAvLyAgIElmIGJpdCA9IDE6IHZhbHVlIGhhcyA1dGggYml0IHNldCAoYWxyZWFkeSA+PSAxNikKICAgICAgICAgICAgICAgICAgICAgICAgLy8gICBJZiBiaXQgPSAwOiBzdWJ0cmFjdCAweDEwIHRvIGNlbnRlciBhcm91bmQgMAogICAgICAgICAgICAgICAgICAgICAgICAvLwogICAgICAgICAgICAgICAgICAgICAgICAvLyBJbXBsZW1lbnRhdGlvbjogbG9hZCBxaCBieXRlcywgY3JlYXRlIG1hc2ssCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIG1hc2tlZC1zdWJ0cmFjdCAweDEwIHdoZXJlIHFoIGJpdCA9IDAKICAgICAgICAgICAgICAgICAgICAgICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIEZvciBuaWJfbG8gKGVsZW1lbnRzIGsqOCswIC4uIGsqOCs3IGZvciBlYWNoIGNvbHVtbik6CiAgICAgICAgICAgICAgICAgICAgICAgIC8vIEVsZW1lbnQgaW5kZXggd2l0aGluIGJsb2NrID0gaypibG9ja2xlbiArIGkgKGk9MC4uNykKICAgICAgICAgICAgICAgICAgICAgICAgLy8gcWggYnl0ZSBpbmRleCA9IChrKmJsb2NrbGVuICsgaSkgLyA4ID0gayAoc2luY2UgYmxvY2tsZW49OCkKICAgICAgICAgICAgICAgICAgICAgICAgLy8gcWggYml0IGluZGV4ICA9IChrKmJsb2NrbGVuICsgaSkgJSA4ID0gaQogICAgICAgICAgICAgICAgICAgICAgICAvLyBTbyBxaFtqKjQgKyBrXSBiaXQgaSBjb250cm9scyB0aGUgNXRoIGJpdAogICAgICAgICAgICAgICAgICAgICAgICB1aW50OF90IHFoX2J5dGVzX2xvWzRdOwogICAgICAgICAgICAgICAgICAgICAgICB1aW50OF90IHFoX2J5dGVzX2hpWzRdOwogICAgICAgICAgICAgICAgICAgICAgICBmb3IgKGludCBqID0gMDsgaiA8IDQ7IGorKykgewogICAgICAgICAgICAgICAgICAgICAgICAgICAgLy8gTG93IG5pYmJsZSBlbGVtZW50czogaW5kaWNlcyBrKjgrMCAuLiBrKjgrNwogICAgICAgICAgICAgICAgICAgICAgICAgICAgcWhfYnl0ZXNfbG9bal0gPSBiX3B0cltsXS5xaFtjb2xfYmFzZSArIGpdLnFoW2tdOwogICAgICAgICAgICAgICAgICAgICAgICAgICAgLy8gSGlnaCBuaWJibGUgZWxlbWVudHM6IGluZGljZXMgayo4KzE2IC4uIGsqOCsyMwogICAgICAgICAgICAgICAgICAgICAgICAgICAgcWhfYnl0ZXNfaGlbal0gPSBiX3B0cltsXS5xaFtjb2xfYmFzZSArIGpdLnFoWyhrICogOCArIDE2KSAvIDhdOwogICAgICAgICAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgICAgICAgICAvLyBMb2FkIHFoIGFzIGJpdG1hc2sgYW5kIGludmVydDogd2Ugd2FudCBtYXNrPTEgd2hlcmUgcWg9MAogICAgICAgICAgICAgICAgICAgICAgICAvLyAodGhvc2UgZWxlbWVudHMgbmVlZCBzdWJ0cmFjdCAweDEwKQogICAgICAgICAgICAgICAgICAgICAgICAvLyBMb2FkIDQgYnl0ZXMgYXMgYjggbWFzayAoMzIgYml0cyBmb3IgMzIgZWxlbWVudHMpCiAgICAgICAgICAgICAgICAgICAgICAgIHZib29sOF90IHFoX21hc2tfbG8gPSBfX3Jpc2N2X3ZsbV92X2I4KHFoX2J5dGVzX2xvLCB2bF84ICogNCk7CiAgICAgICAgICAgICAgICAgICAgICAgIHFoX21hc2tfbG8gPSBfX3Jpc2N2X3ZtbmFuZF9tbV9iOChxaF9tYXNrX2xvLCBxaF9tYXNrX2xvLCB2bF84ICogNCk7CgogICAgICAgICAgICAgICAgICAgICAgICB2Ym9vbDhfdCBxaF9tYXNrX2hpID0gX19yaXNjdl92bG1fdl9iOChxaF9ieXRlc19oaSwgdmxfOCAqIDQpOwogICAgICAgICAgICAgICAgICAgICAgICBxaF9tYXNrX2hpID0gX19yaXNjdl92bW5hbmRfbW1fYjgocWhfbWFza19oaSwgcWhfbWFza19oaSwgdmxfOCAqIDQpOwoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gQXBwbHkgc2lnbiBleHRlbnNpb246IHN1YnRyYWN0IDB4MTAgd2hlcmUgcWggYml0IHdhcyAwCiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQ4bTFfdCB2MF9sbyA9IF9fcmlzY3ZfdnN1Yl92eF9pOG0xX211KAogICAgICAgICAgICAgICAgICAgICAgICAgICAgcWhfbWFza19sbywgbmliX2xvLCBuaWJfbG8sIDB4MTAsIHZsXzggKiA0KTsKICAgICAgICAgICAgICAgICAgICAgICAgdmludDhtMV90IHYwX2hpID0gX19yaXNjdl92c3ViX3Z4X2k4bTFfbXUoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBxaF9tYXNrX2hpLCBuaWJfaGksIG5pYl9oaSwgMHgxMCwgdmxfOCAqIDQpOwoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KICAgICAgICAgICAgICAgICAgICAgICAgLy8gRG90IHByb2R1Y3Qgd2l0aCBROF8wIGFjdGl2YXRpb25zCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFdlIGhhdmUgMzIgaW50OCB2YWx1ZXMgKDQgY29sdW1ucyB4IDggZWxlbWVudHMpCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIGFuZCA4IGludDggYWN0aXZhdGlvbiB2YWx1ZXMuCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIE5lZWQgdG8gcmVwbGljYXRlIGFjdGl2YXRpb25zIGFjcm9zcyA0IGNvbHVtbnMuCiAgICAgICAgICAgICAgICAgICAgICAgIC8vCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFN0cmF0ZWd5OiB3aWRlbmluZyBtdWx0aXBseSArIGhvcml6b250YWwgcmVkdWN0aW9uCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFBlci1jb2x1bW4gZG90OiBzdW0odjBfbG9baio4Li5qKjgrN10gKiBhX2xvKSArCiAgICAgICAgICAgICAgICAgICAgICAgIC8vICAgICAgICAgICAgICAgICBzdW0odjBfaGlbaio4Li5qKjgrN10gKiBhX2hpKQogICAgICAgICAgICAgICAgICAgICAgICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gUmVwbGljYXRlIGFfbG8gdG8gMzIgZWxlbWVudHMgKDR4IHJlcGV0aXRpb24gZm9yIDQgY29sdW1ucykKICAgICAgICAgICAgICAgICAgICAgICAgdmludDhtMV90IGFfbG9fcmVwID0gX19yaXNjdl92bXZfdl94X2k4bTEoMCwgdmxfOCAqIDQpOwogICAgICAgICAgICAgICAgICAgICAgICBhX2xvX3JlcCA9IF9fcmlzY3ZfdnNsaWRldXBfdnhfaThtMShhX2xvX3JlcCwgYV9sbywgMCwgdmxfOCk7CiAgICAgICAgICAgICAgICAgICAgICAgIGFfbG9fcmVwID0gX19yaXNjdl92c2xpZGV1cF92eF9pOG0xKGFfbG9fcmVwLCBhX2xvLCA4LCB2bF84ICogMik7CiAgICAgICAgICAgICAgICAgICAgICAgIGFfbG9fcmVwID0gX19yaXNjdl92c2xpZGV1cF92eF9pOG0xKGFfbG9fcmVwLCBhX2xvLCAxNiwgdmxfOCAqIDQpOwoKICAgICAgICAgICAgICAgICAgICAgICAgdmludDhtMV90IGFfaGlfcmVwID0gX19yaXNjdl92bXZfdl94X2k4bTEoMCwgdmxfOCAqIDQpOwogICAgICAgICAgICAgICAgICAgICAgICBhX2hpX3JlcCA9IF9fcmlzY3ZfdnNsaWRldXBfdnhfaThtMShhX2hpX3JlcCwgYV9oaSwgMCwgdmxfOCk7CiAgICAgICAgICAgICAgICAgICAgICAgIGFfaGlfcmVwID0gX19yaXNjdl92c2xpZGV1cF92eF9pOG0xKGFfaGlfcmVwLCBhX2hpLCA4LCB2bF84ICogMik7CiAgICAgICAgICAgICAgICAgICAgICAgIGFfaGlfcmVwID0gX19yaXNjdl92c2xpZGV1cF92eF9pOG0xKGFfaGlfcmVwLCBhX2hpLCAxNiwgdmxfOCAqIDQpOwoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gV2lkZW5pbmcgbXVsdGlwbHk6IGk4ICogaTggLT4gaTE2CiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQxNm0yX3QgbXVsX2xvID0gX19yaXNjdl92d211bF92dl9pMTZtMih2MF9sbywgYV9sb19yZXAsIHZsXzggKiA0KTsKICAgICAgICAgICAgICAgICAgICAgICAgdmludDE2bTJfdCBtdWxfaGkgPSBfX3Jpc2N2X3Z3bXVsX3Z2X2kxNm0yKHYwX2hpLCBhX2hpX3JlcCwgdmxfOCAqIDQpOwoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gQWRkOiBtdWxfdG90YWwgPSBtdWxfbG8gKyBtdWxfaGkKICAgICAgICAgICAgICAgICAgICAgICAgdmludDE2bTJfdCBtdWxfdG90YWwgPSBfX3Jpc2N2X3ZhZGRfdnZfaTE2bTIobXVsX2xvLCBtdWxfaGksIHZsXzggKiA0KTsKCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIEhvcml6b250YWwgcmVkdWN0aW9uOiBpMTYgLT4gaTMyCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFdlIG5lZWQgNCBzZXBhcmF0ZSBzdW1zLCBvbmUgcGVyIGNvbHVtbiBncm91cCBvZiA4IGVsZW1lbnRzCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFVzZSBuYXJyb3dpbmcgc2hpZnQgdG8gcGFjayBhZGphY2VudCBwYWlycywgdGhlbiB3aWRlbi1hZGQKICAgICAgICAgICAgICAgICAgICAgICAgLy8gQXBwcm9hY2g6IHJlaW50ZXJwcmV0IGkxNm0yIGFzIHBhaXJzLCBzaGlmdC1hbmQtYWRkCiAgICAgICAgICAgICAgICAgICAgICAgIC8vCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIG11bF90b3RhbCBoYXMgMzIgaTE2IHZhbHVlczoKICAgICAgICAgICAgICAgICAgICAgICAgLy8gICBbY29sMF9lMCwgY29sMF9lMSwgLi4uLCBjb2wwX2U3LCBjb2wxX2UwLCAuLi4sIGNvbDNfZTddCiAgICAgICAgICAgICAgICAgICAgICAgIC8vCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFN0ZXAgMTogcmVkdWNlIGVhY2ggZ3JvdXAgb2YgOCBpMTYgLT4gaTMyCiAgICAgICAgICAgICAgICAgICAgICAgIC8vICAgVXNlIHZyZWRzdW0gdG8gZ2V0IGEgc2luZ2xlIGkzMiwgYnV0IHdlIG5lZWQgNCBzZXBhcmF0ZQogICAgICAgICAgICAgICAgICAgICAgICAvLyAgIEFwcHJvYWNoOiB2bnNybCB0byBuYXJyb3cgaTE2LT5pMzIgd2l0aCBzaGlmdAogICAgICAgICAgICAgICAgICAgICAgICB2aW50MzJtMV90IHplcm8gPSBfX3Jpc2N2X3Ztdl92X3hfaTMybTEoMCwgdmxfOCk7CgogICAgICAgICAgICAgICAgICAgICAgICAvLyBSZWR1Y3Rpb24gZm9yIGVhY2ggY29sdW1uOiBleHRyYWN0IGFuZCBzdW0gOCBpMTYgdmFsdWVzCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFVzZSB2Z2V0IHRvIGV4dHJhY3QgZ3JvdXBzLCB0aGVuIHZ3cmVkc3VtCiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQxNm0xX3QgY29sMCA9IF9fcmlzY3ZfdmdldF92X2kxNm0yX2kxNm0xKG11bF90b3RhbCwgMCk7CiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQxNm0xX3QgY29sMSA9IF9fcmlzY3ZfdmdldF92X2kxNm0yX2kxNm0xKG11bF90b3RhbCwgMSk7CiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQxNm0xX3QgY29sMiA9IF9fcmlzY3ZfdmdldF92X2kxNm0yX2kxNm0xKG11bF90b3RhbCwgMik7CiAgICAgICAgICAgICAgICAgICAgICAgIHZpbnQxNm0xX3QgY29sMyA9IF9fcmlzY3ZfdmdldF92X2kxNm0yX2kxNm0xKG11bF90b3RhbCwgMyk7CgogICAgICAgICAgICAgICAgICAgICAgICBpbnQzMl90IHN1bWlfMCA9IF9fcmlzY3Zfdm12X3hfc19pMzJtMV9pMzIoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBfX3Jpc2N2X3Z3cmVkc3VtX3ZzX2kxNm0xX2kzMm0xKGNvbDAsIHplcm8sIHZsXzgpKTsKICAgICAgICAgICAgICAgICAgICAgICAgaW50MzJfdCBzdW1pXzEgPSBfX3Jpc2N2X3Ztdl94X3NfaTMybTFfaTMyKAogICAgICAgICAgICAgICAgICAgICAgICAgICAgX19yaXNjdl92d3JlZHN1bV92c19pMTZtMV9pMzJtMShjb2wxLCB6ZXJvLCB2bF84KSk7CiAgICAgICAgICAgICAgICAgICAgICAgIGludDMyX3Qgc3VtaV8yID0gX19yaXNjdl92bXZfeF9zX2kzMm0xX2kzMigKICAgICAgICAgICAgICAgICAgICAgICAgICAgIF9fcmlzY3ZfdndyZWRzdW1fdnNfaTE2bTFfaTMybTEoY29sMiwgemVybywgdmxfOCkpOwogICAgICAgICAgICAgICAgICAgICAgICBpbnQzMl90IHN1bWlfMyA9IF9fcmlzY3Zfdm12X3hfc19pMzJtMV9pMzIoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBfX3Jpc2N2X3Z3cmVkc3VtX3ZzX2kxNm0xX2kzMm0xKGNvbDMsIHplcm8sIHZsXzgpKTsKCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIFNjYWxlIGFuZCBhY2N1bXVsYXRlCiAgICAgICAgICAgICAgICAgICAgICAgIHN1bWZbY29sX2Jhc2UgKyAwXSArPSAoZmxvYXQpc3VtaV8wCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAqIEdHTUxfQ1BVX0ZQMTZfVE9fRlAzMihiX3B0cltsXS5kW2NvbF9iYXNlICsgMF0pICogYV9zY2FsZTsKICAgICAgICAgICAgICAgICAgICAgICAgc3VtZltjb2xfYmFzZSArIDFdICs9IChmbG9hdClzdW1pXzEKICAgICAgICAgICAgICAgICAgICAgICAgICAgICogR0dNTF9DUFVfRlAxNl9UT19GUDMyKGJfcHRyW2xdLmRbY29sX2Jhc2UgKyAxXSkgKiBhX3NjYWxlOwogICAgICAgICAgICAgICAgICAgICAgICBzdW1mW2NvbF9iYXNlICsgMl0gKz0gKGZsb2F0KXN1bWlfMgogICAgICAgICAgICAgICAgICAgICAgICAgICAgKiBHR01MX0NQVV9GUDE2X1RPX0ZQMzIoYl9wdHJbbF0uZFtjb2xfYmFzZSArIDJdKSAqIGFfc2NhbGU7CiAgICAgICAgICAgICAgICAgICAgICAgIHN1bWZbY29sX2Jhc2UgKyAzXSArPSAoZmxvYXQpc3VtaV8zCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAqIEdHTUxfQ1BVX0ZQMTZfVE9fRlAzMihiX3B0cltsXS5kW2NvbF9iYXNlICsgM10pICogYV9zY2FsZTsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIGZvciAoaW50IGogPSAwOyBqIDwgbmNvbHNfaW50ZXJsZWF2ZWQ7IGorKykgewogICAgICAgICAgICAgICAgc1t4ICogbmNvbHNfaW50ZXJsZWF2ZWQgKyBqXSA9IHN1bWZbal07CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICB9IGVsc2UgewogICAgICAgIC8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQogICAgICAgIC8vIFZMRU4gPCAyNTY6IGZhbGwgYmFjayB0byBnZW5lcmljIHNjYWxhciBpbXBsZW1lbnRhdGlvbgogICAgICAgIC8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQogICAgICAgIGdnbWxfZ2Vtdl9xNV8wX3E4XzBfZ2VuZXJpYyhuLCBzLCBicywgdngsIHZ5LCBuciwgbmMpOwogICAgfQp9CiNlbmRpZiAvLyBfX3Jpc2N2X3ZfaW50cmluc2ljCg=="}, {"name": "test.cpp", "type": "text", "content": "// test.cpp \u2014 correctness test for RVV ggml_gemv_q5_0_q8_0\n//\n// Compares the RVV vectorized implementation against the scalar (generic)\n// reference on deterministic pseudo-random data.\n//\n// Build (rv64gcv, VLEN=512):\n//   riscv64-linux-gnu-g++ -std=c++17 -O2 -march=rv64gcv_zvl512b -mabi=lp64d \\\n//       -DGGML_USE_RISCV_V -D__riscv_v_fixed_vlen=512 -o test test.cpp -lm\n//\n// Build (scalar, for reference):\n//   g++ -std=c++17 -O2 -o test_scalar test.cpp -lm\n\n#include <cstdint>\n#include <cstddef>\n#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n#include <cassert>\n#include <cmath>\n#include <vector>\n\n// ---------------------------------------------------------------------------\n// Minimal ggml type definitions (from ggml-common.h)\n// ---------------------------------------------------------------------------\n#define QK5_0 32\n#define QK8_0 32\n#define GGML_RESTRICT\n#define GGML_UNUSED(x) (void)(x)\n\ntypedef uint16_t ggml_half;\n\n// IEEE 754 half-precision to single-precision conversion\nstatic inline float ggml_half_to_fp32(uint16_t h) {\n    uint32_t sign = (h >> 15) & 1;\n    uint32_t h_exp = (h >> 10) & 0x1F;\n    uint32_t h_mant = h & 0x3FF;\n    uint32_t f_exp, f_mant;\n    if (h_exp == 0) {\n        if (h_mant == 0) return sign ? -0.0f : 0.0f;\n        int shift = 0;\n        while ((h_mant & (1 << 9)) == 0) { h_mant <<= 1; shift++; }\n        h_mant &= 0x3FF;\n        f_exp = 127 - 15 - shift + 1;\n        f_mant = h_mant << 13;\n    } else if (h_exp == 31) {\n        if (h_mant == 0) return sign ? -INFINITY : INFINITY;\n        uint32_t nan_bits = (sign << 31) | (255 << 23) | (h_mant << 13);\n        return *(float*)&nan_bits;\n    } else {\n        f_exp = h_exp - 15 + 127;\n        f_mant = h_mant << 13;\n    }\n    uint32_t f_bits = (sign << 31) | (f_exp << 23) | f_mant;\n    return *(float*)&f_bits;\n}\n\nstatic inline uint16_t ggml_fp32_to_fp16(float f) {\n    if (f == 0.0f) return 0;\n    if (f < 0.0f) return ggml_fp32_to_fp16(-f) | 0x8000;\n    int exp = 15;\n    while (f >= 2.0f && exp < 30) { f /= 2.0f; exp++; }\n    while (f < 1.0f && exp > 0) { f *= 2.0f; exp--; }\n    uint32_t mant = (uint32_t)((f - 1.0f) * 1024.0f);\n    return (exp << 10) | (mant & 0x3FF);\n}\n\n#define GGML_CPU_FP16_TO_FP32(x) ggml_half_to_fp32(x)\n#define GGML_CPU_FP32_TO_FP16(x) ggml_fp32_to_fp16(x)\n\n// ---------------------------------------------------------------------------\n// Q8_0 block structure (from ggml-common.h)\n// ---------------------------------------------------------------------------\ntypedef struct {\n    ggml_half d;       // delta (scale factor)\n    int8_t  qs[QK8_0]; // quantized values\n} block_q8_0;\n\n// ---------------------------------------------------------------------------\n// Q5_0 single block structure (from ggml-common.h)\n// ---------------------------------------------------------------------------\ntypedef struct {\n    ggml_half d;           // delta (scale factor)\n    uint8_t  qh[4];       // 5th bit of quants (32 bits for 32 elements)\n    uint8_t  qs[QK5_0/2]; // nibbles / quants (16 bytes)\n} block_q5_0;\n\n// ---------------------------------------------------------------------------\n// Q5_0 interleaved block structure for 8-column GEMV\n//\n// Custom structure (Q5_0 has 5-bit packing + qh bitmask, not in template<>):\n//   d[8]:    8 half-precision scale factors (16 bytes)\n//   qh[8][4]: 8 x 4-byte qh bitmasks (32 bytes)\n//   qs[128]: interleaved nibble-packed quants (128 bytes)\n//\n// qs interleaving: qs[k * 8 * 8 + j * 8 + i] gives the i-th byte of\n// the j-th column's k-th chunk. Each byte contains two nibbles (low + high).\n// ---------------------------------------------------------------------------\nstruct block_q5_0x8 {\n    ggml_half d[8];       // 8 scale factors (16 bytes)\n    uint8_t qh[8][4];     // 8 x 4-byte qh bitmasks (32 bytes)\n    uint8_t qs[128];      // interleaved nibble-packed quants (128 bytes)\n};\n// Total: 16 + 32 + 128 = 176 bytes\nstatic_assert(sizeof(block_q5_0x8) == 176, \"block_q5_0x8 should be 176 bytes\");\n\n// ---------------------------------------------------------------------------\n// Scalar (generic) reference implementation\n//\n// Based on ggml_vec_dot_q5_0_q8_0_generic from quants.c,\n// extended to the GEMV interleaved pattern from ggml_gemv_q4_0_8x8_q8_0_generic.\n//\n// For each group of 8 columns and each block:\n//   For each chunk k (0..1, each 8 elements):\n//     For each column j (0..7):\n//       sumi = 0\n//       For each element i (0..7):\n//         Extract 5-bit value from qs (nibble + qh bit)\n//         sumi += q5_value * q8_0_value\n//       sumf[j] += sumi * d_x[j] * d_y[l]\n// ---------------------------------------------------------------------------\n#if defined(__riscv_v_intrinsic)\n__attribute__((optnone))  // Disable optimization to avoid LLVM bug\n#endif\nstatic void ggml_gemv_q5_0_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,\n                                          const void * GGML_RESTRICT vx,\n                                          const void * GGML_RESTRICT vy,\n                                          int nr, int nc) {\n    const int qk = QK8_0;  // 32\n    const int nb = n / qk;\n    const int ncols_interleaved = 8;\n    const int blocklen = 8;\n\n    assert(n % qk == 0);\n    assert(nc % ncols_interleaved == 0);\n\n    GGML_UNUSED(bs);\n    GGML_UNUSED(nr);\n\n    float sumf[8];\n    int sumi;\n\n    const block_q8_0 * a_ptr = (const block_q8_0 *) vy;\n    for (int x = 0; x < nc / ncols_interleaved; x++) {\n        const block_q5_0x8 * b_ptr = (const block_q5_0x8 *) vx + (x * nb);\n\n        for (int j = 0; j < ncols_interleaved; j++) sumf[j] = 0.0;\n        for (int l = 0; l < nb; l++) {\n            for (int k = 0; k < (qk / (2 * blocklen)); k++) {\n                for (int j = 0; j < ncols_interleaved; j++) {\n                    sumi = 0;\n                    for (int i = 0; i < blocklen; ++i) {\n                        // Index into interleaved qs\n                        const int qs_idx = k * ncols_interleaved * blocklen\n                                         + j * blocklen + i;\n\n                        // Low nibble: element at position (k * blocklen + i)\n                        // within the Q5_0 block (indices 0..15)\n                        const int elem_lo = k * blocklen + i;\n                        const int qh_byte_lo = elem_lo / 8;\n                        const int qh_bit_lo  = elem_lo % 8;\n                        const int xh_0 = (b_ptr[l].qh[j][qh_byte_lo] >> qh_bit_lo) & 1;\n                        const int v0 = (int8_t)(((b_ptr[l].qs[qs_idx] & 0x0F) | (xh_0 << 4)) - 16);\n\n                        // High nibble: element at position (k * blocklen + i + qk/2)\n                        // within the Q5_0 block (indices 16..31)\n                        const int elem_hi = k * blocklen + i + qk / 2;\n                        const int qh_byte_hi = elem_hi / 8;\n                        const int qh_bit_hi  = elem_hi % 8;\n                        const int xh_1 = (b_ptr[l].qh[j][qh_byte_hi] >> qh_bit_hi) & 1;\n                        const int v1 = (int8_t)(((b_ptr[l].qs[qs_idx] >> 4) | (xh_1 << 4)) - 16);\n\n                        // Dot product with Q8_0 activation\n                        sumi += v0 * a_ptr[l].qs[k * blocklen + i]\n                              + v1 * a_ptr[l].qs[k * blocklen + i + qk / 2];\n                    }\n                    sumf[j] += sumi * GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j])\n                                    * GGML_CPU_FP16_TO_FP32(a_ptr[l].d);\n                }\n            }\n        }\n        for (int j = 0; j < ncols_interleaved; j++) {\n            s[x * ncols_interleaved + j] = sumf[j];\n        }\n    }\n}\n\n// ---------------------------------------------------------------------------\n// RVV vectorized implementation \u2014 single source of truth\n// ---------------------------------------------------------------------------\n#include \"rvv_gemv_q5_0_q8_0.inl\"\n\n// ---------------------------------------------------------------------------\n// Pseudo-random data generator (LCG, deterministic)\n// ---------------------------------------------------------------------------\nstatic uint32_t rng_state = 42;\n\nstatic uint32_t rng_next() {\n    rng_state = rng_state * 1103515245 + 12345;\n    return (rng_state >> 16) & 0x7FFF;\n}\n\nstatic int8_t rng_int8() {\n    return (int8_t)(rng_next() % 256 - 128);\n}\n\nstatic uint8_t rng_uint8() {\n    return rng_next() % 256;\n}\n\nstatic float rng_float() {\n    return (float)rng_next() / 32768.0f;\n}\n\n// ---------------------------------------------------------------------------\n// Test data initialization\n// ---------------------------------------------------------------------------\nstatic void init_test_block(block_q5_0x8 * q5, block_q8_0 * q8, uint32_t seed) {\n    rng_state = seed;\n\n    // Initialize d[8] with positive values\n    for (int j = 0; j < 8; j++) {\n        q5->d[j] = ggml_fp32_to_fp16(0.1f + rng_float() * 0.9f);\n    }\n\n    // Initialize qh[8][4] with random bitmasks\n    for (int j = 0; j < 8; j++) {\n        for (int b = 0; b < 4; b++) {\n            q5->qh[j][b] = rng_uint8();\n        }\n    }\n\n    // Initialize qs[128] with random nibble values\n    for (int i = 0; i < 128; i++) {\n        q5->qs[i] = rng_uint8();\n    }\n\n    // Initialize Q8_0 block\n    q8->d = ggml_fp32_to_fp16(0.5f + rng_float() * 0.5f);\n    for (int i = 0; i < QK8_0; i++) {\n        q8->qs[i] = rng_int8();\n    }\n}\n\n// ---------------------------------------------------------------------------\n// Test runner\n// ---------------------------------------------------------------------------\n#if defined(__riscv_v_intrinsic)\n__attribute__((optnone))  // Disable optimization to avoid LLVM bug in array comparisons\n#endif\nstatic int run_test(int n_blocks, uint32_t seed, float rel_tolerance, const char * label) {\n    printf(\"Test %s: n_blocks=%d, seed=%u, rel_tol=%.6e\\n\",\n           label, n_blocks, seed, rel_tolerance);\n\n    const int n = n_blocks * QK8_0;\n    const int nc = 8;\n\n    std::vector<block_q5_0x8> q5(n_blocks);\n    std::vector<block_q8_0>   q8(n_blocks);\n    std::vector<float> scalar_out(nc, 0.0f);\n    std::vector<float> rvv_out(nc, 0.0f);\n\n    for (int b = 0; b < n_blocks; b++) {\n        init_test_block(&q5[b], &q8[b], seed + b);\n    }\n\n    // Run scalar (generic) reference\n    ggml_gemv_q5_0_q8_0_generic(n, scalar_out.data(), 0, q5.data(), q8.data(), 1, nc);\n\n#if defined(__riscv_v_intrinsic)\n    // Run RVV implementation\n    ggml_gemv_q5_0_q8_0_rvv(n, rvv_out.data(), 0, q5.data(), q8.data(), 1, nc);\n#else\n    printf(\"  [SKIP] %s \u2014 RVV intrinsics not available\\n\", label);\n    return 0;\n#endif\n\n    printf(\"  Scalar: \");\n    for (int j = 0; j < nc; j++) printf(\"%.2f \", scalar_out[j]);\n    printf(\"\\n\");\n    printf(\"  RVV:    \");\n    for (int j = 0; j < nc; j++) printf(\"%.2f \", rvv_out[j]);\n    printf(\"\\n\");\n\n    // Compare with relative tolerance\n    int failures = 0;\n    float max_abs_diff = 0.0f;\n    float max_rel_diff = 0.0f;\n\n    for (int j = 0; j < nc; j++) {\n        float abs_diff = fabsf(scalar_out[j] - rvv_out[j]);\n        float magnitude = fabsf(scalar_out[j]) + fabsf(rvv_out[j]);\n        float rel_diff = (magnitude > 1e-6f) ? abs_diff / magnitude : abs_diff;\n\n        if (abs_diff > max_abs_diff) max_abs_diff = abs_diff;\n        if (rel_diff > max_rel_diff) max_rel_diff = rel_diff;\n\n        if (rel_diff > rel_tolerance) {\n            failures++;\n            printf(\"  FAIL col %d: scalar=%.6f, rvv=%.6f, rel_diff=%.6e\\n\",\n                   j, scalar_out[j], rvv_out[j], rel_diff);\n        }\n    }\n\n    printf(\"  Max abs diff: %.6e, max rel diff: %.6e\\n\", max_abs_diff, max_rel_diff);\n    printf(\"  %s\\n\\n\", failures ? \"FAIL\" : \"PASS\");\n\n    return failures;\n}\n\nint main() {\n    printf(\"=== ggml_gemv_q5_0_q8_0: RVV-512 vs Scalar correctness test ===\\n\\n\");\n\n    int total_failures = 0;\n\n#if defined(__riscv_v_fixed_vlen)\n    printf(\"VLEN = %d bits\\n\", __riscv_v_fixed_vlen);\n#else\n    printf(\"VLEN detection: runtime (__riscv_vlenb())\\n\");\n#endif\n    printf(\"block_q5_0x8 size: %zu bytes (expected 176)\\n\\n\", sizeof(block_q5_0x8));\n\n    // Test cases with various seeds and block counts\n    total_failures += run_test(1,  42,  1e-4, \"seed-42-1-block\");\n    total_failures += run_test(1,  123, 1e-4, \"seed-123-1-block\");\n    total_failures += run_test(1,  456, 1e-4, \"seed-456-1-block\");\n    total_failures += run_test(4,  42,  1e-4, \"seed-42-4-blocks\");\n    total_failures += run_test(8,  42,  1e-4, \"seed-42-8-blocks\");\n    total_failures += run_test(16, 999, 1e-4, \"seed-999-16-blocks\");\n\n    printf(\"\\n=== Summary: %d test(s) failed ===\\n\", total_failures);\n    return total_failures;\n}\n"}], "grading": {"eval_id": 0, "eval_name": "llama-cpp-gemv-q5-q8-chinese", "config": "without_skill", "assertions": [{"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator", "passed": false, "evidence": "No rvv-patches directory exists under applications/llama.cpp/. All output files (rvv_gemv_q5_0_q8_0.inl, test.cpp, patch.diff, README.md) are placed directly in the outputs/ directory without the expected rvv-patches/*/ subdirectory structure."}, {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": false, "evidence": "File rvv_gemv_q5_0_q8_0.inl exists but NOT under the expected path rvv-patches/*/rvv_*.inl under applications/llama.cpp/. It is in the flat outputs/ directory without the rvv-patches wrapper."}, {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": true, "evidence": "The .inl file contains '#if defined(__riscv_v_intrinsic)' on line 51 and '#endif // __riscv_v_intrinsic' on line 270, properly guarding the entire RVV implementation."}, {"name": "inl_has_rvv_header", "text": ".inl file includes riscv_vector.h", "passed": true, "evidence": "The .inl file contains '#include <riscv_vector.h>' on line 52, inside the __riscv_v_intrinsic guard."}, {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": false, "evidence": "File test.cpp exists with comprehensive correctness tests, but it is NOT under the expected path rvv-patches/*/test.cpp under applications/llama.cpp/. It is in the flat outputs/ directory."}, {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "test.cpp contains the function 'ggml_gemv_q5_0_q8_0_generic' (lines 124-185), a complete scalar reference implementation that dequantizes Q5_0 values and computes dot products element-by-element."}, {"name": "test_has_rng", "text": "test.cpp uses deterministic data generation", "passed": true, "evidence": "test.cpp contains an LCG-based pseudo-random generator with fixed seed (rng_state = 42 on line 195, rng_next() on lines 197-199). The init_test_block function resets the seed for reproducibility."}, {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": false, "evidence": "File patch.diff exists with integration content, but it is NOT under the expected path rvv-patches/*/patch.diff under applications/llama.cpp/. It is in the flat outputs/ directory."}, {"name": "patch_targets_riscv", "text": "patch.diff targets the RISC-V arch source file", "passed": true, "evidence": "patch.diff references 'ggml/src/ggml-cpu/arch/riscv/repack.cpp' (lines 27-28), clearly targeting the RISC-V specific source file."}, {"name": "created_readme", "text": "Created README.md with documentation", "passed": false, "evidence": "File README.md exists with detailed documentation, but it is NOT under the expected path rvv-patches/*/README.md under applications/llama.cpp/. It is in the flat outputs/ directory."}, {"name": "readme_has_signature", "text": "README.md includes function signature", "passed": true, "evidence": "README.md contains the full function signature 'void ggml_gemv_q5_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);' under the '## Function Signature' section (lines 31-34)."}, {"name": "cross_platform_analysis", "text": "Analyzed cross-platform (ARM/x86) implementations", "passed": true, "evidence": "README.md contains a 'Cross-Platform Analysis' section (lines 172-177) comparing RISC-V RVV, ARM NEON, x86 AVX2, and Generic C approaches with file references and technique descriptions. The .inl file also references ARM NEON and x86 AVX2 implementations in its header comments (lines 34-36)."}, {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": false, "evidence": "No output file mentions 'gap analysis', 'rvv-gap-analysis', or 'cross-platform gap'. The README.md has a 'Cross-Platform Analysis' section but does not describe a gap analysis step."}, {"name": "test_uses_optnone", "text": "test.cpp uses __attribute__((optnone)) for scalar reference", "passed": true, "evidence": "test.cpp uses '__attribute__((optnone))' on the scalar reference function ggml_gemv_q5_0_q8_0_generic (line 122) with comment 'Disable optimization to avoid LLVM bug'. It is also used on run_test (line 248)."}], "summary": {"passed": 8, "failed": 5, "total": 13}}}, {"id": "eval-1-with_skill", "prompt": "I need to vectorize vec_dot_q6_K_q8_K for RISC-V RVV in applications/llama.cpp. VLEN=512.", "eval_id": 1, "outputs": [{"name": "steps-summary.md", "type": "text", "content": "# Steps Summary: vec_dot_q6_K_q8_K RVV Vectorization (VLEN=512)\n\n## Task\nVectorize `ggml_vec_dot_q6_K_q8_K` for RISC-V RVV with VLEN=512 in llama.cpp.\n\n## Phase 1: Research & Analysis\n\n### Step 1: Read Application README\n- File: `applications/llama.cpp/README.md`\n- Key findings:\n  - llama.cpp pinned at commit `e21cdc11` (b8783)\n  - Build system: `build.sh` with cross-compilation to `rv64gcv_zfh_zvfh_zicbop_zihintpause`\n  - Existing RVV patches: `gemm-q4_K-8x4-q8_K`, `gemv-q4_K-8x8-q8_K`, `quantize-q8_0-4x4`\n  - Patch target: `ggml/src/ggml-cpu/arch/riscv/quants.c` (for vec_dot functions)\n  - Note: GEMV patches target `arch/riscv/repack.cpp`, but vec_dot functions live in `quants.c`\n  - BBV profiling shows `ggml_gemv_q4_K_8x8_q8_K` at 32.1% of core inference compute\n\n### Step 2: Analyze Cross-Platform Implementations\n\nFound `ggml_vec_dot_q6_K_q8_K` in 11 files across 6 platforms:\n\n| Platform | File | Line | Implementation Details |\n|---|---|---|---|\n| **ARM SVE+MATMUL** | `arch/arm/quants.c` | 2884 | Uses `svmmla_s32` (matrix multiply accumulate), `svdot_s64` for scale/bsum interaction. Supports nrc=2 (dual-row). 128/256/512 VL paths. |\n| **ARM MATMUL (NEON)** | `arch/arm/quants.c` | 3095 | Uses `vmmla_s32` (NEON matrix multiply), 16-element blocks with `vld1q_u8_x4` loads. Dual-row processing. |\n| **x86 AVX2** | `arch/x86/quants.c` | 2130 | Uses `_mm256_maddubs_epi16` (unsigned x signed \u2192 int16), `_mm256_madd_epi16` (int16 \u00d7 scale \u2192 int32), `_mm256_fmadd_ps`. Handles q6 offset via separate q8sum subtraction. |\n| **x86 AVX** | `arch/x86/quants.c` | 2222 | Similar to AVX2 but with 128-bit operations, uses `_mm_maddubs_epi16` and `_mm_madd_epi16`. |\n| **RISC-V (T-Head XTheadVector)** | `arch/riscv/quants.c` | 1713 | Uses T-Head vendor intrinsics (`th.vwmul.vv`, `th.vwredsum.vs`). Processes full 128-element chunks with inline assembly. |\n| **RISC-V RVV (VLEN=256)** | `arch/riscv/quants.c` | 1800 | Uses standard RVV intrinsics. Processes 32-byte loads for ql/qh, 4 groups of 32-element widening multiplies, 8 scale multiplications, chained `vredsum`. |\n| **RISC-V RVV (VLEN=128)** | `arch/riscv/quants.c` | 1881 | Uses inline assembly with fixed VL values (32/64/128). Prefetching, scale extraction from packed 64-bit, direct FMA in register. |\n| **Generic (scalar)** | `quants.c` | 794 | Reference implementation. Decodes Q6_K byte-by-byte into `aux8[QK_K]`, then 16-element blocks with per-block scale application. |\n\n**Critical finding**: The RISC-V switch statement has `case 256:` and `case 128:` but **NO `case 512:`**. The `default` case asserts false, meaning VLEN=512 hardware either crashes or (if the assert is compiled out) falls through to generic.\n\n### Step 3: Map Cross-Platform SIMD Paths\n\nPatch target file: `ggml/src/ggml-cpu/arch/riscv/quants.c` (line 1700)\nFunction: `ggml_vec_dot_q6_K_q8_K`\n\nData structures (from `ggml-common.h`):\n- `block_q6_K` (210 bytes): ql[128] + qh[64] + scales[16] + d(FP16)\n- `block_q8_K` (576 bytes): d(FP32) + qs[256] + bsums[16]\n\n## Phase 2: Implementation\n\n### Step 4: Create Operator Package\n\nCreated 4 files in `rvv-patches/vec_dot-q6_K-q8_K/`:\n\n1. **`rvv_vec_dot_q6_K_q8_K.inl`** -- Full RVV implementation\n   - Algorithm follows x86 AVX2 / ARM NEON strategy\n   - For each super-block: decode qh (2-bit fields) + ql (4-bit nibbles) \u2192 6-bit values\n   - Subtract 32 offset, widening multiply with q8, apply 8 per-block scales\n   - VLEN=512 allows processing all 64 bytes of ql and 32 bytes of qh in e8m1\n   - Widening operations use e16m2 and e32m2 (well within VLEN=512 budget)\n   - Chained `vredsum_vs` for horizontal reduction of 8 scale products\n\n2. **`test.cpp`** -- Standalone correctness test\n   - Self-contained: includes minimal ggml type definitions (ggml_half, block_q6_K, block_q8_K)\n   - Scalar reference extracted verbatim from `quants.c:794`\n   - Uses `__attribute__((optnone))` on scalar reference to avoid LLVM-22 optimizer bug\n   - Deterministic LCG RNG (seed=42) for reproducibility\n   - 5 test cases: 1, 2, 4, 8, 16 blocks\n   - Tolerance: relative 1e-4 for FP32 accumulation\n\n3. **`patch.diff`** -- Integration patch\n   - Adds `#include \"rvv_vec_dot_q6_K_q8_K.inl\"` before the function\n   - Adds `case 512:` in the existing `switch (vector_length)` statement\n   - The `case 512:` delegates to `ggml_vec_dot_q6_K_q8_K_rvv()` from the .inl file\n   - Context lines target the specific location between `case 256:` and `case 128:`\n\n4. **`README.md`** -- Operator documentation\n   - Algorithm description with step-by-step breakdown\n   - VLEN=512 specific register usage table\n   - Cross-platform reference table\n   - Q6_K decoding algorithm\n   - Build & test instructions\n\n## Phase 3: Testing (Not Executed -- Plan Only)\n\n### Step 5: Build and Run Standalone Test\nWould execute:\n```bash\nclang++ -std=c++17 -O2 --target=riscv64-unknown-linux-gnu \\\n    --sysroot=$SYSROOT -march=rv64gcv_zvl512b -mabi=lp64d \\\n    -DGGML_USE_RISCV_V -D__riscv_v_fixed_vlen=512 \\\n    -fuse-ld=lld test.cpp -o test -lm\nqemu-riscv64 -L $SYSROOT ./test\n```\nExpected: All 5 tests pass with relative error < 1e-4.\n\n### Step 6: Integration Test\nWould execute:\n```bash\ncd applications/llama.cpp && ./build.sh --force\nqemu-riscv64 -L $SYSROOT output/llama.cpp/bin/llama-cli -m models/qwen-0.5b-q4_0.gguf -p \"test\"\n```\nVerify: `nm lib/libggml-cpu.so | grep vec_dot_q6_K_q8_K` shows the symbol.\n\n## Phase 4: Reporting (Not Executed -- Plan Only)\n\n### Step 7: Gap Analysis\nWould invoke the `rvv-gap-analysis` skill to:\n1. Parse the RVV implementation from `rvv_vec_dot_q6_K_q8_K.inl`\n2. Launch parallel subagents to analyze x86 AVX2, ARM NEON/SVE, LoongArch, Power, S390X, WASM implementations\n3. Compare intrinsic usage patterns to identify instructions missing from RVV\n4. Key candidates for gap analysis:\n   - `_mm256_maddubs_epi16` (unsigned x signed \u2192 int16 widening MAC) -- RVV has `vwmul` but not an equivalent fused unsigned*signed operation\n   - `svmmla_s32` / `vmmla_s32` (matrix multiply accumulate) -- RVV lacks a direct equivalent\n   - `_mm256_fmadd_ps` (fused multiply-add) -- RVV has `vfmacc` but not at the same throughput\n5. Output: `docs/report/llama.cpp/rvv-gap-analysis-vec_dot-q6_K-q8_K-YYYY-MM-DD.md`\n\n### Step 8: Generate PDF Report\nWould invoke the `lovstudio-any2pdf` skill to:\n1. Convert the markdown gap analysis report to PDF\n2. Theme: `github-light`\n3. Output: `docs/report/llama.cpp/pdf/rvv-gap-analysis-vec_dot-q6_K-q8_K-YYYY-MM-DD.pdf`\n\n## Key Technical Observations\n\n1. **VLEN=512 is a gap**: The existing RISC-V implementation has no VLEN=512 path for `vec_dot_q6_K_q8_K`. This means VLEN=512 hardware (common in modern RISC-V chips like SpacemiT K1, SiFive P870) gets zero vectorization benefit for Q6_K dot products.\n\n2. **Algorithm matches VLEN=256**: The VLEN=512 implementation uses the same algorithm as VLEN=256 (same intrinsic pattern) but benefits from wider registers allowing more data to be processed per instruction without additional register pressure.\n\n3. **Scale application is the bottleneck**: The 8 scale multiplications (int16 x int8 -> int32) followed by chained reduction (vredsum) accounts for a significant portion of the instruction count. ARM SVE can use `svmmla_s32` to fuse this, while x86 uses `_mm256_madd_epi16`. RVV requires separate `vwmul_vx` + `vredsum` operations.\n\n4. **The -32 offset handling**: x86 AVX2 handles the Q6_K offset (-32) by computing `_mm256_maddubs_epi16(m32s, q8)` (accumulating `-32 * q8`) and subtracting it from the main product. ARM handles it explicitly (`- 32`). The RVV implementation follows the ARM approach: subtract 32 before the widening multiply, which is simpler and avoids extra arithmetic.\n"}], "grading": {"eval_id": 1, "eval_name": "llama-cpp-vec-dot-q6k-english", "config": "with_skill", "assertions": [{"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator", "passed": true, "evidence": "Files in rvv-patches/vec_dot-q6_K-q8_K/ subdir"}, {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": true, "evidence": "rvv_vec_dot_q6_K_q8_K.inl exists"}, {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": true, "evidence": "2 occurrences in .inl"}, {"name": "inl_has_rvv_header", "text": ".inl file includes riscv_vector.h", "passed": true, "evidence": "4 references in .inl"}, {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": true, "evidence": "test.cpp exists"}, {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "18 generic/scalar matches across files"}, {"name": "test_has_rng", "text": "test.cpp uses deterministic data generation", "passed": true, "evidence": "26 RNG/seed matches in test.cpp"}, {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": true, "evidence": "patch.diff exists"}, {"name": "patch_targets_riscv", "text": "patch.diff targets the RISC-V arch source file", "passed": true, "evidence": "arch/riscv referenced in patch.diff and README"}, {"name": "created_readme", "text": "Created README.md with documentation", "passed": true, "evidence": "README.md exists"}, {"name": "readme_has_signature", "text": "README.md includes function signature", "passed": true, "evidence": "vec_dot_q6_K_q8_K referenced throughout"}, {"name": "cross_platform_analysis", "text": "Analyzed cross-platform (ARM/x86) implementations", "passed": true, "evidence": "27 ARM/NEON/x86/AVX matches across 4 files"}, {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": true, "evidence": "8 gap analysis matches in README.md and steps-summary.md"}, {"name": "test_uses_optnone", "text": "test.cpp uses __attribute__((optnone))", "passed": true, "evidence": "2 optnone occurrences in test.cpp"}], "summary": {"passed": 14, "failed": 0, "total": 14}}}, {"id": "eval-1-without_skill", "prompt": "I need to vectorize vec_dot_q6_K_q8_K for RISC-V RVV in applications/llama.cpp. VLEN=512.", "eval_id": 1, "outputs": [], "grading": {"eval_id": 1, "eval_name": "llama-cpp-vec-dot-q6k-english", "config": "without_skill", "assertions": [{"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator", "passed": false, "evidence": "Output files are in skills/rvv-op/workspace/iteration-1/eval-1/without_skill/outputs/vec_dot_q6_K_q8_K/, NOT under applications/llama.cpp/rvv-patches/ as required by the assertion check"}, {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": false, "evidence": "rvv_vec_dot_q6_K_q8_K.inl exists but is in workspace outputs directory, NOT under applications/llama.cpp/rvv-patches/ as specified in the assertion check"}, {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": true, "evidence": "Line 39 and 61 contain '#if defined(__riscv_v_intrinsic)' conditional compilation guards"}, {"name": "inl_has_rvv_header", "text": ".inl file includes riscv_vector.h", "passed": true, "evidence": "Line 40 contains '#include <riscv_vector.h>'"}, {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": false, "evidence": "test.cpp exists but is in workspace outputs directory, NOT under applications/llama.cpp/rvv-patches/ as specified in the assertion check"}, {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "Lines 105-161 contain 'ggml_vec_dot_q6_K_q8_K_generic' - a full scalar reference implementation copied from llama.cpp"}, {"name": "test_has_rng", "text": "test.cpp uses deterministic data generation", "passed": true, "evidence": "Lines 188-206 implement deterministic LCG PRNG with fixed seed (rng_state = 42), including rng_next(), rng_int8(), rng_uint8(), rng_float()"}, {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": false, "evidence": "patch.diff exists but is in workspace outputs directory, NOT under applications/llama.cpp/rvv-patches/ as specified in the assertion check"}, {"name": "patch_targets_riscv", "text": "patch.diff targets the RISC-V arch source file", "passed": true, "evidence": "Line 1: 'diff --git a/ggml/src/ggml-cpu/arch/riscv/quants.c' - clearly targets arch/riscv source path"}, {"name": "created_readme", "text": "Created README.md with documentation", "passed": false, "evidence": "README.md exists but is in workspace outputs directory, NOT under applications/llama.cpp/rvv-patches/ as specified in the assertion check"}, {"name": "readme_has_signature", "text": "README.md includes function signature", "passed": true, "evidence": "Lines 16-19 contain the full function signature: 'void ggml_vec_dot_q6_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);'"}, {"name": "cross_platform_analysis", "text": "Analyzed cross-platform (ARM/x86) implementations", "passed": true, "evidence": "README.md lines 93-107 and SUMMARY.md lines 12-27 contain Cross-Platform Implementation Analysis table listing ARM NEON, ARM SVE+SME, x86 AVX2, x86 AVX implementations"}, {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": false, "evidence": "No explicit mention of 'gap analysis', 'rvv-gap-analysis', or cross-platform gap analysis as a named step. The word 'gap' appears in context of 'This implementation fills that gap' but not as a specific analysis methodology"}, {"name": "test_uses_optnone", "text": "test.cpp uses __attribute__((optnone)) for scalar reference", "passed": true, "evidence": "Line 103 contains '__attribute__((optnone))' before the scalar reference function definition"}], "summary": {"passed": 8, "failed": 6, "total": 14}}}, {"id": "eval-2-with_skill", "prompt": "\u5bf9applications/yolo\u4e2d\u7684softmax_fp16\u7b97\u5b50\u5b9e\u73b0RVV\u5411\u91cf\u5316\uff0cVLEN=512\u3002\u8fd9\u4e2a\u5e94\u7528\u8fd8\u6ca1\u6709rvv-patches\u76ee\u5f55\uff0c\u9700\u8981\u5148\u5efa\u7acb\u3002", "eval_id": 2, "outputs": [], "grading": null}, {"id": "eval-2-without_skill", "prompt": "\u5bf9applications/yolo\u4e2d\u7684softmax_fp16\u7b97\u5b50\u5b9e\u73b0RVV\u5411\u91cf\u5316\uff0cVLEN=512\u3002\u8fd9\u4e2a\u5e94\u7528\u8fd8\u6ca1\u6709rvv-patches\u76ee\u5f55\uff0c\u9700\u8981\u5148\u5efa\u7acb\u3002", "eval_id": 2, "outputs": [{"name": "README.md", "type": "text", "content": "# RVV FP16 Softmax Patch for ONNX Runtime MLAS\n\n## Overview\n\nThis patch adds RISC-V Vector Extension (RVV) support for FP16 softmax kernels\nin ONNX Runtime's MLAS (Multi-platform Linear Algebra Subprograms) library.\n\n**Target**: VLEN=512-bit vector registers with Zvfh (half-precision floating-point\nvector extension).\n\n## Files\n\n| File | Description |\n|------|-------------|\n| `softmax_fp16_rvv512.inl` | Core RVV FP16 softmax implementation (vectorized kernels) |\n| `test_softmax_fp16.cpp` | Test harness with scalar reference implementations |\n| `patch.diff` | MLAS integration patch for ONNX Runtime |\n| `README.md` | This documentation |\n\n## Vector Configuration\n\n| Parameter | Value | Notes |\n|-----------|-------|-------|\n| VLEN | 512 bits | Vector register width |\n| SEW | 16 bits | FP16 element size |\n| LMUL | 1 | Single vector register group |\n| VL | 32 elements | Elements per vector register (512/16) |\n| Extension | Zvfh | Half-precision FP vector extension |\n\n## Implemented Kernels\n\nThe patch implements 5 kernels matching the `MLAS_SOFTMAX_DISPATCH` interface:\n\n### 1. `ReduceMax_Kernel_Fp16_Rvv512`\n\nFinds the maximum value in an FP16 array.\n\n- **Input**: FP16 array, length N\n- **Output**: Maximum value as FP16\n- **Strategy**: 4x unrolled vector comparison, horizontal reduction via slide-down + vfmax\n- **Loop granularity**: 128 elements per iteration (4 x VL=32)\n\n### 2. `SumExp_Kernel_Fp16_Rvv512`\n\nComputes `exp(x - max)` for each element and returns the sum.\n\n- **Input**: FP16 array, negative maximum value\n- **Output**: Sum of exponentials (FP16), optionally stores exp values\n- **Strategy**: 4x unrolled vectorized exp with polynomial approximation\n- **Exp approximation**: Range reduction to log2 domain + Horner polynomial evaluation\n\n### 3. `Softmax_Kernel_Fp16_Rvv512`\n\nFinal normalization: `output[i] = input[i] / sum`.\n\n- **Input**: FP16 array of exp values, accumulated sum\n- **Output**: Normalized probabilities (FP16)\n- **Strategy**: 4x unrolled vector multiply (each element / sum)\n\n### 4. `Exp_Kernel_Fp16_Rvv512`\n\nComputes `exp(x)` for each element.\n\n- **Input**: FP16 array, valid range [-17.3, 11.1]\n- **Output**: FP16 array of exp values\n- **Strategy**: Full range exp with overflow handling\n\n### 5. `LogSoftmax_Kernel_Fp16_Rvv512`\n\nComputes log softmax: `output[i] = input[i] + neg_max - log_sum`.\n\n- **Input**: Original input, negative maximum, log of exp sum\n- **Output**: Log softmax values (FP16)\n- **Strategy**: 4x unrolled vector add + subtract\n\n## Algorithm: FP16 Exp Approximation\n\nThe exp function uses a polynomial approximation matching the approach used by\nthe ARM NEON FP16 kernel in MLAS:\n\n```\n1. Clamp input to [LowerRange, UpperRange]\n2. Range reduction: biased = x * (1/ln2) + rounding_bias\n3. Integer part: m = biased - rounding_bias\n4. Residual: r = x + m * ln2_high + m * ln2_mid + m * ln2_low\n5. Exponent reconstruction: normal = int16(biased) << 10 + max_exponent_bias\n6. Polynomial: p = poly_0 + r*(poly_1 + r*(poly_2 + r*(poly_3 + r*(poly_4 + r*poly_56))))\n7. Result: p * reinterpret_as_fp16(normal)\n```\n\nFP16 bit-pattern constants match the MLAS `ExpConstantsFp16` values from the\nARM NEON implementation (`softmax_kernel_neon_fp16.cpp`).\n\n## Softmax Pipeline (3-step)\n\nThe MLAS softmax pipeline processes each row through three stages:\n\n```\nStep 1: max = ReduceMax(input, N)\nStep 2: sum = SumExp(input, temp, N, -max)\nStep 3: Softmax(temp, output, N, sum)\n```\n\nFor log softmax, step 2 uses `temp=nullptr` and step 3 uses `LogSoftmax` instead.\n\n## Performance Estimates\n\nCompared to scalar (non-vectorized) FP16 softmax:\n\n| Kernel | Scalar | RVV VLEN=512 | Speedup |\n|--------|--------|--------------|---------|\n| ReduceMax | N comparisons | N/32 vector ops | ~32x |\n| SumExp | N scalar exp | N/32 vectorized exp | ~32x |\n| Softmax | N divisions | N/32 vector mul | ~32x |\n\nFor YOLO inference with 8400 rows x 80 classes:\n- **Scalar**: ~672,000 individual FP16 operations per softmax\n- **RVV-512**: ~21,000 vector operations per softmax (4x unroll = ~5,250 iterations)\n\n**Note**: Actual speedup depends on memory bandwidth, pipeline latency, and\nthe exp polynomial approximation cost (which is non-trivial).\n\n## Cross-Platform Reference\n\nThis implementation is modeled after the ARM NEON FP16 softmax kernel:\n- `onnxruntime/core/mlas/lib/softmax_kernel_neon_fp16.cpp`\n- `onnxruntime/core/mlas/lib/softmax.h` (dispatch interface)\n- `onnxruntime/core/mlas/lib/fp16_common.h` (NEON FP16 helpers)\n\nKey differences:\n- ARM NEON processes 8 (float16x8) or 4 (float16x4) elements per instruction\n- RVV VLEN=512 processes 32 elements per instruction (4x NEON width)\n- ARM NEON uses `vpaddq_f16` for horizontal reduction; RVV uses `vslidedown` + `vfadd`\n\n## Not Yet Implemented\n\nThe following kernels from `MLAS_SOFTMAX_DISPATCH` are left as `nullptr`:\n\n- `Tanh_Fp16` - Hyperbolic tangent (used by GQA softcap)\n- `Softcap_Fp16` - Soft capping function\n\nThese can be added following the same pattern using the Tanh polynomial\napproximation from `softmax_kernel_neon_fp16.cpp`.\n\n## Requirements\n\n- RISC-V 64-bit target (`rv64gcv_zvfh`)\n- GCC or Clang with RVV intrinsics support (`<riscv_vector.h>`)\n- Zvfh extension (half-precision floating-point vector instructions)\n- VLEN=512 (compile-time configuration via `VLEN_512` define)\n\n## Usage\n\nApply to ONNX Runtime source tree before building:\n\n```bash\ncd applications/yolo/ort/vendor/onnxruntime\npatch -p1 < ../../../rvv-patches/patch.diff\n```\n\nCopy the `.inl` file alongside the new kernel source:\n\n```bash\ncp ../../../rvv-patches/softmax_fp16_rvv512.inl \\\n   onnxruntime/core/mlas/lib/riscv64/softmax_fp16_rvv512.inl\n```\n\nBuild with RISC-V cross-toolchain:\n\n```bash\ncmake .. \\\n  -DCMAKE_TOOLCHAIN_FILE=../../riscv64-linux-toolchain.cmake \\\n  -Donnxruntime_MLAS_RVV_VLEN_512=ON \\\n  -DCMAKE_CXX_FLAGS=\"-march=rv64gcv_zvfh\"\n```\n\n## Testing\n\nBuild and run the test harness:\n\n```bash\n# Cross-compile for RISC-V\nriscv64-unknown-linux-gnu-g++ -std=c++17 -O2 \\\n  -march=rv64gcv_zvfh -DVLEN_512 \\\n  test_softmax_fp16.cpp -o test_softmax_fp16\n\n# Run under QEMU\nqemu-riscv64 -L <sysroot> ./test_softmax_fp16 --verbose --bench\n```\n\nFor scalar reference testing on x86:\n\n```bash\ng++ -std=c++17 -O2 test_softmax_fp16.cpp -o test_softmax_fp16_scalar\n./test_softmax_fp16_scalar --verbose\n```\n"}, {"name": "patch.diff", "type": "binary", "mime": "text/x-diff", "data_uri": "data:text/x-diff;base64,ZGlmZiAtLWdpdCBhL2NtYWtlL29ubnhydW50aW1lX21sYXMuY21ha2UgYi9jbWFrZS9vbm54cnVudGltZV9tbGFzLmNtYWtlCmluZGV4IGUzZjRhNWIuLmYxYTJiM2MgMTAwNjQ0Ci0tLSBhL2NtYWtlL29ubnhydW50aW1lX21sYXMuY21ha2UKKysrIGIvY21ha2Uvb25ueHJ1bnRpbWVfbWxhcy5jbWFrZQpAQCAtODM1LDYgKzgzNSw3IEBACiAgICAgIGlmKFJJU0NWNjQgQU5EIE1MQVNfU09VUkNFX0lTX05PVF9TRVQpCiAgICAgICAgICBzZXQobWxhc19wbGF0Zm9ybV9zcmNzCisgICAgICAgICAgJHtNTEFTX1NSQ19ESVJ9L3Jpc2N2NjQvU29mdG1heEtlcm5lbFJ2dkZwMTYuY3BwCiAgICAgICAgICAgJHtNTEFTX1NSQ19ESVJ9L3Jpc2N2NjQvU2dlbW1LZXJuZWxSdnY1MTIuY3BwCiAgICAgICAgICAgJHtNTEFTX1NSQ19ESVJ9L3Jpc2N2NjQvU2dlbW1QYWNrQjE2LmNwcAogICAgICAgICAgICR7TUxBU19TUkNfRElSfS9yaXNjdjY0L1NnZW1tS2VybmVsUnZ2LmNwcApAQCAtODQzLDYgKzg0NCw4IEBACiAgICAgICAgICApCiAgICAgICAgICAjIERlZmluZSBWTEVOXzUxMiBmb3IgNTEyLWJpdCB2ZWN0b3IgcmVnaXN0ZXIgYnVpbGRzCiAgICAgICAgICBhZGRfY29tcGlsZV9kZWZpbml0aW9ucyhWTEVOXzUxMikKKyAgICAgICAgIyBFbmFibGUgRlAxNiB2ZWN0b3IgZXh0ZW5zaW9uIGZvciBzb2Z0bWF4IGtlcm5lbHMKKyAgICAgICAgc3RyaW5nKEFQUEVORCBDTUFLRV9DWFhfRkxBR1MgIiAtbWFyY2g9cnY2NGdjdl96dmZoIikKICAgICAgICAgIGlmKE5PVCBPTk5YUlVOVElNRV9NTEFTX01VTFRJX0FSQ0gpCiAgICAgICAgICAgIHNldChNTEFTX1NPVVJDRV9JU19OT1RfU0VUIDApCiAgICAgICAgICBlbmRpZigpCmRpZmYgLS1naXQgYS9vbm54cnVudGltZS9jb3JlL21sYXMvbGliL21sYXNpLmggYi9vbm54cnVudGltZS9jb3JlL21sYXMvbGliL21sYXNpLmgKaW5kZXggYzFmZGU5ZS4uZDRlNWY2YSAxMDA2NDQKLS0tIGEvb25ueHJ1bnRpbWUvY29yZS9tbGFzL2xpYi9tbGFzaS5oCisrKyBiL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvbWxhc2kuaApAQCAtMTM3Niw2ICsxMzc2LDEwIEBACiAjaWYgZGVmaW5lZChNTEFTX1RBUkdFVF9SSVNDVikKICAgICBNTEFTX0dFTU1fRkxPQVRfS0VSTkVMKiBHZW1tRmxvYXRLZXJuZWw7CiAgICAgTUxBU19TR0VNTV9QQUNLQjE2X0tFUk5FTCogUGFja0IxNktlcm5lbDsKKyAgICBzdHJ1Y3QgTUxBU19TT0ZUTUFYX0RJU1BBVENIKiBTb2Z0bWF4RGlzcGF0Y2g7CisjZW5kaWYKKworI2lmIGRlZmluZWQoTUxBU19UQVJHRVRfUklTQ1YpICYmIGRlZmluZWQoTUxBU19SVlZfVkxFTl81MTIpCisgICAgYm9vbCBIYXNGcDE2U29mdG1heDsKICNlbmRpZgogI2lmIGRlZmluZWQoTUxBU19UQVJHRVRfQU1ENjRfSVg4NikKICAgICBjb25zdCBNTEFTX0dFTU1fUVVBTlRfRElTUEFUQ0gqIEdlbW1VOFM4RGlzcGF0Y2g7CmRpZmYgLS1naXQgYS9vbm54cnVudGltZS9jb3JlL21sYXMvbGliL3BsYXRmb3JtLmNwcCBiL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvcGxhdGZvcm0uY3BwCmluZGV4IDJjMGUxZjAuLmE1YjZjN2QgMTAwNjQ0Ci0tLSBhL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvcGxhdGZvcm0uY3BwCisrKyBiL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvcGxhdGZvcm0uY3BwCkBAIC04MDAsNiArODAwLDE2IEBACgogI2lmIGRlZmluZWQoTUxBU19UQVJHRVRfUklTQ1YpCgorICAgIC8vCisgICAgLy8gU2V0dXAgRlAxNiBzb2Z0bWF4IGRpc3BhdGNoIGlmIFp2ZmggZXh0ZW5zaW9uIGlzIGF2YWlsYWJsZS4KKyAgICAvLworCisjaWYgZGVmaW5lZChNTEFTX1JWVl9WTEVOXzUxMikgJiYgZGVmaW5lZChfX3Jpc2N2X3p2ZmgpCisgICAgdGhpcy0+SGFzRnAxNlNvZnRtYXggPSB0cnVlOworICAgIHRoaXMtPlNvZnRtYXhEaXNwYXRjaCA9ICZTb2Z0bWF4RGlzcGF0Y2hSdnZGcDE2OworI2Vsc2UKKyAgICB0aGlzLT5IYXNGcDE2U29mdG1heCA9IGZhbHNlOworICAgIHRoaXMtPlNvZnRtYXhEaXNwYXRjaCA9IG51bGxwdHI7CisjZW5kaWYKKwogICAgIC8vCiAgICAgLy8gVXNlIHRoZSBSVlYgR0VNTSBrZXJuZWwgZm9yIGZsb2F0IG1hdHJpeCBtdWx0aXBsaWNhdGlvbi4KICAgICAvLyBTZWxlY3QgVkw9MTYga2VybmVsIGZvciA1MTItYml0IFZMRU4gaW1wbGVtZW50YXRpb25zLgpkaWZmIC0tZ2l0IGEvb25ueHJ1bnRpbWUvY29yZS9tbGFzL2xpYi9yaXNjdjY0L1NvZnRtYXhLZXJuZWxSdnZGcDE2LmNwcCBiL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvcmlzY3Y2NC9Tb2Z0bWF4S2VybmVsUnZ2RnAxNi5jcHAKbmV3IGZpbGUgbW9kZSAxMDA2NDQKaW5kZXggMDAwMDAwMC4uYTFiMmMzZAotLS0gL2Rldi9udWxsCisrKyBiL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvcmlzY3Y2NC9Tb2Z0bWF4S2VybmVsUnZ2RnAxNi5jcHAKQEAgLTAsMCArMSwxMDggQEAKKy8qKysKKworQ29weXJpZ2h0IChjKSBSVkZ1c2UgUHJvamVjdC4gQWxsIHJpZ2h0cyByZXNlcnZlZC4KKworTGljZW5zZWQgdW5kZXIgdGhlIE1JVCBMaWNlbnNlLgorCitNb2R1bGUgTmFtZToKKworICAgIFNvZnRtYXhLZXJuZWxSdnZGcDE2LmNwcAorCitBYnN0cmFjdDoKKworICAgIFJWViBGUDE2IHNvZnRtYXgga2VybmVsIHJlZ2lzdHJhdGlvbiBmb3IgTUxBUyBkaXNwYXRjaC4KKworICAgIFRoaXMgZmlsZSBpbmNsdWRlcyB0aGUgUlZWIHNvZnRtYXggaW1wbGVtZW50YXRpb24gKHNvZnRtYXhfZnAxNl9ydnY1MTIuaW5sKQorICAgIGFuZCBjcmVhdGVzIHRoZSBNTEFTX1NPRlRNQVhfRElTUEFUQ0ggZnVuY3Rpb24gcG9pbnRlciB0YWJsZSB0aGF0CisgICAgTUxBUyB1c2VzIHRvIGRpc3BhdGNoIEZQMTYgc29mdG1heCBvcGVyYXRpb25zLgorCisgICAgVGFyZ2V0OiBWTEVOPTUxMiwgU0VXPTE2IChGUDE2KSwgTE1VTD0xLCBWTD0zMiBlbGVtZW50cy4KKyAgICBSZXF1aXJlczogX19yaXNjdl96dmZoIChoYWxmLXByZWNpc2lvbiBmbG9hdGluZy1wb2ludCB2ZWN0b3IgZXh0ZW5zaW9uKQorCistLSovCisKKyNpbmNsdWRlICJtbGFzaS5oIgorI2luY2x1ZGUgInNvZnRtYXguaCIKKworI2lmIGRlZmluZWQoTUxBU19UQVJHRVRfUklTQ1YpICYmIGRlZmluZWQoTUxBU19SVlZfVkxFTl81MTIpICYmIGRlZmluZWQoX19yaXNjdl96dmZoKQorCisjaW5jbHVkZSA8cmlzY3ZfdmVjdG9yLmg+CisKKy8vIEluY2x1ZGUgdGhlIGNvcmUgUlZWIEZQMTYgc29mdG1heCBpbXBsZW1lbnRhdGlvbgorLy8gVGhpcyBjb250YWluczogRXhwVmVjdG9yRnAxNiwgU3VtRXhwVmVjdG9yRnAxNiwgUmVkdWNlTWF4X0tlcm5lbF9GcDE2X1J2djUxMiwKKy8vICAgICAgICAgICAgICAgIFN1bUV4cF9LZXJuZWxfRnAxNl9SdnY1MTIsIFNvZnRtYXhfS2VybmVsX0ZwMTZfUnZ2NTEyLAorLy8gICAgICAgICAgICAgICAgRXhwX0tlcm5lbF9GcDE2X1J2djUxMiwgTG9nU29mdG1heF9LZXJuZWxfRnAxNl9SdnY1MTIKKyNpbmNsdWRlICJzb2Z0bWF4X2ZwMTZfcnZ2NTEyLmlubCIKKworLy8KKy8vIE1MQVMgZGlzcGF0Y2ggd3JhcHBlciBmdW5jdGlvbnMuCisvLyBUaGVzZSBmdW5jdGlvbnMgbWF0Y2ggdGhlIE1MQVNfU09GVE1BWF9ESVNQQVRDSCBmdW5jdGlvbiBwb2ludGVyIHNpZ25hdHVyZXMuCisvLworCituYW1lc3BhY2UgeworCitNTEFTX0ZQMTYKK1JlZHVjZU1heFdyYXBwZXIoY29uc3QgTUxBU19GUDE2KiBJbnB1dCwgc2l6ZV90IE4pIHsKKyAgICByZXR1cm4gc29mdG1heF9ydnY1MTI6OlJlZHVjZU1heF9LZXJuZWxfRnAxNl9SdnY1MTIoSW5wdXQsIE4pOworfQorCitNTEFTX0ZQMTYKK1N1bUV4cFdyYXBwZXIoY29uc3QgTUxBU19GUDE2KiBJbnB1dCwgTUxBU19GUDE2KiBPdXRwdXQsIHNpemVfdCBOLAorICAgICAgICAgICAgICBjb25zdCBNTEFTX0ZQMTYgTmVnYXRpdmVNYXhpbXVtKSB7CisgICAgcmV0dXJuIHNvZnRtYXhfcnZ2NTEyOjpTdW1FeHBfS2VybmVsX0ZwMTZfUnZ2NTEyKElucHV0LCBPdXRwdXQsIE4sCisgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBOZWdhdGl2ZU1heGltdW0pOworfQorCit2b2lkCitTb2Z0bWF4V3JhcHBlcihjb25zdCBNTEFTX0ZQMTYqIElucHV0LCBNTEFTX0ZQMTYqIE91dHB1dCwgc2l6ZV90IE4sCisgICAgICAgICAgICAgICBjb25zdCBNTEFTX0ZQMTYgU3VtKSB7CisgICAgc29mdG1heF9ydnY1MTI6OlNvZnRtYXhfS2VybmVsX0ZwMTZfUnZ2NTEyKElucHV0LCBPdXRwdXQsIE4sIFN1bSk7Cit9CisKK3ZvaWQKK0xvZ1NvZnRtYXhXcmFwcGVyKGNvbnN0IE1MQVNfRlAxNiogSW5wdXQsIE1MQVNfRlAxNiogT3V0cHV0LCBzaXplX3QgTiwKKyAgICAgICAgICAgICAgICAgIGNvbnN0IE1MQVNfRlAxNiBOZWdhdGl2ZU1heGltdW0sIGNvbnN0IE1MQVNfRlAxNiBMb2dTdW0pIHsKKyAgICBzb2Z0bWF4X3J2djUxMjo6TG9nU29mdG1heF9LZXJuZWxfRnAxNl9SdnY1MTIoSW5wdXQsIE91dHB1dCwgTiwKKyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgTmVnYXRpdmVNYXhpbXVtLCBMb2dTdW0pOworfQorCit2b2lkCitFeHBXcmFwcGVyKGNvbnN0IE1MQVNfRlAxNiogSW5wdXQsIE1MQVNfRlAxNiogT3V0cHV0LCBzaXplX3QgTikgeworICAgIHNvZnRtYXhfcnZ2NTEyOjpFeHBfS2VybmVsX0ZwMTZfUnZ2NTEyKElucHV0LCBPdXRwdXQsIE4pOworfQorCisvLworLy8gU3RhdGljIGRpc3BhdGNoIHRhYmxlIGZvciBSVlYgRlAxNiBzb2Z0bWF4IGtlcm5lbHMuCisvLyBUYW5oX0ZwMTYgYW5kIFNvZnRjYXBfRnAxNiBhcmUgbm90IHlldCBpbXBsZW1lbnRlZC4KKy8vCisKK01MQVNfU09GVE1BWF9ESVNQQVRDSCBTb2Z0bWF4RGlzcGF0Y2hSdnZGcDE2U3RvcmFnZSA9IHsKKyAgICAvKlRhbmhfRnAxNiovICAgICAgIG51bGxwdHIsICAgICAgICAgICAvLyBUT0RPOiBpbXBsZW1lbnQgVGFuaF9GcDE2CisgICAgLypTb2Z0Y2FwX0ZwMTYqLyAgICBudWxscHRyLCAgICAgICAgICAgLy8gVE9ETzogaW1wbGVtZW50IFNvZnRjYXBfRnAxNgorICAgIC8qRXhwX0ZwMTYqLyAgICAgICAgRXhwV3JhcHBlciwKKyAgICAvKlJlZHVjZU1heF9GcDE2Ki8gIFJlZHVjZU1heFdyYXBwZXIsCisgICAgLypTdW1FeHBfRnAxNiovICAgICBTdW1FeHBXcmFwcGVyLAorICAgIC8qU29mdG1heF9GcDE2Ki8gICAgU29mdG1heFdyYXBwZXIsCisgICAgLypMb2dTb2Z0bWF4X0ZwMTYqLyBMb2dTb2Z0bWF4V3JhcHBlciwKK307CisKK30gIC8vIGFub255bW91cyBuYW1lc3BhY2UKKworLy8KKy8vIEdsb2JhbCBkaXNwYXRjaCBwb2ludGVyIGFjY2Vzc2libGUgZnJvbSBwbGF0Zm9ybS5jcHAuCisvLworCitNTEFTX1NPRlRNQVhfRElTUEFUQ0gqIFNvZnRtYXhEaXNwYXRjaFJ2dkZwMTYgPSAmU29mdG1heERpc3BhdGNoUnZ2RnAxNlN0b3JhZ2U7CisKKyNlbmRpZiAvLyBNTEFTX1RBUkdFVF9SSVNDViAmJiBNTEFTX1JWVl9WTEVOXzUxMiAmJiBfX3Jpc2N2X3p2ZmgKZGlmZiAtLWdpdCBhL29ubnhydW50aW1lL2NvcmUvbWxhcy9saWIvc29mdG1heC5oIGIvb25ueHJ1bnRpbWUvY29yZS9tbGFzL2xpYi9zb2Z0bWF4LmgKaW5kZXggYTFiMmMzZC4uZTRmNWc2aCAxMDA2NDQKLS0tIGEvb25ueHJ1bnRpbWUvY29yZS9tbGFzL2xpYi9zb2Z0bWF4LmgKKysrIGIvb25ueHJ1bnRpbWUvY29yZS9tbGFzL2xpYi9zb2Z0bWF4LmgKQEAgLTc5LDYgKzc5LDggQEAKCiAgICAgTG9nU29mdG1heF9GcDE2X0ZuKiBMb2dTb2Z0bWF4X0ZwMTYgPSBudWxscHRyOwogfTsKKworLy8gUlZWIEZQMTYgc29mdG1heCBkaXNwYXRjaCAoZGVmaW5lZCBpbiBTb2Z0bWF4S2VybmVsUnZ2RnAxNi5jcHApCitleHRlcm4gTUxBU19TT0ZUTUFYX0RJU1BBVENIKiBTb2Z0bWF4RGlzcGF0Y2hSdnZGcDE2OwoKICNlbmRpZiAgLy8gU09GVE1BWF9ICg=="}, {"name": "softmax_fp16_rvv512.inl", "type": "binary", "mime": "application/octet-stream", "data_uri": "data:application/octet-stream;base64,LyorKwoKQ29weXJpZ2h0IChjKSBSVkZ1c2UgUHJvamVjdC4gQWxsIHJpZ2h0cyByZXNlcnZlZC4KCkxpY2Vuc2VkIHVuZGVyIHRoZSBNSVQgTGljZW5zZS4KCk1vZHVsZSBOYW1lOgoKICAgIHNvZnRtYXhfZnAxNl9ydnY1MTIuaW5sCgpBYnN0cmFjdDoKCiAgICBSVlYgKFJJU0MtViBWZWN0b3IgRXh0ZW5zaW9uKSBpbXBsZW1lbnRhdGlvbiBvZiBGUDE2IHNvZnRtYXgga2VybmVscwogICAgdGFyZ2V0aW5nIFZMRU49NTEyICg1MTItYml0IHZlY3RvciByZWdpc3RlcnMpLgoKICAgIFZMRU49NTEyIHdpdGggU0VXPTE2IChoYWxmIHByZWNpc2lvbikgYW5kIExNVUw9MSB5aWVsZHMgVkw9MzIsIG1lYW5pbmcKICAgIGVhY2ggdmVjdG9yIGluc3RydWN0aW9uIHByb2Nlc3NlcyAzMiBGUDE2IGVsZW1lbnRzIHNpbXVsdGFuZW91c2x5LgoKICAgIFRoaXMgZmlsZSBpbXBsZW1lbnRzIHRoZSBmb2xsb3dpbmcga2VybmVscyBtYXRjaGluZyB0aGUgTUxBU19TT0ZUTUFYX0RJU1BBVENICiAgICBpbnRlcmZhY2UgZm9yIEZQMTYgc29mdG1heCBjb21wdXRhdGlvbjoKCiAgICAxLiBSZWR1Y2VNYXhfS2VybmVsX0ZwMTZfUnZ2NTEyICAgLSBGaW5kIG1heGltdW0gdmFsdWUgaW4gRlAxNiBhcnJheQogICAgMi4gU3VtRXhwX0tlcm5lbF9GcDE2X1J2djUxMiAgICAgLSBDb21wdXRlIGV4cCh4IC0gbWF4KSBhbmQgYWNjdW11bGF0ZSBzdW0KICAgIDMuIFNvZnRtYXhfS2VybmVsX0ZwMTZfUnZ2NTEyICAgIC0gRGl2aWRlIGV4cCB2YWx1ZXMgYnkgc3VtIChub3JtYWxpemF0aW9uKQogICAgNC4gRXhwX0tlcm5lbF9GcDE2X1J2djUxMiAgICAgICAgLSBDb21wdXRlIGV4cG9uZW50aWFsIGZ1bmN0aW9uIChGUDE2KQogICAgNS4gTG9nU29mdG1heF9LZXJuZWxfRnAxNl9SdnY1MTIgLSBDb21wdXRlIGxvZyBzb2Z0bWF4IG91dHB1dAoKICAgIEFsZ29yaXRobSAobWF0Y2hpbmcgT05OWCBSdW50aW1lIE1MQVMgc29mdG1heCBwaXBlbGluZSk6CiAgICAgICAgc29mdG1heCh4KSA9IGV4cCh4IC0gbWF4KHgpKSAvIHN1bShleHAoeCAtIG1heCh4KSkpCgogICAgRlAxNiBleHAgYXBwcm94aW1hdGlvbiB1c2VzIHJhbmdlIHJlZHVjdGlvbiB0byBsb2cyIGRvbWFpbiArIHBvbHlub21pYWwKICAgIGV2YWx1YXRpb24gKHNhbWUgYXBwcm9hY2ggYXMgQVJNIE5FT04gZnAxNiBrZXJuZWxzKS4KCiAgICBWTEVOPTUxMiBDb25maWd1cmF0aW9uOgogICAgICAgIFZMRU4gPSA1MTIgYml0cwogICAgICAgIFNFVyAgPSAxNiBiaXRzIChGUDE2KQogICAgICAgIExNVUwgPSAxCiAgICAgICAgVkwgICA9IDUxMiAvIDE2ID0gMzIgZWxlbWVudHMgcGVyIHZlY3RvciByZWdpc3RlcgoKICAgIFBlcmZvcm1hbmNlIGVzdGltYXRlIHZzIHNjYWxhcjoKICAgICAgICBSZWR1Y2VNYXg6ICAzMnggZmV3ZXIgbG9vcCBpdGVyYXRpb25zCiAgICAgICAgU3VtRXhwOiAgICAgMzJ4IHZlY3Rvcml6ZWQgZXhwICsgcmVkdWN0aW9uCiAgICAgICAgU29mdG1heDogICAgMzJ4IHZlY3Rvcml6ZWQgbXVsdGlwbHkKCi0tKi8KCiNpZiBkZWZpbmVkKE1MQVNfVEFSR0VUX1JJU0NWKSAmJiBkZWZpbmVkKE1MQVNfUlZWX1ZMRU5fNTEyKSAmJiBkZWZpbmVkKF9fcmlzY3ZfenZmaCkKCiNpbmNsdWRlIDxyaXNjdl92ZWN0b3IuaD4KI2luY2x1ZGUgPGNtYXRoPgojaW5jbHVkZSA8bGltaXRzPgoKLy8KLy8gRlAxNiBjb25zdGFudHMgZm9yIGV4cCBhcHByb3hpbWF0aW9uLgovLyBTdG9yZWQgYXMgdWludDE2X3QgYml0IHBhdHRlcm5zIG1hdGNoaW5nIHRoZSBNTEFTIGZwMTYgcG9seW5vbWlhbAovLyBjb2VmZmljaWVudHMgdXNlZCBieSB0aGUgQVJNIE5FT04ga2VybmVsLgovLwovLyBUaGVzZSBjb25zdGFudHMgZW5jb2RlIHRoZSBmb2xsb3dpbmcgRlAxNiB2YWx1ZXM6Ci8vICAgTG93ZXJSYW5nZSAgICAgICA9IC0xNS41ICogbG4oMikgIChsb3dlciBjbGFtcCBmb3IgU3VtRXhwKQovLyAgIFVwcGVyUmFuZ2UgICAgICAgPSAgMTUuNSAqIGxuKDIpICAodXBwZXIgY2xhbXAgZm9yIFN1bUV4cCkKLy8gICBSb3VuZGluZ0JpYXMgICAgID0gIDEuNSAqIDJeMTAgICAgKGZvciByb3VuZGluZyBpbiBsb2cyIGNvbnZlcnNpb24pCi8vICAgTG9nMlJlY2lwcm9jYWwgICA9ICAxL2xuKDIpICAgICAgIChtdWx0aXBseSB0byBjb252ZXJ0IHRvIGxvZzIgZG9tYWluKQovLyAgIExvZzJIaWdoICAgICAgICAgPSAgLTYuOTI4N2UtMSAgICAoaGlnaCBiaXRzIG9mIC1sbigyKSkKLy8gICBMb2cyTWlkICAgICAgICAgID0gIC0yLjc1ODVlLTQgICAgKG1pZCBiaXRzIG9mIC1sbigyKSkKLy8gICBMb2cyTG93ICAgICAgICAgID0gIC0yLjM4NDJlLTcgICAgKGxvdyBiaXRzIG9mIC1sbigyKSkKLy8gICBwb2x5XzAuLnBvbHlfNCAgID0gIHBvbHlub21pYWwgY29lZmZpY2llbnRzIGZvciBleHAgYXBwcm94aW1hdGlvbgovLyAgIHBvbHlfNTYgICAgICAgICAgPSAgMS8yISBmb3IgU3VtRXhwIChwNj0xIG1lcmdlZCBpbnRvIGZpbmFsIGFkZCkKLy8gICBNYXhpbXVtRXhwb25lbnQgID0gIDE1ICAgICAgICAgICAgKEZQMTYgbWF4IHVuYmlhc2VkIGV4cG9uZW50KQovLwoKbmFtZXNwYWNlIHNvZnRtYXhfcnZ2NTEyIHsKCi8vCi8vIEZQMTYgaGVscGVyOiByZWludGVycHJldCB1aW50MTYgYXMgX0Zsb2F0MTYKLy8KTUxBU19GT1JDRUlOTElORSBfRmxvYXQxNgpCaXRzVG9GcDE2KHVpbnQxNl90IGJpdHMpIHsKICAgIF9GbG9hdDE2IHZhbDsKICAgIF9fYnVpbHRpbl9tZW1jcHkoJnZhbCwgJmJpdHMsIHNpemVvZih2YWwpKTsKICAgIHJldHVybiB2YWw7Cn0KCi8vCi8vIEZQMTYgaGVscGVyOiByZWludGVycHJldCBfRmxvYXQxNiBhcyB1aW50MTYKLy8KTUxBU19GT1JDRUlOTElORSB1aW50MTZfdApGcDE2VG9CaXRzKF9GbG9hdDE2IHZhbCkgewogICAgdWludDE2X3QgYml0czsKICAgIF9fYnVpbHRpbl9tZW1jcHkoJmJpdHMsICZ2YWwsIHNpemVvZihiaXRzKSk7CiAgICByZXR1cm4gYml0czsKfQoKLy8KLy8gRlAxNiBjb25zdGFudHMgYXMgX0Zsb2F0MTYgdmFsdWVzIChiaXQgcGF0dGVybnMgZnJvbSBNTEFTIEV4cENvbnN0YW50c0ZwMTYpLgovLwpjb25zdGV4cHIgX0Zsb2F0MTYga0xvd2VyUmFuZ2VTdW1FeHAgID0gQml0c1RvRnAxNigweGM5NWYpOyAgLy8gLTE1LjUgKiBsbjIKY29uc3RleHByIF9GbG9hdDE2IGtVcHBlclJhbmdlU3VtRXhwICA9IEJpdHNUb0ZwMTYoMHg0OTVmKTsgIC8vICAxNS41ICogbG4yCmNvbnN0ZXhwciBfRmxvYXQxNiBrTG93ZXJSYW5nZSAgICAgICAgPSBCaXRzVG9GcDE2KDB4Y2M1NSk7ICAvLyAtMjUgKiBsbjIKY29uc3RleHByIF9GbG9hdDE2IGtVcHBlclJhbmdlICAgICAgICA9IEJpdHNUb0ZwMTYoMHg0OThjKTsgIC8vICAxNiAqIGxuMgpjb25zdGV4cHIgX0Zsb2F0MTYga1JvdW5kaW5nQmlhcyAgICAgID0gQml0c1RvRnAxNigweDY2MDApOyAgLy8gIDEuNSAqIDJeMTAKY29uc3RleHByIF9GbG9hdDE2IGtMb2cyUmVjaXByb2NhbCAgICA9IEJpdHNUb0ZwMTYoMHgzZGM1KTsgIC8vICAxL2xuMgpjb25zdGV4cHIgX0Zsb2F0MTYga0xvZzJIaWdoICAgICAgICAgID0gQml0c1RvRnAxNigweGI5OGIpOyAgLy8gLTYuOTI4N2UtMQpjb25zdGV4cHIgX0Zsb2F0MTYga0xvZzJNaWQgICAgICAgICAgID0gQml0c1RvRnAxNigweDhjODUpOyAgLy8gLTIuNzU4NWUtNApjb25zdGV4cHIgX0Zsb2F0MTYga0xvZzJMb3cgICAgICAgICAgID0gQml0c1RvRnAxNigweDgwMDQpOyAgLy8gLTIuMzg0MmUtNwoKLy8gUG9seW5vbWlhbCBjb2VmZmljaWVudHMgZm9yIGV4cCAoSG9ybmVyIGZvcm0pOgovLyAgIHAoeCkgPSAxICsgeCArIHheMi8yISArIHheMy8zISArIHheNC80ISArIHheNS81ISArIHheNi82IQpjb25zdGV4cHIgX0Zsb2F0MTYga1BvbHkwICA9IEJpdHNUb0ZwMTYoMHgxNWIwKTsgIC8vIDEvNiEKY29uc3RleHByIF9GbG9hdDE2IGtQb2x5MSAgPSBCaXRzVG9GcDE2KDB4MjA0NCk7ICAvLyAxLzUhCmNvbnN0ZXhwciBfRmxvYXQxNiBrUG9seTIgID0gQml0c1RvRnAxNigweDI5NTUpOyAgLy8gMS80IQpjb25zdGV4cHIgX0Zsb2F0MTYga1BvbHkzICA9IEJpdHNUb0ZwMTYoMHgzMTU1KTsgIC8vIDEvMyEKY29uc3RleHByIF9GbG9hdDE2IGtQb2x5NCAgPSBCaXRzVG9GcDE2KDB4MzgwMCk7ICAvLyAxLzIhCmNvbnN0ZXhwciBfRmxvYXQxNiBrUG9seTU2ID0gQml0c1RvRnAxNigweDNjMDApOyAgLy8gMS8xIQoKY29uc3RleHByIGludDE2X3Qga01heGltdW1FeHBvbmVudEJpdHMgPSBzdGF0aWNfY2FzdDxpbnQxNl90PigweDNDMDApOyAgLy8gZXhwb25lbnQgPSAxNQoKLy8KLy8gVmVjdG9yaXplZCBleHAgZnVuY3Rpb24gZm9yIEZQMTYgKFJWViwgVkxFTj01MTIsIFNFVz0xNiwgTE1VTD0xKS4KLy8gVXNlcyByYW5nZSByZWR1Y3Rpb24gdG8gbG9nMiBkb21haW4gKyBwb2x5bm9taWFsIGFwcHJveGltYXRpb24uCi8vCi8vIEFsZ29yaXRobToKLy8gICAxLiBDbGFtcCBpbnB1dCB0byBbTG93ZXJSYW5nZSwgVXBwZXJSYW5nZV0KLy8gICAyLiBDb21wdXRlIGJpYXNlZCA9IHggKiAoMS9sbjIpICsgcm91bmRpbmdfYmlhcwovLyAgIDMuIENvbXB1dGUgbSA9IGJpYXNlZCAtIHJvdW5kaW5nX2JpYXMgKGludGVnZXIgcGFydCkKLy8gICA0LiBDb21wdXRlIHJlc2lkdWFsIHIgPSB4ICsgbSAqIGxuMl9oaWdoICsgbSAqIGxuMl9taWQgKyBtICogbG4yX2xvdwovLyAgIDUuIENvbXB1dGUgbm9ybWFsIGV4cG9uZW50IGZyb20gbSAoc2hpZnQgbGVmdCBieSAxMCA9IEZQMTYgbWFudGlzc2EgYml0cykKLy8gICA2LiBFdmFsdWF0ZSBwb2x5bm9taWFsOiBwID0gcG9seV8wICsgcioocG9seV8xICsgcioocG9seV8yICsgLi4uKSkKLy8gICA3LiBSZWNvbnN0cnVjdDogcmVzdWx0ID0gcCAqIDJebm9ybWFsCi8vCk1MQVNfRk9SQ0VJTkxJTkUgdmZsb2F0MTZtMV90CkV4cFZlY3RvckZwMTYodmZsb2F0MTZtMV90IHgsIHNpemVfdCB2bCkgewogICAgLy8gQ2xhbXAgaW5wdXQgdG8gdmFsaWQgcmFuZ2UgZm9yIGV4cAogICAgdmZsb2F0MTZtMV90IGNsYW1wZWQgPSBfX3Jpc2N2X3ZmbWF4X3ZmX2YxNm0xKAogICAgICAgIF9fcmlzY3ZfdmZtaW5fdmZfZjE2bTEoeCwga1VwcGVyUmFuZ2UsIHZsKSwKICAgICAgICBrTG93ZXJSYW5nZSwgdmwpOwoKICAgIC8vIFJhbmdlIHJlZHVjdGlvbjogYmlhc2VkID0gY2xhbXBlZCAqICgxL2xuMikgKyByb3VuZGluZ19iaWFzCiAgICAvLyBVc2luZyB2Zm1hZGQ6IGRlc3QgPSByczEgKiByczIgKyByZCA9PiBjbGFtcGVkICogTG9nMlJlY2lwcm9jYWwgKyBSb3VuZGluZ0JpYXMKICAgIHZmbG9hdDE2bTFfdCBiaWFzZWQgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShjbGFtcGVkLCBrTG9nMlJlY2lwcm9jYWwsIGtSb3VuZGluZ0JpYXMsIHZsKTsKCiAgICAvLyBtID0gYmlhc2VkIC0gcm91bmRpbmdfYmlhcyAoaW50ZWdlciBwYXJ0KQogICAgdmZsb2F0MTZtMV90IG0gPSBfX3Jpc2N2X3Zmc3ViX3ZmX2YxNm0xKGJpYXNlZCwga1JvdW5kaW5nQmlhcywgdmwpOwoKICAgIC8vIFJlc2lkdWFsOiByID0gY2xhbXBlZCArIG0gKiBMb2cySGlnaCArIG0gKiBMb2cyTWlkICsgbSAqIExvZzJMb3cKICAgIHZmbG9hdDE2bTFfdCByID0gX19yaXNjdl92Zm1hZGRfdmZfZjE2bTEobSwga0xvZzJIaWdoLCBjbGFtcGVkLCB2bCk7CiAgICByID0gX19yaXNjdl92Zm1hZGRfdmZfZjE2bTEobSwga0xvZzJNaWQsIHIsIHZsKTsKICAgIHIgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShtLCBrTG9nMkxvdywgciwgdmwpOwoKICAgIC8vIENvbXB1dGUgc2NhbGluZyBmYWN0b3JzIGZyb20gZXhwb25lbnQgbToKICAgIC8vIG5vcm1hbCA9IChpbnQxNihiaWFzZWQpIDw8IDEwKSArIE1heGltdW1FeHBvbmVudAogICAgLy8gVGhpcyBjb252ZXJ0cyB0aGUgbG9nMiBpbnRlZ2VyIHBhcnQgdG8gYW4gRlAxNiBleHBvbmVudC4KICAgIC8vIFdlIHJlaW50ZXJwcmV0IGJpYXNlZCBhcyBpbnQxNiwgc2hpZnQgbGVmdCBieSAxMCAoRlAxNiBtYW50aXNzYSBiaXRzKSwKICAgIC8vIHRoZW4gYWRkIHRoZSBiaWFzICgxNSA8PCAxMCA9IDB4M0MwMCkgdG8gZ2V0IDJebSBpbiBGUDE2IHJlcHJlc2VudGF0aW9uLgogICAgdmludDE2bTFfdCBiaWFzZWRfaW50ID0gX19yaXNjdl92cmVpbnRlcnByZXRfdl9pMTZtMV9mMTZtMShiaWFzZWQpOwogICAgdmludDE2bTFfdCBub3JtYWwgPSBfX3Jpc2N2X3ZzbGxfdmlfaTE2bTEoYmlhc2VkX2ludCwgMTAsIHZsKTsKICAgIHZpbnQxNm0xX3QgbWF4X2V4cF92ZWMgPSBfX3Jpc2N2X3Ztdl92X3hfaTE2bTEoa01heGltdW1FeHBvbmVudEJpdHMsIHZsKTsKICAgIG5vcm1hbCA9IF9fcmlzY3ZfdmFkZF92dl9pMTZtMShub3JtYWwsIG1heF9leHBfdmVjLCB2bCk7CgogICAgLy8gUG9seW5vbWlhbCBhcHByb3hpbWF0aW9uIChIb3JuZXIgZm9ybSk6CiAgICAvLyBwID0gcG9seV8wICsgcioocG9seV8xICsgcioocG9seV8yICsgcioocG9seV8zICsgcioocG9seV80ICsgcipwb2x5XzU2KSkpKQogICAgdmZsb2F0MTZtMV90IHAgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShrUG9seTAsIHIsIGtQb2x5MSwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5MiwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5MywgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5NCwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5NTYsIHZsKTsKCiAgICAvLyBSZWNvbnN0cnVjdDogcmVzdWx0ID0gcCAqIDJebm9ybWFsCiAgICB2ZmxvYXQxNm0xX3Qgbm9ybWFsX2YgPSBfX3Jpc2N2X3ZyZWludGVycHJldF92X2YxNm0xX2kxNm0xKG5vcm1hbCk7CiAgICBwID0gX19yaXNjdl92Zm11bF92dl9mMTZtMShwLCBub3JtYWxfZiwgdmwpOwoKICAgIHJldHVybiBwOwp9CgovLwovLyBWZWN0b3JpemVkIFN1bUV4cCBmdW5jdGlvbiBmb3IgRlAxNiAoUlZWLCBWTEVOPTUxMikuCi8vIENvbXB1dGVzIGV4cCh4ICsgbmVnYXRpdmVfbWF4aW11bSkgd2l0aCBuYXJyb3dlciB2YWxpZCByYW5nZS4KLy8gTm8gb3ZlcmZsb3cgaGFuZGxpbmcgbmVlZGVkIHNpbmNlIGFsbCBpbnB1dHMgYXJlIDw9IDAgYWZ0ZXIgc3VidHJhY3Rpb24uCi8vCk1MQVNfRk9SQ0VJTkxJTkUgdmZsb2F0MTZtMV90ClN1bUV4cFZlY3RvckZwMTYodmZsb2F0MTZtMV90IHgsIHZmbG9hdDE2bTFfdCBuZWdfbWF4LCBzaXplX3QgdmwpIHsKICAgIC8vIFN1YnRyYWN0IG1heDogYWxsIHZhbHVlcyBhcmUgbm93IDw9IDAKICAgIHZmbG9hdDE2bTFfdCBzaGlmdGVkID0gX19yaXNjdl92ZmFkZF92dl9mMTZtMSh4LCBuZWdfbWF4LCB2bCk7CgogICAgLy8gQ2xhbXAgdG8gbG93ZXIgcmFuZ2UgKHZhbHVlcyBhcmUgYWxyZWFkeSA8PSAwLCBqdXN0IGNsYW1wIGxvd2VyIGJvdW5kKQogICAgc2hpZnRlZCA9IF9fcmlzY3ZfdmZtYXhfdmZfZjE2bTEoc2hpZnRlZCwga0xvd2VyUmFuZ2VTdW1FeHAsIHZsKTsKCiAgICAvLyBSYW5nZSByZWR1Y3Rpb24gdG8gbG9nMiBkb21haW4KICAgIHZmbG9hdDE2bTFfdCBiaWFzZWQgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShzaGlmdGVkLCBrTG9nMlJlY2lwcm9jYWwsIGtSb3VuZGluZ0JpYXMsIHZsKTsKICAgIHZmbG9hdDE2bTFfdCBtID0gX19yaXNjdl92ZnN1Yl92Zl9mMTZtMShiaWFzZWQsIGtSb3VuZGluZ0JpYXMsIHZsKTsKCiAgICAvLyBSZXNpZHVhbAogICAgdmZsb2F0MTZtMV90IHIgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShtLCBrTG9nMkhpZ2gsIHNoaWZ0ZWQsIHZsKTsKICAgIHIgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShtLCBrTG9nMk1pZCwgciwgdmwpOwogICAgciA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKG0sIGtMb2cyTG93LCByLCB2bCk7CgogICAgLy8gQ29tcHV0ZSAyXm0gKG5vIG92ZXJmbG93IGhhbmRsaW5nIG5lZWRlZCkKICAgIHZpbnQxNm0xX3QgYmlhc2VkX2ludCA9IF9fcmlzY3ZfdnJlaW50ZXJwcmV0X3ZfaTE2bTFfZjE2bTEoYmlhc2VkKTsKICAgIHZpbnQxNm0xX3Qgbm9ybWFsID0gX19yaXNjdl92c2xsX3ZpX2kxNm0xKGJpYXNlZF9pbnQsIDEwLCB2bCk7CiAgICB2aW50MTZtMV90IG1heF9leHBfdmVjID0gX19yaXNjdl92bXZfdl94X2kxNm0xKGtNYXhpbXVtRXhwb25lbnRCaXRzLCB2bCk7CiAgICBub3JtYWwgPSBfX3Jpc2N2X3ZhZGRfdnZfaTE2bTEobm9ybWFsLCBtYXhfZXhwX3ZlYywgdmwpOwoKICAgIC8vIFBvbHlub21pYWwgKEhvcm5lcikgLSBzYW1lIGFzIEV4cFZlY3RvciBidXQgd2l0aCBwNj1wNT1wb2x5XzU2CiAgICAvLyBmb3IgU3VtRXhwOiBwID0gcG9seV8wICsgcioocG9seV8xICsgciooLi4uICsgcipwb2x5XzU2KSkgdGhlbiBwID0gcCArIHIqcG9seV81NgogICAgdmZsb2F0MTZtMV90IHAgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShrUG9seTAsIHIsIGtQb2x5MSwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5MiwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5MywgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5NCwgdmwpOwogICAgcCA9IF9fcmlzY3ZfdmZtYWRkX3ZmX2YxNm0xKHAsIHIsIGtQb2x5NTYsIHZsKTsKICAgIHAgPSBfX3Jpc2N2X3ZmbWFkZF92Zl9mMTZtMShwLCByLCBrUG9seTU2LCB2bCk7ICAvLyBFeHRyYSB0ZXJtIGZvciBTdW1FeHAKCiAgICAvLyBSZWNvbnN0cnVjdAogICAgdmZsb2F0MTZtMV90IG5vcm1hbF9mID0gX19yaXNjdl92cmVpbnRlcnByZXRfdl9mMTZtMV9pMTZtMShub3JtYWwpOwogICAgcCA9IF9fcmlzY3ZfdmZtdWxfdnZfZjE2bTEocCwgbm9ybWFsX2YsIHZsKTsKCiAgICByZXR1cm4gcDsKfQoKLy8KLy8gUmVkdWNlIG1heGltdW0gZm9yIEZQMTYgdmVjdG9yOiBob3Jpem9udGFsIG1heCByZWR1Y3Rpb24uCi8vCk1MQVNfRk9SQ0VJTkxJTkUgX0Zsb2F0MTYKUmVkdWNlTWF4SG9yaXpvbnRhbCh2ZmxvYXQxNm0xX3Qgdiwgc2l6ZV90IHZsKSB7CiAgICAvLyBVc2Ugc2xpZGluZyB3aW5kb3cgdG8gcmVkdWNlIHRvIHNjYWxhcgogICAgLy8gRm9yIFZMRU49NTEyLCBWTD0zMjogbmVlZCA1IHN0ZXBzIG9mIHBhaXJ3aXNlIG1heAogICAgLy8gTWV0aG9kOiByZXBlYXRlZGx5IHNoaWZ0IGFuZCBtYXggdW50aWwgc2NhbGFyCiAgICBmb3IgKHNpemVfdCBzdGVwID0gdmwgLyAyOyBzdGVwID49IDE7IHN0ZXAgLz0gMikgewogICAgICAgIHZmbG9hdDE2bTFfdCBzaGlmdGVkID0gX19yaXNjdl92c2xpZGVkb3duX3Z4X2YxNm0xKHYsIHN0ZXAsIHZsKTsKICAgICAgICB2ID0gX19yaXNjdl92Zm1heF92dl9mMTZtMSh2LCBzaGlmdGVkLCB2bCk7CiAgICB9CiAgICByZXR1cm4gX19yaXNjdl92bXZfZl9zX2YxNm0xX2YxNih2KTsKfQoKLy8KLy8gUmVkdWNlIHN1bSBmb3IgRlAxNiB2ZWN0b3I6IGhvcml6b250YWwgYWRkIHJlZHVjdGlvbi4KLy8KTUxBU19GT1JDRUlOTElORSBfRmxvYXQxNgpSZWR1Y2VTdW1Ib3Jpem9udGFsKHZmbG9hdDE2bTFfdCB2LCBzaXplX3QgdmwpIHsKICAgIGZvciAoc2l6ZV90IHN0ZXAgPSB2bCAvIDI7IHN0ZXAgPj0gMTsgc3RlcCAvPSAyKSB7CiAgICAgICAgdmZsb2F0MTZtMV90IHNoaWZ0ZWQgPSBfX3Jpc2N2X3ZzbGlkZWRvd25fdnhfZjE2bTEodiwgc3RlcCwgdmwpOwogICAgICAgIHYgPSBfX3Jpc2N2X3ZmYWRkX3Z2X2YxNm0xKHYsIHNoaWZ0ZWQsIHZsKTsKICAgIH0KICAgIHJldHVybiBfX3Jpc2N2X3Ztdl9mX3NfZjE2bTFfZjE2KHYpOwp9CgovLwovLyA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQovLyBLZXJuZWwgMTogUmVkdWNlTWF4X0tlcm5lbF9GcDE2X1J2djUxMgovLyA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQovLyBGaW5kIHRoZSBtYXhpbXVtIHZhbHVlIGluIGFuIEZQMTYgYXJyYXkuCi8vCi8vIFZMRU49NTEyLCBTRVc9MTY6IFZMPTMyIGVsZW1lbnRzIHBlciB2ZWN0b3IgcmVnaXN0ZXIuCi8vIFVucm9sbGVkIDR4OiBwcm9jZXNzZXMgMTI4IGVsZW1lbnRzIHBlciBpdGVyYXRpb24uCi8vCk1MQVNfRlAxNgpSZWR1Y2VNYXhfS2VybmVsX0ZwMTZfUnZ2NTEyKAogICAgY29uc3QgTUxBU19GUDE2KiBJbnB1dCwKICAgIHNpemVfdCBOCiAgICApCnsKICAgIGNvbnN0IGF1dG8qIGlucHV0ID0gcmVpbnRlcnByZXRfY2FzdDxjb25zdCBfRmxvYXQxNio+KElucHV0KTsKCiAgICBpZiAoTiA9PSAwKSB7CiAgICAgICAgcmV0dXJuIE1MQVNfRlAxNjo6RnJvbUJpdHMoMHhGQkZGKTsgIC8vIC1OYU4gKG1pbmltdW0gc2VudGluZWwpCiAgICB9CgogICAgLy8gSW5pdGlhbGl6ZSBtYXggdG8gZmlyc3QgZWxlbWVudCwgdGhlbiB2ZWN0b3JpemUKICAgIGNvbnN0ZXhwciBzaXplX3Qga1ZsID0gMzI7ICAvLyBWTEVOPTUxMiAvIFNFVz0xNgogICAgc2l6ZV90IHZsID0gX19yaXNjdl92c2V0dmxfZTE2bTEoa1ZsKTsKCiAgICBfRmxvYXQxNiBzY2FsYXJfbWF4ID0gaW5wdXRbMF07CiAgICBpbnB1dCsrOwoKICAgIC8vIEZpbmQgbWF4IGFjcm9zcyByZW1haW5pbmcgZWxlbWVudHMgaW4gZmlyc3QgcGFydGlhbCB2ZWN0b3IKICAgIHNpemVfdCByZW1haW5pbmdfZmlyc3QgPSAoTiAtIDEpIDwgdmwgPyAoTiAtIDEpIDogdmw7CiAgICBpZiAocmVtYWluaW5nX2ZpcnN0ID4gMCkgewogICAgICAgIHZmbG9hdDE2bTFfdCB2X21heCA9IF9fcmlzY3ZfdmZtdl92X2ZfZjE2bTEoc2NhbGFyX21heCwgcmVtYWluaW5nX2ZpcnN0KTsKICAgICAgICB2ZmxvYXQxNm0xX3Qgdl9pbiA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgcmVtYWluaW5nX2ZpcnN0KTsKICAgICAgICB2X21heCA9IF9fcmlzY3ZfdmZtYXhfdnZfZjE2bTEodl9tYXgsIHZfaW4sIHJlbWFpbmluZ19maXJzdCk7CiAgICAgICAgc2NhbGFyX21heCA9IFJlZHVjZU1heEhvcml6b250YWwodl9tYXgsIHJlbWFpbmluZ19maXJzdCk7CiAgICAgICAgaW5wdXQgKz0gcmVtYWluaW5nX2ZpcnN0OwogICAgICAgIE4gLT0gKHJlbWFpbmluZ19maXJzdCArIDEpOwogICAgfSBlbHNlIHsKICAgICAgICBOLS07CiAgICB9CgogICAgLy8gTWFpbiBsb29wOiBwcm9jZXNzIDQgdmVjdG9ycyAoMTI4IGVsZW1lbnRzKSBwZXIgaXRlcmF0aW9uCiAgICB3aGlsZSAoTiA+PSA0ICogdmwpIHsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjAgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjEgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyB2bCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MiA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCArIDIgKiB2bCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MyA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCArIDMgKiB2bCwgdmwpOwoKICAgICAgICB2MCA9IF9fcmlzY3ZfdmZtYXhfdnZfZjE2bTEodjAsIHYxLCB2bCk7CiAgICAgICAgdjIgPSBfX3Jpc2N2X3ZmbWF4X3Z2X2YxNm0xKHYyLCB2MywgdmwpOwogICAgICAgIHYwID0gX19yaXNjdl92Zm1heF92dl9mMTZtMSh2MCwgdjIsIHZsKTsKCiAgICAgICAgX0Zsb2F0MTYgYmxvY2tfbWF4ID0gUmVkdWNlTWF4SG9yaXpvbnRhbCh2MCwgdmwpOwogICAgICAgIHNjYWxhcl9tYXggPSAoYmxvY2tfbWF4ID4gc2NhbGFyX21heCkgPyBibG9ja19tYXggOiBzY2FsYXJfbWF4OwoKICAgICAgICBpbnB1dCArPSA0ICogdmw7CiAgICAgICAgTiAtPSA0ICogdmw7CiAgICB9CgogICAgLy8gSGFuZGxlIHJlbWFpbmluZyBmdWxsIHZlY3RvcnMKICAgIHdoaWxlIChOID49IHZsKSB7CiAgICAgICAgdmZsb2F0MTZtMV90IHZfaW4gPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQsIHZsKTsKICAgICAgICBfRmxvYXQxNiBibG9ja19tYXggPSBSZWR1Y2VNYXhIb3Jpem9udGFsKHZfaW4sIHZsKTsKICAgICAgICBzY2FsYXJfbWF4ID0gKGJsb2NrX21heCA+IHNjYWxhcl9tYXgpID8gYmxvY2tfbWF4IDogc2NhbGFyX21heDsKICAgICAgICBpbnB1dCArPSB2bDsKICAgICAgICBOIC09IHZsOwogICAgfQoKICAgIC8vIEhhbmRsZSB0YWlsIGVsZW1lbnRzCiAgICBpZiAoTiA+IDApIHsKICAgICAgICB2bCA9IF9fcmlzY3ZfdnNldHZsX2UxNm0xKE4pOwogICAgICAgIHZmbG9hdDE2bTFfdCB2X21heCA9IF9fcmlzY3ZfdmZtdl92X2ZfZjE2bTEoc2NhbGFyX21heCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2X2luID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0LCB2bCk7CiAgICAgICAgdl9tYXggPSBfX3Jpc2N2X3ZmbWF4X3Z2X2YxNm0xKHZfbWF4LCB2X2luLCB2bCk7CiAgICAgICAgc2NhbGFyX21heCA9IFJlZHVjZU1heEhvcml6b250YWwodl9tYXgsIHZsKTsKICAgIH0KCiAgICByZXR1cm4gTUxBU19GUDE2OjpGcm9tRmxvYXQoc2NhbGFyX21heCk7Cn0KCi8vCi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09Ci8vIEtlcm5lbCAyOiBTdW1FeHBfS2VybmVsX0ZwMTZfUnZ2NTEyCi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09Ci8vIENvbXB1dGUgZXhwKHggLSBtYXgpIGZvciBlYWNoIGVsZW1lbnQgYW5kIHJldHVybiB0aGUgc3VtLgovLyBPcHRpb25hbGx5IHN0b3JlcyBleHAoeCAtIG1heCkgcmVzdWx0cyB0byBPdXRwdXQuCi8vCi8vIFZMRU49NTEyLCBTRVc9MTY6IFZMPTMyIGVsZW1lbnRzIHBlciB2ZWN0b3IgcmVnaXN0ZXIuCi8vIFVucm9sbGVkIDR4OiBwcm9jZXNzZXMgMTI4IGVsZW1lbnRzIHBlciBpdGVyYXRpb24uCi8vCk1MQVNfRlAxNgpTdW1FeHBfS2VybmVsX0ZwMTZfUnZ2NTEyKAogICAgY29uc3QgTUxBU19GUDE2KiBJbnB1dCwKICAgIE1MQVNfRlAxNiogT3V0cHV0LAogICAgc2l6ZV90IE4sCiAgICBjb25zdCBNTEFTX0ZQMTYgTmVnYXRpdmVNYXhpbXVtCiAgICApCnsKICAgIGNvbnN0IGF1dG8qIGlucHV0ID0gcmVpbnRlcnByZXRfY2FzdDxjb25zdCBfRmxvYXQxNio+KElucHV0KTsKICAgIGF1dG8qIG91dHB1dCA9IHJlaW50ZXJwcmV0X2Nhc3Q8X0Zsb2F0MTYqPihPdXRwdXQpOwogICAgY29uc3QgYm9vbCBzdG9yZV9vdXRwdXQgPSAoT3V0cHV0ICE9IG51bGxwdHIpOwoKICAgIGNvbnN0ZXhwciBzaXplX3Qga1ZsID0gMzI7CiAgICBzaXplX3QgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShrVmwpOwoKICAgIF9GbG9hdDE2IG5lZ19tYXggPSBOZWdhdGl2ZU1heGltdW0uVG9GbG9hdCgpOwogICAgX0Zsb2F0MTYgYWNjdW11bGF0b3IgPSBzdGF0aWNfY2FzdDxfRmxvYXQxNj4oMC4wZik7CgogICAgLy8gQnJvYWRjYXN0IG5lZ2F0aXZlIG1heGltdW0gdG8gdmVjdG9yCiAgICB2ZmxvYXQxNm0xX3QgbmVnX21heF92ZWMgPSBfX3Jpc2N2X3ZmbXZfdl9mX2YxNm0xKG5lZ19tYXgsIHZsKTsKCiAgICAvLyBNYWluIGxvb3A6IHByb2Nlc3MgNCB2ZWN0b3JzIHBlciBpdGVyYXRpb24gKDEyOCBlbGVtZW50cykKICAgIHdoaWxlIChOID49IDQgKiB2bCkgewogICAgICAgIHZmbG9hdDE2bTFfdCB2MCA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MSA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCArIHZsLCB2bCk7CiAgICAgICAgdmZsb2F0MTZtMV90IHYyID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0ICsgMiAqIHZsLCB2bCk7CiAgICAgICAgdmZsb2F0MTZtMV90IHYzID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0ICsgMyAqIHZsLCB2bCk7CgogICAgICAgIHYwID0gU3VtRXhwVmVjdG9yRnAxNih2MCwgbmVnX21heF92ZWMsIHZsKTsKICAgICAgICB2MSA9IFN1bUV4cFZlY3RvckZwMTYodjEsIG5lZ19tYXhfdmVjLCB2bCk7CiAgICAgICAgdjIgPSBTdW1FeHBWZWN0b3JGcDE2KHYyLCBuZWdfbWF4X3ZlYywgdmwpOwogICAgICAgIHYzID0gU3VtRXhwVmVjdG9yRnAxNih2MywgbmVnX21heF92ZWMsIHZsKTsKCiAgICAgICAgLy8gSG9yaXpvbnRhbCBzdW0gd2l0aGluIGVhY2ggdmVjdG9yCiAgICAgICAgX0Zsb2F0MTYgczAgPSBSZWR1Y2VTdW1Ib3Jpem9udGFsKHYwLCB2bCk7CiAgICAgICAgX0Zsb2F0MTYgczEgPSBSZWR1Y2VTdW1Ib3Jpem9udGFsKHYxLCB2bCk7CiAgICAgICAgX0Zsb2F0MTYgczIgPSBSZWR1Y2VTdW1Ib3Jpem9udGFsKHYyLCB2bCk7CiAgICAgICAgX0Zsb2F0MTYgczMgPSBSZWR1Y2VTdW1Ib3Jpem9udGFsKHYzLCB2bCk7CgogICAgICAgIGFjY3VtdWxhdG9yID0gc3RhdGljX2Nhc3Q8X0Zsb2F0MTY+KAogICAgICAgICAgICBzdGF0aWNfY2FzdDxmbG9hdD4oYWNjdW11bGF0b3IpICsKICAgICAgICAgICAgc3RhdGljX2Nhc3Q8ZmxvYXQ+KHMwKSArIHN0YXRpY19jYXN0PGZsb2F0PihzMSkgKwogICAgICAgICAgICBzdGF0aWNfY2FzdDxmbG9hdD4oczIpICsgc3RhdGljX2Nhc3Q8ZmxvYXQ+KHMzKSk7CgogICAgICAgIGlmIChzdG9yZV9vdXRwdXQpIHsKICAgICAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgICAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCArIHZsLCB2MSwgdmwpOwogICAgICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0ICsgMiAqIHZsLCB2MiwgdmwpOwogICAgICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0ICsgMyAqIHZsLCB2MywgdmwpOwogICAgICAgICAgICBvdXRwdXQgKz0gNCAqIHZsOwogICAgICAgIH0KCiAgICAgICAgaW5wdXQgKz0gNCAqIHZsOwogICAgICAgIE4gLT0gNCAqIHZsOwogICAgfQoKICAgIC8vIEhhbmRsZSByZW1haW5pbmcgZnVsbCB2ZWN0b3JzCiAgICB3aGlsZSAoTiA+PSB2bCkgewogICAgICAgIHZmbG9hdDE2bTFfdCB2MCA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgdmwpOwogICAgICAgIHYwID0gU3VtRXhwVmVjdG9yRnAxNih2MCwgbmVnX21heF92ZWMsIHZsKTsKCiAgICAgICAgX0Zsb2F0MTYgcyA9IFJlZHVjZVN1bUhvcml6b250YWwodjAsIHZsKTsKICAgICAgICBhY2N1bXVsYXRvciA9IHN0YXRpY19jYXN0PF9GbG9hdDE2PigKICAgICAgICAgICAgc3RhdGljX2Nhc3Q8ZmxvYXQ+KGFjY3VtdWxhdG9yKSArIHN0YXRpY19jYXN0PGZsb2F0PihzKSk7CgogICAgICAgIGlmIChzdG9yZV9vdXRwdXQpIHsKICAgICAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgICAgICAgICAgb3V0cHV0ICs9IHZsOwogICAgICAgIH0KCiAgICAgICAgaW5wdXQgKz0gdmw7CiAgICAgICAgTiAtPSB2bDsKICAgIH0KCiAgICAvLyBIYW5kbGUgdGFpbCBlbGVtZW50cwogICAgaWYgKE4gPiAwKSB7CiAgICAgICAgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShOKTsKICAgICAgICBuZWdfbWF4X3ZlYyA9IF9fcmlzY3ZfdmZtdl92X2ZfZjE2bTEobmVnX21heCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MCA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgdmwpOwogICAgICAgIHYwID0gU3VtRXhwVmVjdG9yRnAxNih2MCwgbmVnX21heF92ZWMsIHZsKTsKCiAgICAgICAgX0Zsb2F0MTYgcyA9IFJlZHVjZVN1bUhvcml6b250YWwodjAsIHZsKTsKICAgICAgICBhY2N1bXVsYXRvciA9IHN0YXRpY19jYXN0PF9GbG9hdDE2PigKICAgICAgICAgICAgc3RhdGljX2Nhc3Q8ZmxvYXQ+KGFjY3VtdWxhdG9yKSArIHN0YXRpY19jYXN0PGZsb2F0PihzKSk7CgogICAgICAgIGlmIChzdG9yZV9vdXRwdXQpIHsKICAgICAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgICAgICB9CiAgICB9CgogICAgcmV0dXJuIE1MQVNfRlAxNjo6RnJvbUZsb2F0KGFjY3VtdWxhdG9yKTsKfQoKLy8KLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KLy8gS2VybmVsIDM6IFNvZnRtYXhfS2VybmVsX0ZwMTZfUnZ2NTEyCi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09Ci8vIENvbXB1dGUgZmluYWwgc29mdG1heCBub3JtYWxpemF0aW9uOiBvdXRwdXRbaV0gPSBpbnB1dFtpXSAvIHN1bS4KLy8gSW5wdXQgY29udGFpbnMgZXhwKHggLSBtYXgpIHZhbHVlcywgU3VtIGlzIHRoZSBhY2N1bXVsYXRlZCBzdW0uCi8vCi8vIFZMRU49NTEyLCBTRVc9MTY6IFZMPTMyIGVsZW1lbnRzIHBlciB2ZWN0b3IgcmVnaXN0ZXIuCi8vIFVucm9sbGVkIDR4OiBwcm9jZXNzZXMgMTI4IGVsZW1lbnRzIHBlciBpdGVyYXRpb24uCi8vCnZvaWQKU29mdG1heF9LZXJuZWxfRnAxNl9SdnY1MTIoCiAgICBjb25zdCBNTEFTX0ZQMTYqIElucHV0LAogICAgTUxBU19GUDE2KiBPdXRwdXQsCiAgICBzaXplX3QgTiwKICAgIGNvbnN0IE1MQVNfRlAxNiBTdW0KICAgICkKewogICAgY29uc3QgYXV0byogaW5wdXQgPSByZWludGVycHJldF9jYXN0PGNvbnN0IF9GbG9hdDE2Kj4oSW5wdXQpOwogICAgYXV0byogb3V0cHV0ID0gcmVpbnRlcnByZXRfY2FzdDxfRmxvYXQxNio+KE91dHB1dCk7CgogICAgY29uc3RleHByIHNpemVfdCBrVmwgPSAzMjsKICAgIHNpemVfdCB2bCA9IF9fcmlzY3ZfdnNldHZsX2UxNm0xKGtWbCk7CgogICAgLy8gQ29tcHV0ZSBzY2FsZSA9IDEuMCAvIFN1bSBpbiBGUDE2CiAgICBmbG9hdCBzdW1fZiA9IFN1bS5Ub0Zsb2F0KCk7CiAgICBfRmxvYXQxNiBzY2FsZSA9IHN0YXRpY19jYXN0PF9GbG9hdDE2PigxLjBmIC8gc3VtX2YpOwoKICAgIC8vIE1haW4gbG9vcDogcHJvY2VzcyA0IHZlY3RvcnMgcGVyIGl0ZXJhdGlvbiAoMTI4IGVsZW1lbnRzKQogICAgd2hpbGUgKE4gPj0gNCAqIHZsKSB7CiAgICAgICAgdmZsb2F0MTZtMV90IHYwID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0LCB2bCk7CiAgICAgICAgdmZsb2F0MTZtMV90IHYxID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0ICsgdmwsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjIgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyAyICogdmwsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjMgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyAzICogdmwsIHZsKTsKCiAgICAgICAgdjAgPSBfX3Jpc2N2X3ZmbXVsX3ZmX2YxNm0xKHYwLCBzY2FsZSwgdmwpOwogICAgICAgIHYxID0gX19yaXNjdl92Zm11bF92Zl9mMTZtMSh2MSwgc2NhbGUsIHZsKTsKICAgICAgICB2MiA9IF9fcmlzY3ZfdmZtdWxfdmZfZjE2bTEodjIsIHNjYWxlLCB2bCk7CiAgICAgICAgdjMgPSBfX3Jpc2N2X3ZmbXVsX3ZmX2YxNm0xKHYzLCBzY2FsZSwgdmwpOwoKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0LCB2MCwgdmwpOwogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQgKyB2bCwgdjEsIHZsKTsKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0ICsgMiAqIHZsLCB2MiwgdmwpOwogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQgKyAzICogdmwsIHYzLCB2bCk7CgogICAgICAgIGlucHV0ICs9IDQgKiB2bDsKICAgICAgICBvdXRwdXQgKz0gNCAqIHZsOwogICAgICAgIE4gLT0gNCAqIHZsOwogICAgfQoKICAgIC8vIEhhbmRsZSByZW1haW5pbmcgZnVsbCB2ZWN0b3JzCiAgICB3aGlsZSAoTiA+PSB2bCkgewogICAgICAgIHZmbG9hdDE2bTFfdCB2MCA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgdmwpOwogICAgICAgIHYwID0gX19yaXNjdl92Zm11bF92Zl9mMTZtMSh2MCwgc2NhbGUsIHZsKTsKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0LCB2MCwgdmwpOwoKICAgICAgICBpbnB1dCArPSB2bDsKICAgICAgICBvdXRwdXQgKz0gdmw7CiAgICAgICAgTiAtPSB2bDsKICAgIH0KCiAgICAvLyBIYW5kbGUgdGFpbCBlbGVtZW50cwogICAgaWYgKE4gPiAwKSB7CiAgICAgICAgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShOKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjAgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQsIHZsKTsKICAgICAgICB2MCA9IF9fcmlzY3ZfdmZtdWxfdmZfZjE2bTEodjAsIHNjYWxlLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgIH0KfQoKLy8KLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KLy8gS2VybmVsIDQ6IEV4cF9LZXJuZWxfRnAxNl9SdnY1MTIKLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KLy8gQ29tcHV0ZSBleHAoeCkgZm9yIGVhY2ggZWxlbWVudCBvZiBhbiBGUDE2IGFycmF5LgovLwovLyBWYWxpZCBpbnB1dCByYW5nZTogWy0xNy4zMjg3LCAxMS4wOTA0XSAobmFycm93ZXIgcmFuZ2UgbWFwcGVkIGZyb20gRlAxNikuCi8vCnZvaWQKRXhwX0tlcm5lbF9GcDE2X1J2djUxMigKICAgIGNvbnN0IE1MQVNfRlAxNiogSW5wdXQsCiAgICBNTEFTX0ZQMTYqIE91dHB1dCwKICAgIHNpemVfdCBOCiAgICApCnsKICAgIGNvbnN0IGF1dG8qIGlucHV0ID0gcmVpbnRlcnByZXRfY2FzdDxjb25zdCBfRmxvYXQxNio+KElucHV0KTsKICAgIGF1dG8qIG91dHB1dCA9IHJlaW50ZXJwcmV0X2Nhc3Q8X0Zsb2F0MTYqPihPdXRwdXQpOwoKICAgIGNvbnN0ZXhwciBzaXplX3Qga1ZsID0gMzI7CiAgICBzaXplX3QgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShrVmwpOwoKICAgIC8vIE1haW4gbG9vcDogcHJvY2VzcyA0IHZlY3RvcnMgcGVyIGl0ZXJhdGlvbiAoMTI4IGVsZW1lbnRzKQogICAgd2hpbGUgKE4gPj0gNCAqIHZsKSB7CiAgICAgICAgdmZsb2F0MTZtMV90IHYwID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0LCB2bCk7CiAgICAgICAgdmZsb2F0MTZtMV90IHYxID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0ICsgdmwsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjIgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyAyICogdmwsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjMgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyAzICogdmwsIHZsKTsKCiAgICAgICAgdjAgPSBFeHBWZWN0b3JGcDE2KHYwLCB2bCk7CiAgICAgICAgdjEgPSBFeHBWZWN0b3JGcDE2KHYxLCB2bCk7CiAgICAgICAgdjIgPSBFeHBWZWN0b3JGcDE2KHYyLCB2bCk7CiAgICAgICAgdjMgPSBFeHBWZWN0b3JGcDE2KHYzLCB2bCk7CgogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQsIHYwLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCArIHZsLCB2MSwgdmwpOwogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQgKyAyICogdmwsIHYyLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCArIDMgKiB2bCwgdjMsIHZsKTsKCiAgICAgICAgaW5wdXQgKz0gNCAqIHZsOwogICAgICAgIG91dHB1dCArPSA0ICogdmw7CiAgICAgICAgTiAtPSA0ICogdmw7CiAgICB9CgogICAgLy8gSGFuZGxlIHJlbWFpbmluZyBmdWxsIHZlY3RvcnMKICAgIHdoaWxlIChOID49IHZsKSB7CiAgICAgICAgdmZsb2F0MTZtMV90IHYwID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0LCB2bCk7CiAgICAgICAgdjAgPSBFeHBWZWN0b3JGcDE2KHYwLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKCiAgICAgICAgaW5wdXQgKz0gdmw7CiAgICAgICAgb3V0cHV0ICs9IHZsOwogICAgICAgIE4gLT0gdmw7CiAgICB9CgogICAgLy8gSGFuZGxlIHRhaWwgZWxlbWVudHMKICAgIGlmIChOID4gMCkgewogICAgICAgIHZsID0gX19yaXNjdl92c2V0dmxfZTE2bTEoTik7CiAgICAgICAgdmZsb2F0MTZtMV90IHYwID0gX19yaXNjdl92bGUxNl92X2YxNm0xKGlucHV0LCB2bCk7CiAgICAgICAgdjAgPSBFeHBWZWN0b3JGcDE2KHYwLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgIH0KfQoKLy8KLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KLy8gS2VybmVsIDU6IExvZ1NvZnRtYXhfS2VybmVsX0ZwMTZfUnZ2NTEyCi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09Ci8vIENvbXB1dGUgbG9nIHNvZnRtYXggb3V0cHV0OiBvdXRwdXRbaV0gPSBpbnB1dFtpXSArIG5lZ19tYXggLSBsb2dfc3VtCi8vCnZvaWQKTG9nU29mdG1heF9LZXJuZWxfRnAxNl9SdnY1MTIoCiAgICBjb25zdCBNTEFTX0ZQMTYqIElucHV0LAogICAgTUxBU19GUDE2KiBPdXRwdXQsCiAgICBzaXplX3QgTiwKICAgIGNvbnN0IE1MQVNfRlAxNiBOZWdhdGl2ZU1heGltdW0sCiAgICBjb25zdCBNTEFTX0ZQMTYgTG9nU3VtCiAgICApCnsKICAgIGNvbnN0IGF1dG8qIGlucHV0ID0gcmVpbnRlcnByZXRfY2FzdDxjb25zdCBfRmxvYXQxNio+KElucHV0KTsKICAgIGF1dG8qIG91dHB1dCA9IHJlaW50ZXJwcmV0X2Nhc3Q8X0Zsb2F0MTYqPihPdXRwdXQpOwoKICAgIGNvbnN0ZXhwciBzaXplX3Qga1ZsID0gMzI7CiAgICBzaXplX3QgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShrVmwpOwoKICAgIF9GbG9hdDE2IG5lZ19tYXggPSBOZWdhdGl2ZU1heGltdW0uVG9GbG9hdCgpOwogICAgX0Zsb2F0MTYgbG9nX3N1bSA9IExvZ1N1bS5Ub0Zsb2F0KCk7CgogICAgLy8gTWFpbiBsb29wOiBwcm9jZXNzIDQgdmVjdG9ycyBwZXIgaXRlcmF0aW9uICgxMjggZWxlbWVudHMpCiAgICB3aGlsZSAoTiA+PSA0ICogdmwpIHsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjAgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQsIHZsKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjEgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQgKyB2bCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MiA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCArIDIgKiB2bCwgdmwpOwogICAgICAgIHZmbG9hdDE2bTFfdCB2MyA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCArIDMgKiB2bCwgdmwpOwoKICAgICAgICAvLyBvdXRwdXRbaV0gPSBpbnB1dFtpXSArIG5lZ19tYXggLSBsb2dfc3VtCiAgICAgICAgdjAgPSBfX3Jpc2N2X3Zmc3ViX3ZmX2YxNm0xKF9fcmlzY3ZfdmZhZGRfdmZfZjE2bTEodjAsIG5lZ19tYXgsIHZsKSwgbG9nX3N1bSwgdmwpOwogICAgICAgIHYxID0gX19yaXNjdl92ZnN1Yl92Zl9mMTZtMShfX3Jpc2N2X3ZmYWRkX3ZmX2YxNm0xKHYxLCBuZWdfbWF4LCB2bCksIGxvZ19zdW0sIHZsKTsKICAgICAgICB2MiA9IF9fcmlzY3ZfdmZzdWJfdmZfZjE2bTEoX19yaXNjdl92ZmFkZF92Zl9mMTZtMSh2MiwgbmVnX21heCwgdmwpLCBsb2dfc3VtLCB2bCk7CiAgICAgICAgdjMgPSBfX3Jpc2N2X3Zmc3ViX3ZmX2YxNm0xKF9fcmlzY3ZfdmZhZGRfdmZfZjE2bTEodjMsIG5lZ19tYXgsIHZsKSwgbG9nX3N1bSwgdmwpOwoKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0LCB2MCwgdmwpOwogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQgKyB2bCwgdjEsIHZsKTsKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0ICsgMiAqIHZsLCB2MiwgdmwpOwogICAgICAgIF9fcmlzY3ZfdnNlMTZfdl9mMTZtMShvdXRwdXQgKyAzICogdmwsIHYzLCB2bCk7CgogICAgICAgIGlucHV0ICs9IDQgKiB2bDsKICAgICAgICBvdXRwdXQgKz0gNCAqIHZsOwogICAgICAgIE4gLT0gNCAqIHZsOwogICAgfQoKICAgIC8vIEhhbmRsZSByZW1haW5pbmcgZnVsbCB2ZWN0b3JzCiAgICB3aGlsZSAoTiA+PSB2bCkgewogICAgICAgIHZmbG9hdDE2bTFfdCB2MCA9IF9fcmlzY3ZfdmxlMTZfdl9mMTZtMShpbnB1dCwgdmwpOwogICAgICAgIHYwID0gX19yaXNjdl92ZnN1Yl92Zl9mMTZtMShfX3Jpc2N2X3ZmYWRkX3ZmX2YxNm0xKHYwLCBuZWdfbWF4LCB2bCksIGxvZ19zdW0sIHZsKTsKICAgICAgICBfX3Jpc2N2X3ZzZTE2X3ZfZjE2bTEob3V0cHV0LCB2MCwgdmwpOwoKICAgICAgICBpbnB1dCArPSB2bDsKICAgICAgICBvdXRwdXQgKz0gdmw7CiAgICAgICAgTiAtPSB2bDsKICAgIH0KCiAgICAvLyBIYW5kbGUgdGFpbCBlbGVtZW50cwogICAgaWYgKE4gPiAwKSB7CiAgICAgICAgdmwgPSBfX3Jpc2N2X3ZzZXR2bF9lMTZtMShOKTsKICAgICAgICB2ZmxvYXQxNm0xX3QgdjAgPSBfX3Jpc2N2X3ZsZTE2X3ZfZjE2bTEoaW5wdXQsIHZsKTsKICAgICAgICB2MCA9IF9fcmlzY3ZfdmZzdWJfdmZfZjE2bTEoX19yaXNjdl92ZmFkZF92Zl9mMTZtMSh2MCwgbmVnX21heCwgdmwpLCBsb2dfc3VtLCB2bCk7CiAgICAgICAgX19yaXNjdl92c2UxNl92X2YxNm0xKG91dHB1dCwgdjAsIHZsKTsKICAgIH0KfQoKfSAgLy8gbmFtZXNwYWNlIHNvZnRtYXhfcnZ2NTEyCgojZW5kaWYgLy8gTUxBU19UQVJHRVRfUklTQ1YgJiYgTUxBU19SVlZfVkxFTl81MTIgJiYgX19yaXNjdl96dmZoCg=="}, {"name": "test_softmax_fp16.cpp", "type": "text", "content": "/*++\n\nCopyright (c) RVFuse Project. All rights reserved.\n\nLicensed under the MIT License.\n\nModule Name:\n\n    test_softmax_fp16.cpp\n\nAbstract:\n\n    Test harness for FP16 softmax kernels. Contains:\n    1. Scalar reference implementations (FP32 and FP16)\n    2. Softmax correctness test comparing vector vs scalar\n    3. Performance benchmark for different input sizes\n    4. Edge case tests (zero-length, single-element, large values)\n\n    Build (RISC-V cross-compile):\n        riscv64-unknown-linux-gnu-g++ -std=c++17 -O2 \\\n            -march=rv64gcv_zvfh -DVLEN_512 \\\n            test_softmax_fp16.cpp -o test_softmax_fp16\n\n    Build (native x86, for scalar reference testing):\n        g++ -std=c++17 -O2 test_softmax_fp16.cpp -o test_softmax_fp16_scalar\n\n    Run:\n        ./test_softmax_fp16\n        ./test_softmax_fp16 --verbose\n        ./test_softmax_fp16 --bench\n\n--*/\n\n#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n#include <cmath>\n#include <cstdint>\n#include <vector>\n#include <chrono>\n#include <algorithm>\n#include <numeric>\n\n// ============================================================================\n// FP16 type emulation for testing on non-RVV platforms\n// ============================================================================\n// MLAS_FP16 is defined in onnxruntime/core/mlas/inc/mlas_float16.h.\n// For standalone testing, we provide a minimal FP16 type.\n\n#ifndef MLAS_FP16_DEFINED\n\nstruct MLAS_FP16 {\n    uint16_t val;\n\n    static MLAS_FP16 FromFloat(float f) {\n        MLAS_FP16 result;\n        // Manual float-to-fp16 conversion\n        uint32_t f_bits;\n        memcpy(&f_bits, &f, sizeof(f_bits));\n        uint32_t sign = (f_bits >> 31) & 1;\n        int32_t exp = ((f_bits >> 23) & 0xFF) - 127 + 15;\n        uint32_t frac = (f_bits >> 13) & 0x3FF;\n\n        if (exp <= 0) {\n            // Denormalized or zero\n            if (exp < -10) {\n                result.val = static_cast<uint16_t>(sign << 15);\n            } else {\n                frac |= 0x400;\n                frac >>= (1 - exp);\n                result.val = static_cast<uint16_t>((sign << 15) | frac);\n            }\n        } else if (exp >= 31) {\n            // Overflow to infinity\n            result.val = static_cast<uint16_t>((sign << 15) | 0x7C00);\n        } else {\n            result.val = static_cast<uint16_t>((sign << 15) | (exp << 10) | frac);\n        }\n        return result;\n    }\n\n    static MLAS_FP16 FromBits(uint16_t bits) {\n        MLAS_FP16 result;\n        result.val = bits;\n        return result;\n    }\n\n    float ToFloat() const {\n        uint32_t sign = (val >> 15) & 1;\n        uint32_t exp = (val >> 10) & 0x1F;\n        uint32_t frac = val & 0x3FF;\n\n        if (exp == 0) {\n            if (frac == 0) {\n                // Zero\n                float f = 0.0f;\n                uint32_t f_bits = (sign << 31);\n                memcpy(&f, &f_bits, sizeof(f));\n                return f;\n            }\n            // Denormalized\n            float f = 0.0f;\n            while ((frac & 0x400) == 0) {\n                frac <<= 1;\n                exp--;\n            }\n            frac &= 0x3FF;\n            exp++;\n        }\n\n        if (exp == 31) {\n            // Infinity or NaN\n            uint32_t f_bits = (sign << 31) | 0x7F800000 | (frac << 13);\n            float f;\n            memcpy(&f, &f_bits, sizeof(f));\n            return f;\n        }\n\n        uint32_t f_bits = (sign << 31) | ((exp + 127 - 15) << 23) | (frac << 13);\n        float f;\n        memcpy(&f, &f_bits, sizeof(f));\n        return f;\n    }\n\n    MLAS_FP16 Negate() const {\n        return FromBits(static_cast<uint16_t>(val ^ 0x8000));\n    }\n\n    bool operator==(const MLAS_FP16& other) const { return val == other.val; }\n    bool operator!=(const MLAS_FP16& other) const { return val != other.val; }\n};\n\n#define MLAS_FP16_DEFINED\n\n#endif // MLAS_FP16_DEFINED\n\n// ============================================================================\n// Scalar FP32 reference implementations\n// ============================================================================\n\n//\n// Scalar FP32 ReduceMax\n//\nstatic float\nScalarReduceMaxF32(const float* input, size_t n) {\n    if (n == 0) return -std::numeric_limits<float>::max();\n    float max_val = input[0];\n    for (size_t i = 1; i < n; i++) {\n        if (input[i] > max_val) max_val = input[i];\n    }\n    return max_val;\n}\n\n//\n// Scalar FP32 softmax: output[i] = exp(input[i] - max) / sum(exp(input[i] - max))\n//\nstatic void\nScalarSoftmaxF32(const float* input, float* output, size_t n) {\n    if (n == 0) return;\n\n    float max_val = ScalarReduceMaxF32(input, n);\n    float neg_max = -max_val;\n\n    float sum = 0.0f;\n    for (size_t i = 0; i < n; i++) {\n        float val = std::exp(input[i] + neg_max);\n        output[i] = val;\n        sum += val;\n    }\n\n    float inv_sum = 1.0f / sum;\n    for (size_t i = 0; i < n; i++) {\n        output[i] *= inv_sum;\n    }\n}\n\n//\n// Scalar FP32 log softmax: output[i] = input[i] - max - log(sum(exp(input[i] - max)))\n//\nstatic void\nScalarLogSoftmaxF32(const float* input, float* output, size_t n) {\n    if (n == 0) return;\n\n    float max_val = ScalarReduceMaxF32(input, n);\n    float neg_max = -max_val;\n\n    float sum = 0.0f;\n    for (size_t i = 0; i < n; i++) {\n        sum += std::exp(input[i] + neg_max);\n    }\n\n    float log_sum = std::log(sum);\n    for (size_t i = 0; i < n; i++) {\n        output[i] = input[i] + neg_max - log_sum;\n    }\n}\n\n// ============================================================================\n// Scalar FP16 reference implementations\n// ============================================================================\n\n//\n// Scalar FP16 ReduceMax\n//\nstatic MLAS_FP16\nScalarReduceMaxFp16(const MLAS_FP16* input, size_t n) {\n    if (n == 0) return MLAS_FP16::FromBits(0xFBFF);\n    MLAS_FP16 max_val = input[0];\n    for (size_t i = 1; i < n; i++) {\n        if (input[i].ToFloat() > max_val.ToFloat()) max_val = input[i];\n    }\n    return max_val;\n}\n\n//\n// Scalar FP16 SumExp: compute exp(x - max) and sum\n//\nstatic MLAS_FP16\nScalarSumExpFp16(const MLAS_FP16* input, MLAS_FP16* output, size_t n,\n                 const MLAS_FP16 NegativeMaximum) {\n    float neg_max = NegativeMaximum.ToFloat();\n    float sum = 0.0f;\n\n    for (size_t i = 0; i < n; i++) {\n        float val = std::exp(input[i].ToFloat() + neg_max);\n        sum += val;\n        if (output != nullptr) {\n            output[i] = MLAS_FP16::FromFloat(val);\n        }\n    }\n\n    return MLAS_FP16::FromFloat(sum);\n}\n\n//\n// Scalar FP16 Softmax: divide exp values by sum\n//\nstatic void\nScalarSoftmaxFp16(const MLAS_FP16* input, MLAS_FP16* output, size_t n,\n                   const MLAS_FP16 Sum) {\n    float scale = 1.0f / Sum.ToFloat();\n    for (size_t i = 0; i < n; i++) {\n        output[i] = MLAS_FP16::FromFloat(input[i].ToFloat() * scale);\n    }\n}\n\n//\n// Scalar FP16 LogSoftmax\n//\nstatic void\nScalarLogSoftmaxFp16(const MLAS_FP16* input, MLAS_FP16* output, size_t n,\n                      const MLAS_FP16 NegativeMaximum, const MLAS_FP16 LogSum) {\n    float neg_max = NegativeMaximum.ToFloat();\n    float log_sum = LogSum.ToFloat();\n    for (size_t i = 0; i < n; i++) {\n        float val = input[i].ToFloat() + neg_max - log_sum;\n        output[i] = MLAS_FP16::FromFloat(val);\n    }\n}\n\n//\n// Full scalar FP16 softmax pipeline\n//\nstatic void\nScalarSoftmaxFp16Full(const MLAS_FP16* input, MLAS_FP16* output, size_t n) {\n    if (n == 0) return;\n\n    MLAS_FP16 max_val = ScalarReduceMaxFp16(input, n);\n    MLAS_FP16 neg_max = max_val.Negate();\n\n    MLAS_FP16 sum = ScalarSumExpFp16(input, output, n, neg_max);\n    ScalarSoftmaxFp16(output, output, n, sum);\n}\n\n// ============================================================================\n// FP16 exp implementation for scalar reference\n// ============================================================================\n\nstatic MLAS_FP16\nScalarExpFp16(const MLAS_FP16& x) {\n    float val = std::exp(x.ToFloat());\n    return MLAS_FP16::FromFloat(val);\n}\n\n// ============================================================================\n// Test utilities\n// ============================================================================\n\nstatic int g_tests_passed = 0;\nstatic int g_tests_failed = 0;\nstatic bool g_verbose = false;\nstatic bool g_bench = false;\n\nstatic void\nPrintTestResult(const char* name, bool passed) {\n    if (passed) {\n        printf(\"  [PASS] %s\\n\", name);\n        g_tests_passed++;\n    } else {\n        printf(\"  [FAIL] %s\\n\", name);\n        g_tests_failed++;\n    }\n}\n\nstatic bool\nCompareFp16Arrays(const MLAS_FP16* a, const MLAS_FP16* b, size_t n,\n                  float rel_tol = 0.01f) {\n    for (size_t i = 0; i < n; i++) {\n        float fa = a[i].ToFloat();\n        float fb = b[i].ToFloat();\n\n        float diff = std::fabs(fa - fb);\n        float denom = std::max(std::fabs(fa), std::fabs(fb));\n        if (denom < 1e-6f) denom = 1e-6f;\n\n        if (diff / denom > rel_tol) {\n            if (g_verbose) {\n                printf(\"    Mismatch at [%zu]: scalar=%.6f rvv=%.6f (rel_err=%.4f)\\n\",\n                       i, fa, fb, diff / denom);\n            }\n            return false;\n        }\n    }\n    return true;\n}\n\n// ============================================================================\n// Test cases\n// ============================================================================\n\n//\n// Test 1: Basic softmax with known values\n//\nstatic void\nTestBasicSoftmax() {\n    printf(\"Test: Basic FP16 softmax\\n\");\n\n    // Input: [1.0, 2.0, 3.0]\n    // Expected softmax: [0.0900, 0.2447, 0.6652] (approximately)\n    std::vector<MLAS_FP16> input = {\n        MLAS_FP16::FromFloat(1.0f),\n        MLAS_FP16::FromFloat(2.0f),\n        MLAS_FP16::FromFloat(3.0f),\n    };\n    std::vector<MLAS_FP16> output(3);\n    std::vector<MLAS_FP16> expected(3);\n\n    ScalarSoftmaxFp16Full(input.data(), expected.data(), 3);\n\n    // Compare scalar pipeline vs FP32 reference\n    std::vector<float> input_f32 = {1.0f, 2.0f, 3.0f};\n    std::vector<float> expected_f32(3);\n    ScalarSoftmaxF32(input_f32.data(), expected_f32.data(), 3);\n\n    for (size_t i = 0; i < 3; i++) {\n        float diff = std::fabs(expected[i].ToFloat() - expected_f32[i]);\n        if (g_verbose) {\n            printf(\"    [%zu] fp16=%.6f fp32=%.6f diff=%.6f\\n\",\n                   i, expected[i].ToFloat(), expected_f32[i], diff);\n        }\n    }\n\n    // Sum of softmax outputs should be ~1.0\n    float sum = 0.0f;\n    for (size_t i = 0; i < 3; i++) {\n        sum += expected[i].ToFloat();\n    }\n    bool sum_ok = std::fabs(sum - 1.0f) < 0.01f;\n    PrintTestResult(\"sum(output) ~= 1.0\", sum_ok);\n\n    // All outputs should be positive\n    bool all_positive = true;\n    for (size_t i = 0; i < 3; i++) {\n        if (expected[i].ToFloat() < 0.0f) { all_positive = false; break; }\n    }\n    PrintTestResult(\"all outputs positive\", all_positive);\n\n    // Monotonicity: larger input -> larger output\n    bool monotonic = (expected[0].ToFloat() < expected[1].ToFloat()) &&\n                     (expected[1].ToFloat() < expected[2].ToFloat());\n    PrintTestResult(\"monotonic output\", monotonic);\n}\n\n//\n// Test 2: ReduceMax with various patterns\n//\nstatic void\nTestReduceMax() {\n    printf(\"Test: FP16 ReduceMax\\n\");\n\n    {\n        // Ascending\n        std::vector<MLAS_FP16> data = {\n            MLAS_FP16::FromFloat(1.0f), MLAS_FP16::FromFloat(2.0f),\n            MLAS_FP16::FromFloat(3.0f), MLAS_FP16::FromFloat(4.0f),\n        };\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(data.data(), 4);\n        PrintTestResult(\"ascending max\", std::fabs(max_val.ToFloat() - 4.0f) < 0.001f);\n    }\n\n    {\n        // Descending\n        std::vector<MLAS_FP16> data = {\n            MLAS_FP16::FromFloat(4.0f), MLAS_FP16::FromFloat(3.0f),\n            MLAS_FP16::FromFloat(2.0f), MLAS_FP16::FromFloat(1.0f),\n        };\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(data.data(), 4);\n        PrintTestResult(\"descending max\", std::fabs(max_val.ToFloat() - 4.0f) < 0.001f);\n    }\n\n    {\n        // Negative values\n        std::vector<MLAS_FP16> data = {\n            MLAS_FP16::FromFloat(-10.0f), MLAS_FP16::FromFloat(-1.0f),\n            MLAS_FP16::FromFloat(-5.0f), MLAS_FP16::FromFloat(-3.0f),\n        };\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(data.data(), 4);\n        PrintTestResult(\"negative max\", std::fabs(max_val.ToFloat() - (-1.0f)) < 0.001f);\n    }\n\n    {\n        // All same values\n        std::vector<MLAS_FP16> data = {\n            MLAS_FP16::FromFloat(2.5f), MLAS_FP16::FromFloat(2.5f),\n            MLAS_FP16::FromFloat(2.5f), MLAS_FP16::FromFloat(2.5f),\n        };\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(data.data(), 4);\n        PrintTestResult(\"all-same max\", std::fabs(max_val.ToFloat() - 2.5f) < 0.001f);\n    }\n\n    {\n        // Single element\n        MLAS_FP16 data = MLAS_FP16::FromFloat(42.0f);\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(&data, 1);\n        PrintTestResult(\"single element max\", std::fabs(max_val.ToFloat() - 42.0f) < 0.001f);\n    }\n}\n\n//\n// Test 3: SumExp correctness\n//\nstatic void\nTestSumExp() {\n    printf(\"Test: FP16 SumExp\\n\");\n\n    // Input: [0.0, 1.0, 2.0] with neg_max = -2.0\n    // exp(0 + (-2)) = exp(-2) = 0.1353\n    // exp(1 + (-2)) = exp(-1) = 0.3679\n    // exp(2 + (-2)) = exp(0)  = 1.0000\n    // sum = 1.5033\n    std::vector<MLAS_FP16> input = {\n        MLAS_FP16::FromFloat(0.0f),\n        MLAS_FP16::FromFloat(1.0f),\n        MLAS_FP16::FromFloat(2.0f),\n    };\n    MLAS_FP16 neg_max = MLAS_FP16::FromFloat(-2.0f);\n    std::vector<MLAS_FP16> output(3);\n\n    MLAS_FP16 sum = ScalarSumExpFp16(input.data(), output.data(), 3, neg_max);\n\n    // Check individual exp values\n    bool exp0_ok = std::fabs(output[0].ToFloat() - 0.1353f) < 0.01f;\n    bool exp1_ok = std::fabs(output[1].ToFloat() - 0.3679f) < 0.01f;\n    bool exp2_ok = std::fabs(output[2].ToFloat() - 1.0000f) < 0.01f;\n    bool sum_ok = std::fabs(sum.ToFloat() - 1.5033f) < 0.01f;\n\n    PrintTestResult(\"exp(x_0 - max) correct\", exp0_ok);\n    PrintTestResult(\"exp(x_1 - max) correct\", exp1_ok);\n    PrintTestResult(\"exp(x_2 - max) correct\", exp2_ok);\n    PrintTestResult(\"sum(exp) correct\", sum_ok);\n}\n\n//\n// Test 4: Softmax normalization\n//\nstatic void\nTestSoftmaxNorm() {\n    printf(\"Test: FP16 Softmax normalization\\n\");\n\n    // Simulated exp values: [1.0, 2.0, 3.0], sum = 6.0\n    std::vector<MLAS_FP16> exp_vals = {\n        MLAS_FP16::FromFloat(1.0f),\n        MLAS_FP16::FromFloat(2.0f),\n        MLAS_FP16::FromFloat(3.0f),\n    };\n    MLAS_FP16 sum = MLAS_FP16::FromFloat(6.0f);\n    std::vector<MLAS_FP16> output(3);\n\n    ScalarSoftmaxFp16(exp_vals.data(), output.data(), 3, sum);\n\n    bool v0_ok = std::fabs(output[0].ToFloat() - (1.0f / 6.0f)) < 0.01f;\n    bool v1_ok = std::fabs(output[1].ToFloat() - (2.0f / 6.0f)) < 0.01f;\n    bool v2_ok = std::fabs(output[2].ToFloat() - (3.0f / 6.0f)) < 0.01f;\n\n    PrintTestResult(\"norm[0] = 1/6\", v0_ok);\n    PrintTestResult(\"norm[1] = 2/6\", v1_ok);\n    PrintTestResult(\"norm[2] = 3/6\", v2_ok);\n\n    // Sum should be 1.0\n    float out_sum = output[0].ToFloat() + output[1].ToFloat() + output[2].ToFloat();\n    PrintTestResult(\"sum(normals) = 1.0\", std::fabs(out_sum - 1.0f) < 0.01f);\n}\n\n//\n// Test 5: Full pipeline - larger input\n//\nstatic void\nTestFullPipeline() {\n    printf(\"Test: Full softmax pipeline (N=80, D=8400)\\n\");\n\n    // Simulate YOLO-like dimensions: 80 classes, 8400 rows\n    // For testing, use smaller: 80 classes, 100 rows\n    const size_t num_rows = 100;\n    const size_t num_cols = 80;\n\n    std::vector<MLAS_FP16> input(num_rows * num_cols);\n    std::vector<MLAS_FP16> output(num_rows * num_cols);\n\n    // Fill with random-ish data\n    srand(42);\n    for (size_t i = 0; i < num_rows * num_cols; i++) {\n        input[i] = MLAS_FP16::FromFloat(static_cast<float>(rand()) / RAND_MAX * 10.0f - 5.0f);\n    }\n\n    // Run scalar FP16 softmax\n    for (size_t row = 0; row < num_rows; row++) {\n        ScalarSoftmaxFp16Full(\n            input.data() + row * num_cols,\n            output.data() + row * num_cols,\n            num_cols);\n    }\n\n    // Verify: each row should sum to ~1.0\n    bool all_rows_ok = true;\n    for (size_t row = 0; row < num_rows; row++) {\n        float row_sum = 0.0f;\n        for (size_t col = 0; col < num_cols; col++) {\n            row_sum += output[row * num_cols + col].ToFloat();\n        }\n        if (std::fabs(row_sum - 1.0f) > 0.02f) {\n            if (g_verbose) {\n                printf(\"    Row %zu: sum = %.6f (expected 1.0)\\n\", row, row_sum);\n            }\n            all_rows_ok = false;\n        }\n    }\n    PrintTestResult(\"all rows sum to ~1.0\", all_rows_ok);\n\n    // Compare first row against FP32 reference\n    std::vector<float> input_f32(num_cols);\n    std::vector<float> expected_f32(num_cols);\n    for (size_t col = 0; col < num_cols; col++) {\n        input_f32[col] = input[col].ToFloat();\n    }\n    ScalarSoftmaxF32(input_f32.data(), expected_f32.data(), num_cols);\n\n    std::vector<MLAS_FP16> first_row(num_cols);\n    for (size_t col = 0; col < num_cols; col++) {\n        first_row[col] = output[col];\n    }\n    bool fp16_vs_f32 = CompareFp16Arrays(first_row.data(),\n                                          reinterpret_cast<const MLAS_FP16*>(expected_f32.data()),\n                                          num_cols, 0.02f);\n    PrintTestResult(\"FP16 vs FP32 close match\", fp16_vs_f32);\n}\n\n//\n// Test 6: Edge cases\n//\nstatic void\nTestEdgeCases() {\n    printf(\"Test: Edge cases\\n\");\n\n    {\n        // Zero-length input\n        std::vector<MLAS_FP16> empty;\n        std::vector<MLAS_FP16> out(1);\n        MLAS_FP16 max_val = ScalarReduceMaxFp16(empty.data(), 0);\n        PrintTestResult(\"zero-length reduce max\", max_val.val == 0xFBFF);\n    }\n\n    {\n        // Single element softmax = [1.0]\n        MLAS_FP16 input = MLAS_FP16::FromFloat(5.0f);\n        MLAS_FP16 output;\n        ScalarSoftmaxFp16Full(&input, &output, 1);\n        PrintTestResult(\"single element = 1.0\", std::fabs(output.ToFloat() - 1.0f) < 0.001f);\n    }\n\n    {\n        // Two equal elements = [0.5, 0.5]\n        std::vector<MLAS_FP16> input = {\n            MLAS_FP16::FromFloat(3.0f),\n            MLAS_FP16::FromFloat(3.0f),\n        };\n        std::vector<MLAS_FP16> output(2);\n        ScalarSoftmaxFp16Full(input.data(), output.data(), 2);\n        bool ok = std::fabs(output[0].ToFloat() - 0.5f) < 0.01f &&\n                  std::fabs(output[1].ToFloat() - 0.5f) < 0.01f;\n        PrintTestResult(\"equal elements = [0.5, 0.5]\", ok);\n    }\n\n    {\n        // Large negative values (should still produce valid probabilities)\n        std::vector<MLAS_FP16> input = {\n            MLAS_FP16::FromFloat(-100.0f),\n            MLAS_FP16::FromFloat(-99.0f),\n            MLAS_FP16::FromFloat(-98.0f),\n        };\n        std::vector<MLAS_FP16> output(3);\n        ScalarSoftmaxFp16Full(input.data(), output.data(), 3);\n        float sum = 0.0f;\n        for (size_t i = 0; i < 3; i++) sum += output[i].ToFloat();\n        bool ok = std::fabs(sum - 1.0f) < 0.05f && sum > 0.0f;\n        PrintTestResult(\"large negative values valid\", ok);\n    }\n\n    {\n        // Non-power-of-2 length (common in NLP: seq_len=77)\n        std::vector<MLAS_FP16> input(77);\n        std::vector<MLAS_FP16> output(77);\n        srand(123);\n        for (size_t i = 0; i < 77; i++) {\n            input[i] = MLAS_FP16::FromFloat(static_cast<float>(rand()) / RAND_MAX * 6.0f - 3.0f);\n        }\n        ScalarSoftmaxFp16Full(input.data(), output.data(), 77);\n        float sum = 0.0f;\n        for (size_t i = 0; i < 77; i++) sum += output[i].ToFloat();\n        PrintTestResult(\"non-power-of-2 length (N=77)\", std::fabs(sum - 1.0f) < 0.02f);\n    }\n}\n\n//\n// Test 7: Log softmax\n//\nstatic void\nTestLogSoftmax() {\n    printf(\"Test: FP16 LogSoftmax\\n\");\n\n    // Input: [1.0, 2.0, 3.0]\n    std::vector<MLAS_FP16> input = {\n        MLAS_FP16::FromFloat(1.0f),\n        MLAS_FP16::FromFloat(2.0f),\n        MLAS_FP16::FromFloat(3.0f),\n    };\n    std::vector<MLAS_FP16> output(3);\n\n    // Scalar FP32 reference\n    std::vector<float> input_f32 = {1.0f, 2.0f, 3.0f};\n    std::vector<float> expected_f32(3);\n    ScalarLogSoftmaxF32(input_f32.data(), expected_f32.data(), 3);\n\n    // Scalar FP16 log softmax\n    MLAS_FP16 max_val = ScalarReduceMaxFp16(input.data(), 3);\n    MLAS_FP16 neg_max = max_val.Negate();\n    MLAS_FP16 sum_exp = ScalarSumExpFp16(input.data(), nullptr, 3, neg_max);\n    MLAS_FP16 log_sum = MLAS_FP16::FromFloat(std::log(sum_exp.ToFloat()));\n    ScalarLogSoftmaxFp16(input.data, output.data(), 3, neg_max, log_sum);\n\n    // Check each value\n    bool all_ok = true;\n    for (size_t i = 0; i < 3; i++) {\n        float diff = std::fabs(output[i].ToFloat() - expected_f32[i]);\n        if (diff > 0.02f) {\n            if (g_verbose) {\n                printf(\"    [%zu] fp16=%.6f fp32=%.6f diff=%.6f\\n\",\n                       i, output[i].ToFloat(), expected_f32[i], diff);\n            }\n            all_ok = false;\n        }\n    }\n    PrintTestResult(\"log softmax vs FP32 reference\", all_ok);\n}\n\n// ============================================================================\n// Benchmark\n// ============================================================================\n\nstatic void\nBenchmarkSoftmax(size_t rows, size_t cols, const char* label) {\n    printf(\"\\nBenchmark: %s (rows=%zu, cols=%zu, total=%zu elements)\\n\",\n           label, rows, cols, rows * cols);\n\n    std::vector<MLAS_FP16> input(rows * cols);\n    std::vector<MLAS_FP16> output(rows * cols);\n\n    srand(42);\n    for (size_t i = 0; i < rows * cols; i++) {\n        input[i] = MLAS_FP16::FromFloat(static_cast<float>(rand()) / RAND_MAX * 10.0f - 5.0f);\n    }\n\n    // Warm-up\n    for (size_t row = 0; row < rows; row++) {\n        ScalarSoftmaxFp16Full(input.data() + row * cols, output.data() + row * cols, cols);\n    }\n\n    // Timed run\n    int iterations = 10;\n    auto start = std::chrono::steady_clock::now();\n    for (int iter = 0; iter < iterations; iter++) {\n        for (size_t row = 0; row < rows; row++) {\n            ScalarSoftmaxFp16Full(input.data() + row * cols, output.data() + row * cols, cols);\n        }\n    }\n    auto end = std::chrono::steady_clock::now();\n    double elapsed = std::chrono::duration<double>(end - start).count() / iterations;\n\n    printf(\"  Scalar FP16: %.3f ms (%.0f rows/s)\\n\",\n           elapsed * 1000.0, static_cast<double>(rows) / elapsed);\n}\n\n// ============================================================================\n// Main\n// ============================================================================\n\nint main(int argc, char* argv[]) {\n    printf(\"=== FP16 Softmax Kernel Test Suite ===\\n\\n\");\n\n    for (int i = 1; i < argc; i++) {\n        if (strcmp(argv[i], \"--verbose\") == 0) g_verbose = true;\n        if (strcmp(argv[i], \"--bench\") == 0) g_bench = true;\n    }\n\n    // Run correctness tests\n    TestReduceMax();\n    TestSumExp();\n    TestSoftmaxNorm();\n    TestBasicSoftmax();\n    TestLogSoftmax();\n    TestEdgeCases();\n    TestFullPipeline();\n\n    // Run benchmarks if requested\n    if (g_bench) {\n        BenchmarkSoftmax(100, 80, \"YOLO detection (100 x 80)\");\n        BenchmarkSoftmax(1, 8400, \"YOLO single row (1 x 8400)\");\n        BenchmarkSoftmax(12, 77, \"BERT attention (12 x 77)\");\n        BenchmarkSoftmax(1, 128, \"GPT attention (1 x 128)\");\n        BenchmarkSoftmax(1, 4096, \"LLaMA attention (1 x 4096)\");\n    }\n\n    printf(\"\\n=== Results: %d passed, %d failed ===\\n\",\n           g_tests_passed, g_tests_failed);\n\n    return g_tests_failed > 0 ? 1 : 0;\n}\n"}], "grading": {"eval_id": 2, "eval_name": "yolo-softmax-greenfield", "config": "without_skill", "assertions": [{"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator under applications/yolo/", "passed": true, "evidence": "applications/yolo/rvv-patches/ created with 4 files (README.md, patch.diff, softmax_fp16_rvv512.inl, test_softmax_fp16.cpp)"}, {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": true, "evidence": "softmax_fp16_rvv512.inl exists (630 lines)"}, {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": false, "evidence": "No occurrences of __riscv_v_intrinsic found in any output file"}, {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": true, "evidence": "test_softmax_fp16.cpp exists (746 lines)"}, {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "11 matches for generic/scalar across .inl, README, and test files"}, {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": true, "evidence": "patch.diff exists (175 lines)"}, {"name": "created_readme", "text": "Created README.md with documentation", "passed": true, "evidence": "README.md exists (196 lines)"}, {"name": "cross_platform_analysis", "text": "Attempted cross-platform analysis", "passed": true, "evidence": "25 matches for ARM/NEON/x86/AVX across 3 files"}, {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": false, "evidence": "No mentions of gap analysis or rvv-gap-analysis in any output file"}, {"name": "discovered_app_structure", "text": "Explored applications/yolo/ structure before implementing", "passed": false, "evidence": "No mentions of applications/yolo, yolo structure, build.sh, or README in output files (only 2 matches for README in README.md itself)"}], "summary": {"passed": 7, "failed": 3, "total": 10}}}], "previous_feedback": {}, "previous_outputs": {}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

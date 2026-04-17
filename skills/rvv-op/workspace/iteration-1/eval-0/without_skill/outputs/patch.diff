@@ -1,0 +1,122 @@
+diff --git a/ggml/src/ggml-cpu/repack.h b/ggml/src/ggml-cpu/repack.h
+index c589a21..abcdef0 100644
+--- a/ggml/src/ggml-cpu/repack.h
++++ b/ggml/src/ggml-cpu/repack.h
+@@ -38,6 +38,18 @@ using block_q4_0x4 = block<4, 4>;
+ using block_q4_0x8 = block<4, 8>;
+ using block_q4_0x16 = block<4, 16>;
+ using block_q8_0x4 = block<8, 4>;
+ using block_q8_0x8 = block<8, 8>;
+ using block_q8_0x16 = block<8, 16>;
+
++// Q5_0 interleaved block for 8-column GEMV
++// Custom structure (not from template<> since Q5_0 has 5-bit packing + qh bitmask)
++struct block_q5_0x8 {
++    ggml_half d[8];       // 8 half-precision scale factors (16 bytes)
++    uint8_t qh[8][4];     // 8 x 4-byte qh bitmasks (32 bytes)
++    uint8_t qs[128];      // interleaved nibble-packed quants (128 bytes)
++                          // Layout: [col0_b0|col1_b0|...|col7_b0|col0_b1|...|col7_b3]
++};
++static_assert(sizeof(block_q5_0x8) == 176, "wrong q5_0x8 block size/padding");
++
++void ggml_gemv_q5_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs,
++    const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,
++    int nr, int nc);
++
+ struct block_q4_Kx8 {
+diff --git a/ggml/src/ggml-cpu/arch/riscv/repack.cpp b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+index c37488c..e899792 100644
+--- a/ggml/src/ggml-cpu/arch/riscv/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/riscv/repack.cpp
+@@ -950,6 +950,30 @@ void ggml_gemv_q2_K_16x1_q8_K(int n, float * GGML_RESTRICT s, size_t bs,
+     ggml_gemv_q2_K_16x1_q8_K_generic(n, s, bs, vx, vy, nr, nc);
+ #endif
+ }
++
++// ---------------------------------------------------------------------------
++// ggml_gemv_q5_0_q8_0: Q5_0 weights x Q8_0 activations GEMV (8x8 interleaved)
++// ---------------------------------------------------------------------------
++// RVV implementation: single source of truth is rvv_gemv_q5_0_q8_0.inl
++// (copied to this directory by build.sh before patch is applied)
++#include "rvv_gemv_q5_0_q8_0.inl"
++
++void ggml_gemv_q5_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs,
++    const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,
++    int nr, int nc) {
++#if defined(__riscv_v_intrinsic)
++    ggml_gemv_q5_0_q8_0_rvv(n, s, bs, vx, vy, nr, nc);
++#else
++    ggml_gemv_q5_0_q8_0_generic(n, s, bs, vx, vy, nr, nc);
++#endif
++}
+
+ void ggml_gemv_q5_K_8x4_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK_K;
+diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
+index c37488c..e899792 100644
+--- a/ggml/src/ggml-cpu/repack.cpp
++++ b/ggml/src/ggml-cpu/repack.cpp
+@@ -500,6 +500,7 @@ void ggml_gemv_q4_0_8x8_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
+ }
++
+ void ggml_gemv_q4_K_8x4_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK_K;
+     const int nb = n / qk;
+@@ -883,6 +884,44 @@ void ggml_gemv_q4_0_8x8_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
+     }
+ }
+
++// ---------------------------------------------------------------------------
++// ggml_gemv_q5_0_q8_0_generic: scalar reference for Q5_0 x Q8_0 GEMV (8x8)
++// ---------------------------------------------------------------------------
++// This follows the same pattern as ggml_gemv_q4_0_8x8_q8_0_generic but
++// with 5-bit dequantization (nibble + qh bitmask) instead of 4-bit.
++void ggml_gemv_q5_0_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
++    const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy,
++    int nr, int nc) {
++    const int qk = QK8_0;  // 32
++    const int nb = n / qk;
++    const int ncols_interleaved = 8;
++    const int blocklen = 8;
++
++    assert(n % qk == 0);
++    assert(nc % ncols_interleaved == 0);
++
++    GGML_UNUSED(bs);
++    GGML_UNUSED(nr);
++
++    float sumf[8];
++    int sumi;
++
++    const block_q8_0 * a_ptr = (const block_q8_0 *) vy;
++    for (int x = 0; x < nc / ncols_interleaved; x++) {
++        const block_q5_0x8 * b_ptr = (const block_q5_0x8 *) vx + (x * nb);
++
++        for (int j = 0; j < ncols_interleaved; j++) sumf[j] = 0.0;
++        for (int l = 0; l < nb; l++) {
++            for (int k = 0; k < (qk / (2 * blocklen)); k++) {
++                for (int j = 0; j < ncols_interleaved; j++) {
++                    sumi = 0;
++                    for (int i = 0; i < blocklen; ++i) {
++                        const int qs_idx = k * ncols_interleaved * blocklen + j * blocklen + i;
++                        const int elem_lo = k * blocklen + i;
++                        const int xh_0 = (b_ptr[l].qh[j][elem_lo / 8] >> (elem_lo % 8)) & 1;
++                        const int v0 = (int8_t)(((b_ptr[l].qs[qs_idx] & 0x0F) | (xh_0 << 4)) - 16);
++                        const int elem_hi = k * blocklen + i + qk / 2;
++                        const int xh_1 = (b_ptr[l].qh[j][elem_hi / 8] >> (elem_hi % 8)) & 1;
++                        const int v1 = (int8_t)(((b_ptr[l].qs[qs_idx] >> 4) | (xh_1 << 4)) - 16);
++                        sumi += v0 * a_ptr[l].qs[k * blocklen + i]
++                              + v1 * a_ptr[l].qs[k * blocklen + i + qk / 2];
++                    }
++                    sumf[j] += sumi * GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j])
++                                    * GGML_CPU_FP16_TO_FP32(a_ptr[l].d);
++                }
++            }
++        }
++        for (int j = 0; j < ncols_interleaved; j++) s[x * ncols_interleaved + j] = sumf[j];
++    }
++}
++
+ void ggml_gemv_q4_K_8x4_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK_K;
+     const int nb = n / qk;

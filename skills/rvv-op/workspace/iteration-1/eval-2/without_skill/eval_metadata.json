@@ -1,0 +1,7 @@
+{
+  "eval_id": 2,
+  "eval_name": "yolo-softmax-greenfield",
+  "prompt": "对applications/yolo中的softmax_fp16算子实现RVV向量化，VLEN=512。这个应用还没有rvv-patches目录，需要先建立。",
+  "config": "without_skill",
+  "assertions": []
+}

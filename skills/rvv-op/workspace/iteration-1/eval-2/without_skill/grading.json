@@ -1,0 +1,72 @@
+{
+  "eval_id": 2,
+  "eval_name": "yolo-softmax-greenfield",
+  "config": "without_skill",
+  "assertions": [
+    {
+      "name": "created_rvv_patches_dir",
+      "text": "Created rvv-patches directory for the operator under applications/yolo/",
+      "passed": true,
+      "evidence": "applications/yolo/rvv-patches/ created with 4 files (README.md, patch.diff, softmax_fp16_rvv512.inl, test_softmax_fp16.cpp)"
+    },
+    {
+      "name": "created_inl_file",
+      "text": "Created .inl file with RVV implementation",
+      "passed": true,
+      "evidence": "softmax_fp16_rvv512.inl exists (630 lines)"
+    },
+    {
+      "name": "inl_has_rvv_guard",
+      "text": ".inl file uses __riscv_v_intrinsic compile-time guard",
+      "passed": false,
+      "evidence": "No occurrences of __riscv_v_intrinsic found in any output file"
+    },
+    {
+      "name": "created_test_cpp",
+      "text": "Created test.cpp with correctness test",
+      "passed": true,
+      "evidence": "test_softmax_fp16.cpp exists (746 lines)"
+    },
+    {
+      "name": "test_has_scalar_ref",
+      "text": "test.cpp includes scalar reference implementation",
+      "passed": true,
+      "evidence": "11 matches for generic/scalar across .inl, README, and test files"
+    },
+    {
+      "name": "created_patch_diff",
+      "text": "Created patch.diff for integration",
+      "passed": true,
+      "evidence": "patch.diff exists (175 lines)"
+    },
+    {
+      "name": "created_readme",
+      "text": "Created README.md with documentation",
+      "passed": true,
+      "evidence": "README.md exists (196 lines)"
+    },
+    {
+      "name": "cross_platform_analysis",
+      "text": "Attempted cross-platform analysis",
+      "passed": true,
+      "evidence": "25 matches for ARM/NEON/x86/AVX across 3 files"
+    },
+    {
+      "name": "mentions_gap_analysis",
+      "text": "Describes gap analysis step",
+      "passed": false,
+      "evidence": "No mentions of gap analysis or rvv-gap-analysis in any output file"
+    },
+    {
+      "name": "discovered_app_structure",
+      "text": "Explored applications/yolo/ structure before implementing",
+      "passed": false,
+      "evidence": "No mentions of applications/yolo, yolo structure, build.sh, or README in output files (only 2 matches for README in README.md itself)"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 3,
+    "total": 10
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "eval_id": 1,
+  "eval_name": "llama-cpp-vec-dot-q6k-english",
+  "config": "with_skill",
+  "assertions": [
+    {"name": "created_rvv_patches_dir", "text": "Created rvv-patches directory for the operator", "passed": true, "evidence": "Files in rvv-patches/vec_dot-q6_K-q8_K/ subdir"},
+    {"name": "created_inl_file", "text": "Created .inl file with RVV implementation", "passed": true, "evidence": "rvv_vec_dot_q6_K_q8_K.inl exists"},
+    {"name": "inl_has_rvv_guard", "text": ".inl file uses __riscv_v_intrinsic compile-time guard", "passed": true, "evidence": "2 occurrences in .inl"},
+    {"name": "inl_has_rvv_header", "text": ".inl file includes riscv_vector.h", "passed": true, "evidence": "4 references in .inl"},
+    {"name": "created_test_cpp", "text": "Created test.cpp with correctness test", "passed": true, "evidence": "test.cpp exists"},
+    {"name": "test_has_scalar_ref", "text": "test.cpp includes scalar reference implementation", "passed": true, "evidence": "18 generic/scalar matches across files"},
+    {"name": "test_has_rng", "text": "test.cpp uses deterministic data generation", "passed": true, "evidence": "26 RNG/seed matches in test.cpp"},
+    {"name": "created_patch_diff", "text": "Created patch.diff for integration", "passed": true, "evidence": "patch.diff exists"},
+    {"name": "patch_targets_riscv", "text": "patch.diff targets the RISC-V arch source file", "passed": true, "evidence": "arch/riscv referenced in patch.diff and README"},
+    {"name": "created_readme", "text": "Created README.md with documentation", "passed": true, "evidence": "README.md exists"},
+    {"name": "readme_has_signature", "text": "README.md includes function signature", "passed": true, "evidence": "vec_dot_q6_K_q8_K referenced throughout"},
+    {"name": "cross_platform_analysis", "text": "Analyzed cross-platform (ARM/x86) implementations", "passed": true, "evidence": "27 ARM/NEON/x86/AVX matches across 4 files"},
+    {"name": "mentions_gap_analysis", "text": "Describes gap analysis step", "passed": true, "evidence": "8 gap analysis matches in README.md and steps-summary.md"},
+    {"name": "test_uses_optnone", "text": "test.cpp uses __attribute__((optnone))", "passed": true, "evidence": "2 optnone occurrences in test.cpp"}
+  ],
+  "summary": {"passed": 14, "failed": 0, "total": 14}
+}

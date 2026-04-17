@@ -1,0 +1,23 @@
+{
+  "skill_name": "rvv-op",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "为llama.cpp实现ggml_gemv_q5_0_q8_0算子的RISC-V RVV向量化，向量寄存器512bit",
+      "expected_output": "Agent reads applications/llama.cpp/README.md, analyzes cross-platform implementations, creates rvv-patches directory with .inl/.patch/.test/README files following convention, tests pass, gap analysis report generated",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need to vectorize vec_dot_q6_K_q8_K for RISC-V RVV in applications/llama.cpp. VLEN=512.",
+      "expected_output": "Agent follows all 8 phases: research, analyze ARM/x86 implementations, create RVV kernel in .inl format, create test.cpp with scalar reference, generate patch.diff, run tests, gap analysis, PDF report",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "对applications/yolo中的softmax_fp16算子实现RVV向量化，VLEN=512。这个应用还没有rvv-patches目录，需要先建立。",
+      "expected_output": "Agent discovers that rvv-patches/ doesn't exist, creates it with _template/ based on convention, then implements softmax_fp16 operator following the standard layout",
+      "files": []
+    }
+  ]
+}
