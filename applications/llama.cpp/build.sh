@@ -24,6 +24,7 @@ LLAMA_SOURCE="${VENDOR_DIR}/llama.cpp"
 TOOLCHAIN_FILE="${SCRIPT_DIR}/riscv64-linux-toolchain.cmake"
 QEMU_RISCV64="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"
 TEST_BUILD_DIR="${OUTPUT_DIR}/.test-build"
+SYSROOT=""  # Set by setup_sysroot()
 
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp.git"
 LLAMA_VERSION="b8783"  # Latest release as of 2026-04-14
@@ -117,14 +118,14 @@ setup_sysroot() {
         if [ ! -d "${standalone_sysroot}/usr" ]; then
             error "Sysroot not found at ${standalone_sysroot} (remove --skip-sysroot to extract)"
         fi
-        SYSROOT="${standalone_sysroot}"
+        declare -g SYSROOT="${standalone_sysroot}"
         info "Using existing sysroot: ${SYSROOT}"
         return 0
     fi
 
     if [[ "${FORCE}" != "true" && -d "${standalone_sysroot}/usr" ]]; then
         info "Sysroot already exists at ${standalone_sysroot}. Use --force to re-extract."
-        SYSROOT="${standalone_sysroot}"
+        declare -g SYSROOT="${standalone_sysroot}"
         return 0
     fi
 
@@ -182,7 +183,7 @@ setup_sysroot() {
     # Remove problematic static libs
     find "${standalone_sysroot}" -name "libm.a" -delete 2>/dev/null || true
 
-    SYSROOT="${standalone_sysroot}"
+    declare -g SYSROOT="${standalone_sysroot}"
     info "Sysroot ready at ${SYSROOT}"
     echo "  $(du -sh "${SYSROOT}" | cut -f1)"
 }
