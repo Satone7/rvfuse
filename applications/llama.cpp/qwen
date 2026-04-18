@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Paths
-SYSROOT="${PROJECT_ROOT}/output/c920-ort/sysroot"
+SYSROOT="${PROJECT_ROOT}/output/llama.cpp/sysroot"
 BIN="${PROJECT_ROOT}/output/llama.cpp/bin"
 MODEL_DIR="${SCRIPT_DIR}/models"
 QEMU="${PROJECT_ROOT}/third_party/qemu/build/qemu-riscv64"

@@ -4,15 +4,15 @@ RVV implementation of `ggml_gemv_q4_K_8x8_q8_K` - Q4_K weights × Q8_K activatio
 
 ## Status
 
-⚠️ **Under development** — Algorithm implementation complete, but blocked by LLVM RISC-V optimizer bug.
+⚠️ **Blocked by LLVM-22 Bug** — Vectorization disabled, using scalar fallback.
 
-**Known Issue**: LLVM 22 RISC-V backend produces incorrect code when compiling scalar code with `-march=rv64gcv_zvl512b_zfh_zvfh`. The optimizer generates garbage values for array elements even without explicit initialization. This affects the test harness running under QEMU.
+**LLVM Bug**: LLVM 22 RISC-V backend optimizer produces incorrect code when compiling scalar code with RVV extensions (`-march=rv64gcv_zvl512b`). The optimizer generates garbage values for array elements even with explicit zero-initialization. This affects both the test harness and the GEMV kernel itself.
 
-**Workaround**: Tests compile correctly with `-march=rv64gc` (no RVV extensions). The actual implementation should work when real RVV vector intrinsics are added.
+**Workaround**: The RVV function currently falls back to the generic scalar implementation (`ggml_gemv_q4_K_8x8_q8_K_generic`). Tests use `__attribute__((optnone))` to disable optimization for correctness verification.
 
-**Changes Made**:
-- All local arrays now have explicit zero-initialization to improve code quality
-- RVV function simplified to call generic implementation (pending actual RVV vectorization)
+**Vectorized Version**: The full RVV vectorized implementation can be found in commit `a650391b612d8d2394ef72547aee19efce6d5748`. It will be restored once the LLVM bug is resolved.
+
+**LLVM Bug Report**: See [LLVM issue #83370](https://github.com/llvm/llvm-project/issues/83370) for details on the optimizer bug with minimal reproduction.
 
 ## Files
 
@@ -109,7 +109,9 @@ scales_0_3 = sm[0] & 0x3f3f3f3f;
 scales_4_7 = (sm[2] & 0x0f0f0f0f) | (((sm[0] >> 6) & 0x03030303) << 4);
 ```
 
-## Key RVV Intrinsics Used
+## RVV Intrinsics (Future)
+
+The following intrinsics are planned for use once the LLVM bug is resolved:
 
 | Operation | Intrinsic | Purpose |
 |-----------|-----------|---------|
@@ -119,10 +121,12 @@ scales_4_7 = (sm[2] & 0x0f0f0f0f) | (((sm[0] >> 6) & 0x03030303) << 4);
 | Store float32 | `__riscv_vse32_v_f32m1` | Store output |
 | Set VL | `__riscv_vsetvl_e32m1(4)` | 4-element vector length |
 
+**Current Implementation**: Falls back to scalar loops. The algorithm structure and data flow are preserved, enabling straightforward RVV vectorization once the compiler bug is fixed.
+
 ## Build & Test
 
 ```bash
-# Cross-compile with Docker LLVM toolchain
+# Cross-compile with RVV extensions (falls back to scalar due to LLVM bug)
 docker run --rm \
   -v $(pwd):/work -w /work \
   -v /path/to/sysroot:/sysroot \
@@ -130,13 +134,18 @@ docker run --rm \
   --target=riscv64-unknown-linux-gnu \
   --sysroot=/sysroot \
   -march=rv64gcv_zvl512b -mabi=lp64d \
-  -DGGML_USE_RISCV_V \
+  -DGGML_USE_RISCV_V -D__riscv_v_fixed_vlen=512 \
   -fuse-ld=lld \
   test.cpp -o test_gemv -lm
 
-# Run under QEMU
+# Run under QEMU (tests use optnone to avoid optimizer bug)
 qemu-riscv64 -L /path/to/sysroot ./test_gemv
+
+# Scalar build (no RVV, for reference comparison)
+g++ -std=c++17 -O2 test.cpp -o test_scalar -lm
 ```
+
+**Note**: The RVV build currently produces the same scalar code as the non-RVV build due to the LLVM optimizer bug workaround.
 
 ## References
 
