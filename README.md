@@ -17,16 +17,41 @@ The current pipeline:
 
 本流程提供一套规范性的指令分析和向量化优化调研方法：
 
-| 步骤 | 目标 | 输入 | 输出 |
-|------|------|------|------|
-| 1 | 交叉编译目标应用 | 源代码 | RISC-V 可执行文件 + sysroot |
-| 2 | 验证应用运行 | RISC-V 二进制 | 运行成功确认 |
-| 3 | BBV Profiling | RISC-V 二进制 | `.bb` 统计 + `.disas` 反汇编 |
-| 4 | 热点分析 | BBV 数据 | `hotspot.json` |
-| 5 | RVV 向量化优化 | 热点函数 | 向量化版本 + 正确性验证 |
-| 6 | 优化效果评估 | 向量化版本 | 新的 BBV 数据 + 对比分析 |
-| 7 | Patch 文件生成 | 向量化改动 | `.patch` 文件存档 |
-| 8 | 多架构对比分析 | Patch + 其他架构实现 | 指令分析报告 |
+| 步骤 | 目标 | 输入 | 输出 | Skill |
+|------|------|------|------|-------|
+| 1 | 交叉编译目标应用 | 源代码 | RISC-V 可执行文件 + sysroot | `cross-compile-app` |
+| 2 | 验证应用运行 | RISC-V 二进制 | 运行成功确认 | — |
+| 3 | BBV Profiling | RISC-V 二进制 | `.bb` 统计 + `.disas` 反汇编 | `qemu-bbv-usage` |
+| 4 | 热点分析 | BBV 数据 | `hotspot.json` | — |
+| 5 | RVV 向量化优化 | 热点函数 | 向量化版本 + 正确性验证 | `rvv-op` |
+| 6 | 优化效果评估 | 向量化版本 | 新的 BBV 数据 + 对比分析 | — |
+| 7 | Patch 文件生成 | 向量化改动 | `.patch` 文件存档 | — |
+| 8 | 多架构对比分析 | Patch + 其他架构实现 | 指令分析报告 | `rvv-gap-analysis` |
+
+### 使用 Skills 加速流程
+
+本项目提供 Claude Code Skills 来自动化各步骤。当 LLM 助手执行流程时，应优先调用对应 Skill：
+
+**Step 1 — 交叉编译目标应用**
+
+```
+请帮我添加 <app-name> 到 applications/，repo 是 <repo-url>，编译到 RISC-V。
+```
+
+LLM 会自动调用 `cross-compile-app` Skill，完成：
+- 源码克隆到 `applications/<name>/vendor/`
+- 构建系统分析（CMake / Autotools）
+- 工具链生成（`riscv64-linux-toolchain.cmake`）
+- Sysroot 提取（Docker `riscv64/ubuntu:24.04`）
+- 交叉编译 + QEMU 冒烟测试
+
+**Step 3 — BBV Profiling**
+
+调用 `qemu-bbv-usage` Skill 获取 QEMU BBV 插件的正确使用方式和参数配置。
+
+**Step 5 — RVV 向量化优化**
+
+调用 `rvv-op` Skill 生成 RVV vector intrinsic 代码替换热点函数中的 scalar 实现。
 
 详细操作步骤请参考 CLAUDE.md。
 
@@ -91,6 +116,7 @@ RVFuse/
 ├── setup.sh               # Full pipeline orchestrator
 ├── prepare_model.sh       # YOLO model export and test data
 ├── verify_bbv.sh          # QEMU + BBV plugin build
+├── skills/                # Claude Code Skills (cross-compile-app, qemu-bbv-usage, rvv-op, ...)
 ├── tools/                 # Analysis tools (DFG, BBV, fusion)
 ├── applications/          # Test applications (YOLO inference)
 ├── docs/                  # Architecture and design documents
