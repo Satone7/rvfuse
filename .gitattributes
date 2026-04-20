@@ -1,1 +1,2 @@
 tools/dfg/riscv_instrs.json filter=lfs diff=lfs merge=lfs -text
+skills/md2pdf/assets/fonts/*.ttf filter=lfs diff=lfs merge=lfs -text
