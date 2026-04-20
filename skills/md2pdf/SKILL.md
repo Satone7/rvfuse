@@ -78,15 +78,21 @@ python3 tools/generate_report_pdfs.py --force   # regenerate all
 
 ## PDF Features
 
-| Feature | Behavior |
-|---------|----------|
-| Left stripe | GitHub-style blue accent bar (5mm) |
-| TOC | Inline at document start, clickable links |
-| Page breaks | None — content flows naturally |
-| Page footer | Centered page number with separator line |
-| Tables | Smart column widths, alternating row colors |
-| Code blocks | Monospace font, light gray background |
-| CJK text | Auto font switching (Noto/Source Han fallback) |
+The output PDF has these exact specifications:
+
+| Feature | Specification |
+|---------|--------------|
+| Left stripe | Blue accent bar, 5mm wide, color `#0969DA` |
+| TOC | Inline at document start, H1/H2 entries, clickable PDF links |
+| Page breaks | None — content flows naturally, no blank pages |
+| Page footer | Centered page number, separator line above it |
+| Margins | 20mm on all sides |
+| Body text | Sans font, 10pt, justified, 15pt leading |
+| Headings | H1: 22pt bold, H2: 16pt bold, H3: 12pt accent color |
+| Tables | Blue header (`#0969DA`), smart column widths (min 18mm), alternating rows |
+| Code blocks | Monospace 8pt, gray background (`#F6F8FA`) |
+| CJK text | Auto font switching (Noto/Source Han/WQY ZenHei fallback) |
+| Page size | A4 (595.3 × 841.9pt), white background |
 
 ## Key Differences from any2pdf
 
