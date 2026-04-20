@@ -42,9 +42,10 @@ def _find_font(candidates):
             return c
     return None
 
+_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts")
 _FONT_CANDIDATES = {
     "Sans": [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
+        os.path.join(_FONT_DIR, "LXGWWenKaiGB-Regular.ttf"),
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf",
@@ -52,14 +53,28 @@ _FONT_CANDIDATES = {
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     ],
     "SansBold": [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
+        os.path.join(_FONT_DIR, "LXGWWenKaiGB-Medium.ttf"),
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
         "/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
     ],
+    "SansItalic": [
+        os.path.join(_FONT_DIR, "LXGWWenKaiGB-Regular.ttf"),
+        "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+        "C:/Windows/Fonts/ariali.ttf",
+        "/usr/share/fonts/truetype/crosextra/Carlito-Italic.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Italic.ttf",
+    ],
+    "SansBoldItalic": [
+        os.path.join(_FONT_DIR, "LXGWWenKaiGB-Medium.ttf"),
+        "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
+        "C:/Windows/Fonts/arialbi.ttf",
+        "/usr/share/fonts/truetype/crosextra/Carlito-BoldItalic.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-BoldItalic.ttf",
+    ],
     "CJK": [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
+        os.path.join(_FONT_DIR, "LXGWWenKaiGB-Regular.ttf"),
         ("/System/Library/Fonts/Supplemental/Songti.ttc", 0),
         "C:/Windows/Fonts/simsun.ttc",
         ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 0),
@@ -67,14 +82,14 @@ _FONT_CANDIDATES = {
         "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     ],
     "Mono": [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiMonoGB-Regular.ttf"),
+        os.path.join(_FONT_DIR, "LXGWWenKaiMonoGB-Regular.ttf"),
         ("/System/Library/Fonts/Menlo.ttc", 0),
         "C:/Windows/Fonts/consola.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
     ],
     "MonoBold": [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiMonoGB-Regular.ttf"),
+        os.path.join(_FONT_DIR, "LXGWWenKaiMonoGB-Medium.ttf"),
         ("/System/Library/Fonts/Menlo.ttc", 1),
         "C:/Windows/Fonts/consolab.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
@@ -95,6 +110,17 @@ def register_fonts():
                 pdfmetrics.registerFont(TTFont(name, spec))
         except Exception as e:
             missing.append(name)
+    # Map <b>/<i> style requests to actual registered fonts
+    pdfmetrics.registerFontFamily(
+        "Sans",
+        normal="Sans", bold="SansBold",
+        italic="SansItalic", boldItalic="SansBoldItalic",
+    )
+    pdfmetrics.registerFontFamily(
+        "Mono",
+        normal="Mono", bold="MonoBold",
+        italic="Mono", boldItalic="MonoBold",
+    )
     if missing:
         print(f"Warning: Missing fonts: {', '.join(missing)}", file=sys.stderr)
 
@@ -136,6 +162,21 @@ def _font_wrap(text):
         out.append(f"<font name='CJK'>{seg}</font>" if in_cjk else seg)
     return ''.join(out)
 
+def _scan_unsupported_formats(md_text):
+    """Scan markdown for italic/strikethrough markers that bundled fonts cannot render."""
+    issues = []
+    # Italic: *text* but not **text** or ***
+    for m in re.finditer(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', md_text):
+        if not re.match(r'^\*\*.*\*\*$', m.group(0)):  # exclude bold
+            issues.append(("italic", m.group(0)))
+    # Strikethrough: ~~text~~
+    for m in re.finditer(r'~~(.+?)~~', md_text):
+        issues.append(("strikethrough", m.group(0)))
+    # Bold italic: ***text***
+    for m in re.finditer(r'\*\*\*(.+?)\*\*\*', md_text):
+        issues.append(("bold italic", m.group(0)))
+    return issues
+
 # ═══════════════════════════════════════════════════════════════════════
 # MARKDOWN ESCAPE + INLINE
 # ═══════════════════════════════════════════════════════════════════════
@@ -153,10 +194,19 @@ def esc_code(text):
 
 def md_inline(text, accent_hex="#0969DA"):
     text = esc(text)
+    # Bold italic: ***text***
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'<b><i>\1</i></b>', text)
+    # Bold: **text**
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # Italic: *text*
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+    # Inline code: `code`
     text = re.sub(r'`(.+?)`',
         rf"<font name='Mono' size='8' color='{accent_hex}'>\1</font>", text)
+    # Link: [text](url)
     text = re.sub(r'\[(.+?)\]\(.+?\)', r'<u>\1</u>', text)
+    # Strikethrough: ~~text~~ → muted color (reportlab has no native strike-through)
+    text = re.sub(r'~~(.+?)~~', r"<font color='#656D76'>\1</font>", text)
     return _font_wrap(text)
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -443,10 +493,35 @@ def main():
     parser.add_argument("--input", "-i", required=True, help="Input markdown file")
     parser.add_argument("--output", "-o", default="output.pdf", help="Output PDF path")
     parser.add_argument("--page-size", default="A4", choices=["A4","Letter"])
+    parser.add_argument("--check", action="store_true",
+        help="Check for italic/strikethrough markers (non-interactive, exit 1 if found)")
+    parser.add_argument("--use-system-fonts", action="store_true",
+        help="Skip bundled LXGW fonts, use system fonts instead")
     args = parser.parse_args()
 
     with open(args.input, encoding='utf-8') as f:
         md_text = f.read()
+
+    # --check: scan only, no PDF generation
+    if args.check:
+        if not os.path.exists(os.path.join(_FONT_DIR, "LXGWWenKaiGB-Regular.ttf")):
+            print("OK: bundled font not found, system fonts will be used")
+            sys.exit(0)
+        issues = _scan_unsupported_formats(md_text)
+        if not issues:
+            print("OK: no unsupported format markers found")
+            sys.exit(0)
+        types = sorted(set(t for t, _ in issues))
+        for t in types:
+            samples = [s for tt, s in issues if tt == t][:2]
+            print(f"WARN:{t}:{','.join(samples)}")
+        sys.exit(1)
+
+    # --use-system-fonts: remove bundled fonts from candidates
+    if args.use_system_fonts:
+        for name in list(_FONT_CANDIDATES.keys()):
+            _FONT_CANDIDATES[name] = [c for c in _FONT_CANDIDATES[name]
+                                     if not (isinstance(c, str) and c.startswith(_FONT_DIR))]
 
     # Extract title from first H1
     m = re.search(r'^# (.+)$', md_text, re.MULTILINE)

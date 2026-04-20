@@ -46,7 +46,22 @@ docs/report/llama.cpp/rvv-gap-analysis-xxx.md
 
 If user specifies a different output path, use that. If output PDF already exists, overwrite it directly (no need to ask).
 
-### Step 3: Execute conversion
+### Step 3: Pre-check font compatibility
+
+Before converting, scan the source markdown for format markers that the bundled LXGW font cannot render properly:
+
+```bash
+python3 skills/md2pdf/scripts/md2pdf.py --check --input <input.md>
+```
+
+- Exit code 0 + `OK:` → no issues, proceed to Step 4
+- Exit code 1 + `WARN:italic:...` or `WARN:strikethrough:...` → **ask the user**:
+
+> 源文档包含斜体/删除线标记，但默认字体 (LXGW WenKai GB) 不支持：斜体将显示为正常文本，删除线将显示为灰色文字。是否仍然使用默认字体，还是切换到系统字体？
+
+If user chooses system fonts, add `--use-system-fonts` flag in Step 4.
+
+### Step 4: Execute conversion
 
 ```bash
 python3 skills/md2pdf/scripts/md2pdf.py \
@@ -56,13 +71,14 @@ python3 skills/md2pdf/scripts/md2pdf.py \
 
 Options:
 - `--page-size A4|Letter` (default: A4)
+- `--use-system-fonts` — skip bundled LXGW fonts, use system fonts (better italic support)
 
 If the script fails:
 - Check that `reportlab` is installed (`pip install reportlab`)
 - If input file doesn't exist, tell the user and ask for the correct path
 - If the error mentions fonts, the CJK text may show as □ — suggest `sudo apt install fonts-noto-cjk`
 
-### Step 4: Verify and report
+### Step 5: Verify and report
 
 After conversion, quickly verify the output:
 
@@ -108,6 +124,9 @@ The output PDF has these exact specifications:
 | Tables | Blue header (`#0969DA`), smart column widths (min 18mm), alternating rows |
 | Code blocks | LXGW WenKai Mono GB (霞鹜文楷等宽), gray background (`#F6F8FA`) |
 | CJK text | LXGW WenKai GB (霞鹜文楷 GB, bundled) |
+| Bold | Medium weight (LXGW WenKaiGB-Medium.ttf, no true Bold variant exists) |
+| Italic | Falls back to Regular (CJK fonts typically lack italic variants) |
+| Strikethrough | Rendered as muted gray (`#656D76`); reportlab has no native strike-through |
 | Page size | A4 (595.3 × 841.9pt), white background |
 
 ## Key Differences from any2pdf
