@@ -62,10 +62,26 @@ If the script fails:
 - If input file doesn't exist, tell the user and ask for the correct path
 - If the error mentions fonts, the CJK text may show as □ — suggest `sudo apt install fonts-noto-cjk`
 
-### Step 4: Report result
+### Step 4: Verify and report
 
-Tell the user: output path and file size. Example:
-> PDF 已生成到 `docs/report/xxx.pdf`（142 KB）
+After conversion, quickly verify the output:
+
+```bash
+python3 -c "
+import pdfplumber
+with pdfplumber.open('<output.pdf>') as pdf:
+    print(f'Pages: {len(pdf.pages)}')
+    print(f'Size: {round(<filesize_kb>)}KB')
+"
+```
+
+Then tell the user the result. Example:
+> PDF 已生成到 `docs/report/xxx.pdf`（142 KB，6 页）
+
+If the user asks about quality or there are issues:
+- CJK showing as □ → font missing, install `fonts-noto-cjk`
+- Tables look broken → the script handles standard markdown tables; check the source .md format
+- Want a fancier PDF with cover page → suggest using the `lovstudio:any2pdf` skill instead
 
 ### Batch mode
 
