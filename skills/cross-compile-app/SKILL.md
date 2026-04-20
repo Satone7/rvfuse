@@ -153,9 +153,41 @@ Copy the build.sh skeleton to `applications/<name>/build.sh` and customize:
 
 1. Set `OUTPUT_DIR`, `VENDOR_DIR`, `SOURCE_DIR`, `REPO_URL`, `REPO_VERSION`
 2. Set `PROJECT_ROOT` depth correctly (applications is 1 level below repo root)
-3. Implement the `cross_compile()` function:
-   - CMake: use `-DCMAKE_TOOLCHAIN_FILE` + `-G Ninja`
-   - Makefile: use `CC`/`CXX` env vars pointing to LLVM
+3. Implement the `cross_compile()` function based on the detected build system:
+
+   **CMake** (most common):
+   ```bash
+   cmake -S "${SOURCE_DIR}" -B "${build_dir}" \
+       -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
+       -DCMAKE_INSTALL_PREFIX="${install_dir}" \
+       -DCMAKE_BUILD_TYPE=Release -G Ninja
+   ninja -C "${build_dir}" -j"${JOBS}"
+   ninja -C "${build_dir}" install/strip
+   ```
+
+   **Autotools** (configure.ac / autogen.sh present):
+   ```bash
+   cd "${SOURCE_DIR}"
+   autoreconf -fi  # Generate configure script
+   ./configure --host=riscv64-unknown-linux-gnu \
+       CC="${LLVM_INSTALL}/bin/clang" CXX="${LLVM_INSTALL}/bin/clang++" \
+       CFLAGS="-march=<arch> --sysroot=${SYSROOT}" \
+       LDFLAGS="--sysroot=${SYSROOT} -fuse-ld=lld" \
+       --prefix="${install_dir}"
+   make -j"${JOBS}"
+   make install-strip
+   ```
+   Key: `--host` tells configure this is a cross-build. LLVM's clang is both compiler
+   and linker (via `-fuse-ld=lld`). No GCC cross-compiler needed.
+
+   **Plain Makefile** (no configure system):
+   ```bash
+   make -C "${SOURCE_DIR}" -j"${JOBS}" \
+       CC="${LLVM_INSTALL}/bin/clang" CXX="${LLVM_INSTALL}/bin/clang++" \
+       CFLAGS="-march=<arch> --sysroot=${SYSROOT}" \
+       LDFLAGS="--sysroot=${SYSROOT} -fuse-ld=lld"
+   ```
+
 4. Add application-specific cmake/make flags
 5. Set output binary path for smoke test
 6. `chmod +x build.sh`
@@ -171,6 +203,29 @@ Copy the `.gitignore` template from `references/toolchain-template.md` to
 Write using the README template from `references/toolchain-template.md`. Include
 the Application Profile from Phase 1.7.
 
+### 2.5 Scaffolding Gate
+
+Before proceeding to Phase 3, verify the scaffolding is complete and correct:
+
+```bash
+# build.sh exists and is executable
+test -x applications/<name>/build.sh && echo "OK" || echo "MISSING"
+
+# For CMake projects: toolchain has no remaining placeholders
+if [ -f applications/<name>/riscv64-linux-toolchain.cmake ]; then
+    grep -c '<PLACEHOLDER_ARCH>' applications/<name>/riscv64-linux-toolchain.cmake
+    # Expected output: 0 (if >0, placeholders were not replaced)
+    grep -c 'ENV{LLVM_INSTALL}\|ENV{SYSROOT}' applications/<name>/riscv64-linux-toolchain.cmake
+    # Expected output: >0
+fi
+
+# For autotools projects: verify build.sh uses --host=riscv64-unknown-linux-gnu
+grep -c 'host=riscv64-unknown-linux-gnu' applications/<name>/build.sh
+# Expected output: >0 for autotools, 0 is OK for cmake-only
+```
+
+If any check fails, fix it now — broken scaffolding causes opaque build errors later.
+
 ---
 
 ## Phase 3: Sysroot + Build
@@ -180,6 +235,11 @@ Reference: `references/sysroot-extract.md`
 ### 3.1 Extract Sysroot
 
 1. Check Docker is available: `docker --version`
+   - If Docker is not installed or the daemon is not running, stop and tell the user:
+     "Sysroot extraction requires Docker (riscv64/ubuntu:24.04 image). Install Docker and start the daemon, then re-run."
+   - If Docker is available but `docker run --platform riscv64` fails, the user may need
+     to enable multi-platform support: `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`
+
 2. Run sysroot extraction with the extra packages identified in Phase 1.4:
 
 ```bash
@@ -189,6 +249,9 @@ extract_sysroot "output/<name>/sysroot" <extra-packages...>
 # Option B: Run build.sh which handles it internally
 cd applications/<name> && ./build.sh
 ```
+
+If sysroot extraction fails mid-way, a stale Docker container may remain.
+Clean up with: `docker rm -f $(docker ps -a -q --filter name=rvfuse-sysroot-prep)`
 
 3. Verify sysroot integrity:
 ```bash
@@ -214,6 +277,27 @@ file output/<name>/bin/<binary>
 
 If output shows x86-64 or a different architecture, the cross-compilation failed.
 Re-check the toolchain file and environment variables.
+
+### 3.4 Build Gate
+
+Before proceeding to Phase 4, confirm the build produced a valid RISC-V binary:
+
+```bash
+# Binary is RISC-V ELF
+file output/<name>/bin/<binary> | grep -q "RISC-V"
+# If this grep fails, the binary is wrong architecture — do NOT proceed to smoke test
+
+# Binary is dynamically linked to the correct interpreter
+file output/<name>/bin/<binary> | grep -q "ld-linux-riscv64"
+# Static binaries are OK too — this check is informational only
+
+# Sysroot has the dynamic linker
+test -f output/<name>/sysroot/lib/ld-linux-riscv64-lp64d.so.1
+```
+
+If the binary is not RISC-V ELF, stop and re-check the toolchain `-march` flag and
+`$ENV{LLVM_INSTALL}` path. Running a non-RISC-V binary under QEMU wastes time and
+produces confusing errors.
 
 ---
 
@@ -290,11 +374,13 @@ After completing all 4 phases, verify:
 
 ## References
 
-| Resource | Location |
-|----------|----------|
-| Toolchain templates | `skills/cross-compile-app/references/toolchain-template.md` |
-| Sysroot extraction | `skills/cross-compile-app/references/sysroot-extract.md` |
-| Smoke test procedure | `skills/cross-compile-app/references/smoke-test.md` |
-| YOLO/ORT demo | `applications/yolo/ort/` (CMake, rv64gcv) |
-| llama.cpp demo | `applications/llama.cpp/` (CMake, rv64gcv_zfh_zba_zicbop) |
-| Project context | `CLAUDE.md` (Key Commands section) |
+Each reference file has a specific responsibility — read the relevant section, not the whole file:
+
+| Resource | When to Read | Key Sections |
+|----------|-------------|--------------|
+| `references/toolchain-template.md` | Phase 2 (Scaffolding) | S1: CMake toolchain, S2: build.sh skeleton, S3: .gitignore, S4: README |
+| `references/sysroot-extract.md` | Phase 3 (Sysroot) | Top-level `extract_sysroot()` function + Extra Packages Guide table |
+| `references/smoke-test.md` | Phase 4 (Smoke Test) | S2: VLEN Matching Table, S4: Common Failure Modes |
+| `applications/yolo/ort/` | Reference example | CMake + rv64gcv pattern |
+| `applications/llama.cpp/` | Reference example | CMake + rv64gcv_zfh_zba_zicbop pattern |
+| `CLAUDE.md` | Key Commands section | QEMU BBV profiling, VLEN mismatch warning |

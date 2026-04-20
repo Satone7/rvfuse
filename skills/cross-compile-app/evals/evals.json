@@ -1,0 +1,23 @@
+{
+  "skill_name": "cross-compile-app",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我在 applications/ 下添加 sqlite3，repo 是 https://github.com/sqlite/sqlite.git，version 是 version-3.47.2。交叉编译到 RISC-V，不需要特别的 ISA 扩展。",
+      "expected_output": "Agent creates applications/sqlite3/ with build.sh, toolchain cmake, README.md with Application Profile, .gitignore. Clone source to vendor/sqlite/. Build with rv64gcv (no ZVL). Extract sysroot via Docker. Produce RISC-V ELF binary. Run QEMU smoke test.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "交叉编译 opus，这是一个音频编解码器，github repo: https://github.com/xiph/opus.git，tag v1.5.2。需要用到 autoconf/automake 而不是 cmake。编译 RV64GCV，不加 ZVL。",
+      "expected_output": "Agent creates applications/opus/ with build.sh, toolchain cmake or Makefile-based build, README.md. Source cloned to vendor/opus/. Build system detected as autotools (configure.ac). rv64gcv without ZVL. Sysroot extracted. RISC-V ELF binary. QEMU smoke test.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "add coreutils to applications/, repo https://github.com/coreutils/coreutils.git, tag v9.6. Use rv64gcv_zvl512b, I want to test with 512-bit vectors.",
+      "expected_output": "Agent creates applications/coreutils/ with full scaffolding. Source at vendor/coreutils/. Detected autoconf build. Toolchain with rv64gcv_zvl512b. QEMU smoke test uses -cpu rv64,v=true,vlen=512. README with Application Profile.",
+      "files": []
+    }
+  ]
+}
