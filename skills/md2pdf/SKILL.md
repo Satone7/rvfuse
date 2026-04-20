@@ -57,6 +57,11 @@ python3 skills/md2pdf/scripts/md2pdf.py \
 Options:
 - `--page-size A4|Letter` (default: A4)
 
+If the script fails:
+- Check that `reportlab` is installed (`pip install reportlab`)
+- If input file doesn't exist, tell the user and ask for the correct path
+- If the error mentions fonts, the CJK text may show as □ — suggest `sudo apt install fonts-noto-cjk`
+
 ### Step 4: Report result
 
 Tell the user: output path and file size. Example:
