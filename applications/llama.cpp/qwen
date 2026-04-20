@@ -23,6 +23,7 @@ NUM_TOKENS=32
 NUM_THREADS=1
 TEMP=0.7
 INTERACTIVE=false
+VLEN=""
 
 # Colors
 RED='\033[0;31m'
@@ -45,6 +46,7 @@ show_help() {
     echo "  --temp <float>          Temperature (default: 0.7)"
     echo "  -i, --interactive       Run in interactive chat mode"
     echo "  -m, --model <name>      Model filename (default: ${DEFAULT_MODEL})"
+    echo "  --vlen <bits>           QEMU VLEN in bits: 128, 256, or 512 (default: 128)"
     echo "  -h, --help              Show this help"
     echo ""
     echo "Examples:"
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --temp)         TEMP="$2"; shift 2 ;;
         -i|--interactive) INTERACTIVE=true; shift ;;
         -m|--model)     DEFAULT_MODEL="$2"; shift 2 ;;
+        --vlen)         VLEN="$2"; shift 2 ;;
         -h|--help)      show_help; exit 0 ;;
         *)              error "Unknown argument: $1" ;;
     esac
@@ -124,6 +127,17 @@ run_inference() {
         error "No prompt provided. Use -p \"your prompt\" or -i for interactive mode."
     fi
 
+    # Build QEMU CPU config based on VLEN
+    local QEMU_CPU="max"
+    if [ -n "${VLEN}" ]; then
+        case "${VLEN}" in
+            128) QEMU_CPU="max" ;;
+            256) QEMU_CPU="max,vlen=256" ;;
+            512) QEMU_CPU="max,vlen=512" ;;
+            *)   error "Invalid VLEN: ${VLEN}. Supported: 128, 256, 512" ;;
+        esac
+    fi
+
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     echo -e "${BLUE}  RV64GCV llama.cpp via QEMU ${NC}"
@@ -133,12 +147,13 @@ run_inference() {
     echo "  Threads: ${NUM_THREADS}"
     echo "  Tokens:  ${NUM_TOKENS}"
     echo "  Temp:    ${TEMP}"
+    echo "  VLEN:    ${VLEN:-128}"
     echo ""
 
     if [ "${INTERACTIVE}" == "true" ]; then
         echo -e "${YELLOW}Starting interactive chat (Ctrl+C to exit)...${NC}"
         echo ""
-        exec "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu max "${BIN}/llama-cli" \
+        exec "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu "${QEMU_CPU}" "${BIN}/llama-cli" \
             -m "${model_path}" \
             -t "${NUM_THREADS}" \
             --temp "${TEMP}" \
@@ -150,7 +165,7 @@ run_inference() {
         echo "Prompt: ${PROMPT}"
         echo ""
 
-        "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu max "${BIN}/llama-completion" \
+        "${QEMU}" -L "${SYSROOT}" -E LD_LIBRARY_PATH="${PROJECT_ROOT}/output/llama.cpp/lib" -cpu "${QEMU_CPU}" "${BIN}/llama-completion" \
             -m "${model_path}" \
             -p "${PROMPT}" \
             -n "${NUM_TOKENS}" \

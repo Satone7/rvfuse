@@ -1,0 +1,25 @@
+diff --git a/ggml/src/ggml-cpu/arch/riscv/quants.c b/ggml/src/ggml-cpu/arch/riscv/quants.c
+index d3278d6..0091a10 100644
+--- a/ggml/src/ggml-cpu/arch/riscv/quants.c
++++ b/ggml/src/ggml-cpu/arch/riscv/quants.c
+@@ -5,6 +5,10 @@
+ #include "ggml-cpu.h"
+ #include "simd-mappings.h"
+ 
++// RVV VL512 implementation: single source of truth is rvv_vec_dot_q6_K_q8_K.inl
++// (copied to this directory by build.sh before patch is applied)
++#include "rvv_vec_dot_q6_K_q8_K.inl"
++
+ #include "../../quants.h"
+ #include "../../ggml-cpu-impl.h"
+ 
+@@ -2041,6 +2045,9 @@ void ggml_vec_dot_q6_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
+             }
+         }
+         break;
++    case 512:
++        ggml_vec_dot_q6_K_q8_K_vl512(n, s, bs, vx, bx, vy, by, nrc);
++        break;
+     default:
+         assert(false && "Unsupported vector length");
+         break;
