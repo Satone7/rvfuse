@@ -44,6 +44,7 @@ def _find_font(candidates):
 
 _FONT_CANDIDATES = {
     "Sans": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf",
@@ -51,12 +52,14 @@ _FONT_CANDIDATES = {
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     ],
     "SansBold": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
         "/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
     ],
     "CJK": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiGB-Regular.ttf"),
         ("/System/Library/Fonts/Supplemental/Songti.ttc", 0),
         "C:/Windows/Fonts/simsun.ttc",
         ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 0),
@@ -64,12 +67,14 @@ _FONT_CANDIDATES = {
         "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     ],
     "Mono": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiMonoGB-Regular.ttf"),
         ("/System/Library/Fonts/Menlo.ttc", 0),
         "C:/Windows/Fonts/consola.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
     ],
     "MonoBold": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts", "LXGWWenKaiMonoGB-Regular.ttf"),
         ("/System/Library/Fonts/Menlo.ttc", 1),
         "C:/Windows/Fonts/consolab.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",

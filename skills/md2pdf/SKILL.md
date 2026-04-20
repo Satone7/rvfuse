@@ -106,8 +106,8 @@ The output PDF has these exact specifications:
 | Body text | Sans font, 10pt, justified, 15pt leading |
 | Headings | H1: 22pt bold, H2: 16pt bold, H3: 12pt accent color |
 | Tables | Blue header (`#0969DA`), smart column widths (min 18mm), alternating rows |
-| Code blocks | Monospace 8pt, gray background (`#F6F8FA`) |
-| CJK text | Auto font switching (Noto/Source Han/WQY ZenHei fallback) |
+| Code blocks | LXGW WenKai Mono GB (霞鹜文楷等宽), gray background (`#F6F8FA`) |
+| CJK text | LXGW WenKai GB (霞鹜文楷 GB, bundled) |
 | Page size | A4 (595.3 × 841.9pt), white background |
 
 ## Key Differences from any2pdf
