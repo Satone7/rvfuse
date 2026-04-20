@@ -70,6 +70,15 @@ qemu-riscv64 -L output/sysroot \
   -plugin tools/bbv/libbbv.so,interval=10000,outfile=output/yolo.bbv \
   ./output/yolo_inference ./output/yolo11n.ort ./output/test.jpg
 
+**⚠️ VLEN Mismatch Warning**: When running binaries compiled with `zvl*b` extensions (e.g., `zvl512b`) under QEMU, ensure the QEMU VLEN matches the compiler's expectation. QEMU defaults to VLEN=128, but binaries compiled for larger vector lengths require explicit `-cpu rv64,v=true,vlen=<N>` flag. Otherwise, vector operations may silently fail (e.g., incomplete memory initialization), producing incorrect results without obvious errors.
+
+| Binary Extension | Required QEMU Flag |
+|------------------|-------------------|
+| `zvl128b` | (default, no flag needed) |
+| `zvl256b` | `-cpu rv64,v=true,vlen=256` |
+| `zvl512b` | `-cpu rv64,v=true,vlen=512` |
+| `zvl1024b` | `-cpu rv64,v=true,vlen=1024` |
+
 # Generate hotspot report from BBV data
 python3 tools/analyze_bbv.py --bbv output/yolo.bbv.0.bb --elf output/yolo_inference --sysroot output/sysroot
 
