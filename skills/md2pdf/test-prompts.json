@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "prompt": "把 docs/report/llama.cpp/rvv-gap-analysis-vec-dot-q5_0_q8_0-zh-2026-04-17.md 转成 PDF",
+    "expected": "生成简洁的 PDF，包含左侧蓝色边条、内联目录、表格正确渲染、中文内容正常显示"
+  },
+  {
+    "id": 2,
+    "prompt": "docs/report/yolo/latency_weighted_summary-2026-04-17.md 这个报告导出PDF看看",
+    "expected": "PDF 包含完整目录链接、表格清晰、页码显示正常、无多余分页"
+  },
+  {
+    "id": 3,
+    "prompt": "用md2pdf把 docs/report/README.md 生成一个PDF到 /tmp 目录",
+    "expected": "PDF 输出到 /tmp/README.pdf（或正确文件名），结构清晰，TOC 可点击跳转"
+  }
+]
