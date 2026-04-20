@@ -374,11 +374,13 @@ After completing all 4 phases, verify:
 
 ## References
 
-| Resource | Location |
-|----------|----------|
-| Toolchain templates | `skills/cross-compile-app/references/toolchain-template.md` |
-| Sysroot extraction | `skills/cross-compile-app/references/sysroot-extract.md` |
-| Smoke test procedure | `skills/cross-compile-app/references/smoke-test.md` |
-| YOLO/ORT demo | `applications/yolo/ort/` (CMake, rv64gcv) |
-| llama.cpp demo | `applications/llama.cpp/` (CMake, rv64gcv_zfh_zba_zicbop) |
-| Project context | `CLAUDE.md` (Key Commands section) |
+Each reference file has a specific responsibility — read the relevant section, not the whole file:
+
+| Resource | When to Read | Key Sections |
+|----------|-------------|--------------|
+| `references/toolchain-template.md` | Phase 2 (Scaffolding) | S1: CMake toolchain, S2: build.sh skeleton, S3: .gitignore, S4: README |
+| `references/sysroot-extract.md` | Phase 3 (Sysroot) | Top-level `extract_sysroot()` function + Extra Packages Guide table |
+| `references/smoke-test.md` | Phase 4 (Smoke Test) | S2: VLEN Matching Table, S4: Common Failure Modes |
+| `applications/yolo/ort/` | Reference example | CMake + rv64gcv pattern |
+| `applications/llama.cpp/` | Reference example | CMake + rv64gcv_zfh_zba_zicbop pattern |
+| `CLAUDE.md` | Key Commands section | QEMU BBV profiling, VLEN mismatch warning |
