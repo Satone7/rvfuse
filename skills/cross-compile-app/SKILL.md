@@ -171,6 +171,25 @@ Copy the `.gitignore` template from `references/toolchain-template.md` to
 Write using the README template from `references/toolchain-template.md`. Include
 the Application Profile from Phase 1.7.
 
+### 2.5 Scaffolding Gate
+
+Before proceeding to Phase 3, verify the scaffolding is complete and correct:
+
+```bash
+# Toolchain has no remaining placeholders
+grep -c '<PLACEHOLDER_ARCH>' applications/<name>/riscv64-linux-toolchain.cmake
+# Expected output: 0 (if >0, placeholders were not replaced)
+
+# Toolchain uses env vars (not hardcoded paths)
+grep -c 'ENV{LLVM_INSTALL}\|ENV{SYSROOT}' applications/<name>/riscv64-linux-toolchain.cmake
+# Expected output: >0
+
+# build.sh exists and is executable
+test -x applications/<name>/build.sh && echo "OK" || echo "MISSING"
+```
+
+If any check fails, fix it now — broken scaffolding causes opaque build errors later.
+
 ---
 
 ## Phase 3: Sysroot + Build
@@ -214,6 +233,27 @@ file output/<name>/bin/<binary>
 
 If output shows x86-64 or a different architecture, the cross-compilation failed.
 Re-check the toolchain file and environment variables.
+
+### 3.4 Build Gate
+
+Before proceeding to Phase 4, confirm the build produced a valid RISC-V binary:
+
+```bash
+# Binary is RISC-V ELF
+file output/<name>/bin/<binary> | grep -q "RISC-V"
+# If this grep fails, the binary is wrong architecture — do NOT proceed to smoke test
+
+# Binary is dynamically linked to the correct interpreter
+file output/<name>/bin/<binary> | grep -q "ld-linux-riscv64"
+# Static binaries are OK too — this check is informational only
+
+# Sysroot has the dynamic linker
+test -f output/<name>/sysroot/lib/ld-linux-riscv64-lp64d.so.1
+```
+
+If the binary is not RISC-V ELF, stop and re-check the toolchain `-march` flag and
+`$ENV{LLVM_INSTALL}` path. Running a non-RISC-V binary under QEMU wastes time and
+produces confusing errors.
 
 ---
 
