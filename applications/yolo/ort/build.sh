@@ -235,8 +235,8 @@ cross_compile() {
     info "Building (ninja -j${JOBS})..."
     ninja -C "${ort_build}" -j"${JOBS}"
 
-    info "Installing..."
-    ninja -C "${ort_build}" install/strip
+    info "Installing (preserving debug symbols for perf profiling)..."
+    ninja -C "${ort_build}" install
 
     unset SYSROOT
 
@@ -322,6 +322,44 @@ build_yolo_runner() {
 
 build_yolo_runner
 
+# --- Step 5: Cross-compile Generic ORT Runner ---
+build_generic_runner() {
+    local ort_install="${OUTPUT_DIR}"
+    local runner_src="${PROJECT_ROOT}/applications/yolo/runner"
+    local runner_out="${OUTPUT_DIR}/generic_ort_runner"
+    local sysroot="${OUTPUT_DIR}/sysroot"
+    local sysroot_lib="${sysroot}/usr/lib"
+
+    if [[ "${FORCE}" != "true" && -f "${runner_out}" ]]; then
+        info "Generic ORT runner already built at ${runner_out}. Use --force to rebuild."
+        return 0
+    fi
+
+    [ -f "${runner_src}/generic_ort_runner.cpp" ] || { warn "generic_ort_runner.cpp not found, skipping"; return 0; }
+    [ -f "${sysroot_lib}/libonnxruntime.so" ] || error "libonnxruntime.so not in sysroot."
+
+    info "Cross-compiling Generic ORT runner..."
+
+    "${LLVM_INSTALL}/bin/clang++" \
+        --target=riscv64-unknown-linux-gnu \
+        --sysroot="${sysroot}" \
+        -march=rv64gcv \
+        -isystem "${sysroot}/usr/include/riscv64-linux-gnu" \
+        -std=c++17 -O2 -g -fno-omit-frame-pointer \
+        -fuse-ld=lld \
+        -I"${ort_install}/include/onnxruntime" \
+        -I"${ort_install}/include/onnxruntime/core/session" \
+        "${runner_src}/generic_ort_runner.cpp" \
+        -o "${runner_out}" \
+        -L"${sysroot_lib}" \
+        -lonnxruntime
+
+    info "Generic ORT runner built: ${runner_out}"
+    file "${runner_out}"
+}
+
+build_generic_runner
+
 # --- Done ---
 info "All done!"
 echo ""
@@ -329,6 +367,8 @@ echo "Artifacts:"
 echo "  ORT:     ${OUTPUT_DIR}/lib/libonnxruntime.so"
 echo "  Sysroot: ${OUTPUT_DIR}/sysroot/"
 echo "  Runner:  ${OUTPUT_DIR}/yolo_inference"
+echo "  Generic: ${OUTPUT_DIR}/generic_ort_runner"
 echo ""
 file "${OUTPUT_DIR}/lib/libonnxruntime.so" || true
 file "${OUTPUT_DIR}/yolo_inference" || true
+file "${OUTPUT_DIR}/generic_ort_runner" || true
