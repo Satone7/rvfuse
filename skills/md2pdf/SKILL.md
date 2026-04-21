@@ -51,15 +51,31 @@ If user specifies a different output path, use that. If output PDF already exist
 Before converting, scan the source markdown for format markers that the bundled LXGW font cannot render properly:
 
 ```bash
-python3 skills/md2pdf/scripts/md2pdf.py --check --input <input.md>
+python3 .claude/skills/md2pdf/scripts/md2pdf.py --check --input <input.md>
 ```
 
-- Exit code 0 + `OK:` → no issues, proceed to Step 4
-- Exit code 1 + `WARN:italic:...` or `WARN:strikethrough:...` → **ask the user**:
+Exit codes and handling:
+
+| Exit code | Output | Action |
+|-----------|--------|--------|
+| 0 | `OK:` | No issues, proceed to Step 4 |
+| 1 | `WARN:italic:...` or `WARN:strikethrough:...` | **Ask user** about font choice |
+| 2 | `UNCERTAIN: following matches need judgment...` | **Agent judges** if matches are math expressions |
+
+**Exit code 1 handling** (confirmed italic/strikethrough markers):
 
 > 源文档包含斜体/删除线标记，但默认字体 (LXGW WenKai GB) 不支持：斜体将显示为正常文本，删除线将显示为灰色文字。是否仍然使用默认字体，还是切换到系统字体？
 
 If user chooses system fonts, add `--use-system-fonts` flag in Step 4.
+
+**Exit code 2 handling** (uncertain matches - likely math expressions):
+
+Script outputs a list of uncertain matches with line numbers. Agent should examine each match to determine if it is:
+- **Math expression** (e.g., `a0*b0`, `x+y`): contains digits, operators, or formula-like structure → NOT italic, proceed with default fonts
+- **Actual italic text** (e.g., `*emphasis*`, `*中文*`): words/phrases → treat as confirmed issue, ask user about font choice
+
+If agent judges all uncertain matches as math expressions, proceed to Step 4 with default fonts.
+If any match is actual italic text, treat as exit code 1 and ask user about font choice.
 
 ### Step 4: Execute conversion
 

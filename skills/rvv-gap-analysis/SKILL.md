@@ -319,3 +319,119 @@ Agent({
 - **Count instructions for equivalent workloads**, not different workload sizes.
 - **Document assumptions** — if a proposed instruction requires new hardware (accumulator
   registers, new execution units), state this explicitly.
+
+## Benefit Calculation Rules
+
+### Amdahl's Law Application
+
+When calculating overall benefit, ALWAYS use Amdahl's Law:
+
+```
+整体加速百分比 = (原总时间 - 新总时间) / 原总时间 × 100%
+
+新总时间 = 未优化部分时间 + 热点部分时间 / 加速倍数
+```
+
+Example:
+```
+原总时间 = 100s
+热点占比 = 35%（35s）
+未优化部分 = 65s
+热点加速倍数 = 3.5（热点新时间 = 10s）
+
+新总时间 = 65 + 10 = 75s
+整体加速百分比 = (100 - 75) / 100 = 33%
+```
+
+### Benefit Expression Format
+
+**MANDATORY: Express ALL benefits as percentages, NOT as multipliers.**
+
+| Format | Example | Usage |
+|--------|---------|-------|
+| Correct | 加速33% | Always use this |
+| Incorrect | 1.33× | Never use |
+| Incorrect | 33% → 1.33× | Never use |
+
+When showing calculation process, use:
+```
+加速约 X%（周期减少Y%）
+整体加速 = (原时间 - 新时间) / 原时间 = Z%
+```
+
+### Benefit Scope Levels
+
+Always annotate the scope level for each benefit figure:
+
+| Scope | Meaning | Example Expression |
+|-------|---------|-------------------|
+| 整体 | Whole application | 整体加速15-25% |
+| 函数 | Specific function | 函数加速43% |
+| K-loop级 | Innermost loop | K-loop级周期减少35% |
+
+**Priority**: 整体收益 is the most important metric. Always calculate and report it.
+
+### Conservative Estimation
+
+When calculating benefits, apply these conservative adjustments:
+
+| Factor | Adjustment |
+|--------|-----------|
+| New instruction latency | May be higher than estimated (add ~1-2 cycles) |
+| Pipeline efficiency | Actual throughput ~80-90% of theoretical |
+| Compiler optimization | May not achieve perfect scheduling |
+| K-loop function ratio | Use 85% (not 90%) for function-level calculation |
+| Function hotspot ratio | Use slightly lower values for overall calculation |
+
+Example conservative calculation chain:
+```
+乐观估计:
+  K-loop周期减少: 43.75% → 加速60%
+  函数加速: 65% → 整体加速34%
+
+保守估计:
+  K-loop周期减少: 35% → 加速约54%
+  函数加速: 43% → 整体加速约21%
+  最终报告范围: 15-25%整体加速
+```
+
+## Software Team Constraints
+
+This skill is for a **software team**. The following constraints apply:
+
+### Scope Limitations
+
+- **Software perspective only**: Analyze benefits from instruction count and cycle reduction
+- **No hardware design**: Do not propose instruction encoding, hardware implementation details,
+  or microarchitecture modifications
+- **No hardware complexity estimates**: Do not discuss "hardware complexity", "pipeline stages",
+  or "execution unit requirements"
+- **No register pressure analysis**: Focus on instruction count, not register allocation pressure
+
+### Content to Exclude
+
+| Excluded Content | Reason |
+|-----------------|--------|
+| 指令编码方案 | Hardware team responsibility |
+| 硬件单元设计 | Hardware team responsibility |
+| 累加器寄存器设计 | Hardware team responsibility |
+| 流水线吞吐优化 | Hardware team responsibility |
+| 微架构实现难度 | Hardware team responsibility |
+| 提议指令预估延迟（硬件依据） | Hardware team estimates |
+
+### Acceptable Content
+
+| Acceptable Content | Reason |
+|--------------------|--------|
+| Current instruction latency (from existing documentation) | Software optimization reference |
+| Instruction count comparison | Software benefit analysis |
+| Cycle calculation using documented latencies | Software estimation |
+| Amdahl's Law benefit calculation | Software-level analysis |
+| Platform instruction reference (ARM NEON, x86 VNNI) | Cross-platform comparison |
+
+### When Hardware Topics Appear
+
+If hardware design topics are mentioned in the analysis:
+- Replace "需设计新硬件单元" with "需提出新指令方案"
+- Replace "硬件实现难度高" with "建议由硬件团队评估实现可行性"
+- Delete any section discussing instruction encoding or hardware implementation
