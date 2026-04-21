@@ -236,7 +236,7 @@ cross_compile() {
     ninja -C "${ort_build}" -j"${JOBS}"
 
     info "Installing..."
-    ninja -C "${ort_build}" install/strip
+    ninja -C "${ort_build}" install
 
     unset SYSROOT
 

@@ -305,7 +305,7 @@ cross_compile() {
     ninja -C "${llama_build}" -j"${JOBS}"
 
     info "Installing binaries..."
-    ninja -C "${llama_build}" install/strip
+    ninja -C "${llama_build}" install
 
     # Copy llama libs to sysroot for QEMU execution
     info "Copying llama libs to sysroot..."
