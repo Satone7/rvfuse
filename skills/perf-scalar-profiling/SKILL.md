@@ -91,12 +91,12 @@ Resolution order:
 ### Usage: ONNX Runtime
 
 ```bash
-# Chroot mode (recommended) — isolated glibc, portable across boards
+# Default mode — chroot auto-detected from runner path
+# Looks for output/cross-ort/rootfs.tar.gz automatically
 python3 tools/perf_scalar_profile.py \
   --host 192.168.1.22 --user root --password bianbu \
   --remote-dir /root/ort-perf \
   --runner output/cross-ort/generic_ort_runner \
-  --rootfs output/cross-ort/rootfs.tar.gz \
   --models resnet50 mobilenetv2 squeezenet \
   --outdir output/perf/ort \
   --iterations 30 --freq 999
@@ -106,8 +106,7 @@ python3 tools/perf_scalar_profile.py \
   --host 192.168.1.22 --user root --password bianbu \
   --remote-dir /root/ort-perf \
   --skip-upload \
-  --runner generic_ort_runner \
-  --rootfs output/cross-ort/rootfs.tar.gz \
+  --runner output/cross-ort/generic_ort_runner \
   --models resnet50 \
   --iterations 30 --freq 999
 ```
@@ -175,6 +174,7 @@ python3 tools/perf_scalar_profile.py \
 | `--freq` | No | `999` | Sampling frequency (Hz) |
 | `--upload-only` | No | false | Upload files only, skip profiling |
 | `--skip-upload` | No | false | Skip upload (files already on board) |
+| `--rootfs` | No | auto | Local rootfs.tar.gz (auto-detected from runner path) |
 | `--dry-run` | No | false | Print actions without executing |
 
 ## Prerequisites

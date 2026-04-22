@@ -10,12 +10,11 @@ Auto-detects framework from model file extension:
   .gguf → llama-cli:           ./runner -m <model.gguf> <extra_args>
 
 Usage:
-    # ONNX Runtime (generic_ort_runner) — use short names, auto-download
+    # ONNX Runtime — chroot mode auto-detected from runner path
     python3 tools/perf_scalar_profile.py \\
         --host 192.168.1.22 --user root --password bianbu \\
         --remote-dir /root/ort-perf \\
         --runner output/cross-ort/generic_ort_runner \\
-        --rootfs output/cross-ort/rootfs.tar.gz \\
         --models resnet50 mobilenetv2 squeezenet \\
         --outdir output/perf/ort \\
         --iterations 30 --freq 999
@@ -26,7 +25,6 @@ Usage:
         --remote-dir /root/llama-perf \\
         --runner output/llama.cpp/bin/llama-cli \\
         --libs output/llama.cpp/lib \\
-        --sysroot output/llama.cpp/sysroot \\
         --models qwen-0.5b-q4_0 \\
         --input "-p 'Hello world' -n 128" \\
         --outdir output/perf/llama
@@ -606,7 +604,8 @@ def main():
                         help="Local directory with shared libraries (.so)")
     parser.add_argument("--sysroot", default=None, help="Local sysroot directory (fallback mode)")
     parser.add_argument("--rootfs", default=None,
-                        help="Local rootfs.tar.gz for chroot profiling (recommended)")
+                        help="Local rootfs.tar.gz for chroot profiling (default: auto-detect "
+                             "from runner path, e.g. output/cross-ort/rootfs.tar.gz)")
     parser.add_argument("--outdir", default="output/perf", help="Local output directory")
     parser.add_argument("--remote-dir", default="/root", help="Remote working directory")
     parser.add_argument("--freq", type=int, default=999, help="perf sampling frequency (Hz)")
@@ -629,6 +628,17 @@ def main():
     if not args.models: missing.append("--models")
     if missing:
         parser.error(f"the following arguments are required: {', '.join(missing)}")
+
+    # Auto-detect rootfs.tar.gz from runner path when --rootfs not provided
+    if not args.rootfs and args.runner:
+        runner_dir = os.path.dirname(os.path.abspath(args.runner))
+        # Strip trailing bin/ for llama.cpp (output/llama.cpp/bin → output/llama.cpp)
+        if os.path.basename(runner_dir) == "bin":
+            runner_dir = os.path.dirname(runner_dir)
+        candidate = os.path.join(runner_dir, "rootfs.tar.gz")
+        if os.path.isfile(candidate):
+            args.rootfs = candidate
+            print(f"  [AUTO] Detected rootfs: {candidate}")
 
     # Resolve model paths: local file → models_dir → registry download → URL download
     resolved_models = []
