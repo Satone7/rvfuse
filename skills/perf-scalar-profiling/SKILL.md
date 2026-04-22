@@ -29,10 +29,10 @@ random test data — no need to write model-specific test cases.
 
 | Artifact | Local Path | Remote Path |
 |----------|-----------|-------------|
-| Runner binary | `output/cross-ort/generic_ort_runner` | `<remote-dir>/generic_ort_runner` |
-| ORT shared lib | `output/cross-ort/lib/libonnxruntime.so*` | `<remote-dir>/lib/` |
-| Sysroot | `output/cross-ort/sysroot/` | `<remote-dir>/sysroot/` |
-| ONNX models | `*.onnx` or `*.ort` files | `<remote-dir>/` |
+| Runner binary | `output/cross-ort/generic_ort_runner` | `<remote-dir>/rootfs/generic_ort_runner` |
+| ORT shared lib | `output/cross-ort/lib/libonnxruntime.so*` | inside rootfs.tar.gz |
+| Rootfs (chroot) | `output/cross-ort/rootfs.tar.gz` | `<remote-dir>/rootfs.tar.gz` |
+| ONNX models | `*.onnx` or `*.ort` files | `<remote-dir>/rootfs/` |
 
 ### llama.cpp
 
@@ -91,13 +91,12 @@ Resolution order:
 ### Usage: ONNX Runtime
 
 ```bash
-# Use short names — auto-downloads if not found locally
+# Chroot mode (recommended) — isolated glibc, portable across boards
 python3 tools/perf_scalar_profile.py \
   --host 192.168.1.22 --user root --password bianbu \
   --remote-dir /root/ort-perf \
   --runner output/cross-ort/generic_ort_runner \
-  --libs output/cross-ort/lib \
-  --sysroot output/cross-ort/sysroot \
+  --rootfs output/cross-ort/rootfs.tar.gz \
   --models resnet50 mobilenetv2 squeezenet \
   --outdir output/perf/ort \
   --iterations 30 --freq 999
@@ -108,6 +107,7 @@ python3 tools/perf_scalar_profile.py \
   --remote-dir /root/ort-perf \
   --skip-upload \
   --runner generic_ort_runner \
+  --rootfs output/cross-ort/rootfs.tar.gz \
   --models resnet50 \
   --iterations 30 --freq 999
 ```
@@ -329,12 +329,13 @@ output/perf/
 |-------|-------|-----|
 | Permission denied | perf_event_paranoid too high | `sudo sysctl -w kernel.perf_event_paranoid=0` |
 | No symbols (hex addresses) | Binary stripped or no debug info | Build with `-g -fno-omit-frame-pointer`; ensure `install` not `install/strip` |
+| No symbols in chroot mode | perf can't find .so inside rootfs | Script uses `--symfs <rootfs>` automatically |
 | No samples in perf record | Hardware PMU not supported on SBI | Use `-e cpu-clock` (script does this by default) |
 | Too few samples | Low freq or short run | Increase `--freq 9999` or `--iterations 100` |
 | High overhead | Frequency too high | Use `--freq 99` |
 | SSH connection fails | Network or auth issue | Test: `python3 -c "import paramiko; ..."` |
-| "cannot open shared object" | Missing .so on remote | Include `--libs` and `--sysroot` on first upload |
-| Different results between runs | CPU freq scaling / thread scheduling | `taskset 0x1 perf record ...` + performance governor |
+| glibc version mismatch | Board glibc older than build sysroot | Use `--rootfs` for chroot isolation |
+| chroot fails | No root on board | Script requires root SSH access for chroot/mount |
 
 ## Limitations
 
@@ -343,5 +344,5 @@ output/perf/
 | SBI PMU events vary by firmware | Check `perf list`; software events always work |
 | perf is statistical, not exact | Increase `--freq` for more resolution |
 | Limited PMU counters | Profile events in separate runs |
-| Large sysroot upload is slow | Use `--skip-upload` after first deploy |
 | cpu-clock samples at lower rate | Use high freq (999+) and more iterations (30+) |
+| chroot requires root | SSH as root user (default on Banana Pi) |

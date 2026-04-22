@@ -15,8 +15,7 @@ Usage:
         --host 192.168.1.22 --user root --password bianbu \\
         --remote-dir /root/ort-perf \\
         --runner output/cross-ort/generic_ort_runner \\
-        --libs output/cross-ort/lib \\
-        --sysroot output/cross-ort/sysroot \\
+        --rootfs output/cross-ort/rootfs.tar.gz \\
         --models resnet50 mobilenetv2 squeezenet \\
         --outdir output/perf/ort \\
         --iterations 30 --freq 999
@@ -238,18 +237,26 @@ def detect_framework(model_name: str) -> str:
         return "unknown"
 
 
-def build_run_cmd(runner_path: str, model_name: str, framework: str,
-                  iterations: int, input_arg: str) -> str:
-    """Build the runner command line (without perf prefix)."""
+def build_run_cmd(runner_name: str, model_name: str, framework: str,
+                  iterations: int, input_arg: str, chroot_path: str | None = None) -> str:
+    """Build the runner command line (without perf prefix).
+
+    If chroot_path is set, wraps the command with chroot and LD_LIBRARY_PATH=/lib.
+    """
+    # Inner command inside chroot (paths are relative to rootfs)
     if framework == "ort":
-        # generic_ort_runner <model.onnx> [iterations]
-        return f"{runner_path} {model_name} {iterations}"
+        inner = f"/{runner_name} {model_name} {iterations}"
     elif framework == "llama":
-        # llama-cli -m <model.gguf> <extra_args>
-        return f"{runner_path} -m {model_name} {input_arg}"
+        inner = f"/{runner_name} -m {model_name} {input_arg}"
     else:
-        # Fallback: pass everything through
-        return f"{runner_path} {model_name} {input_arg}"
+        inner = f"/{runner_name} {model_name} {input_arg}"
+
+    if chroot_path:
+        # Run binary directly via chroot (no shell needed).
+        # LD_LIBRARY_PATH must be set BEFORE perf so the chrooted process inherits it.
+        return f"chroot {chroot_path} {inner}"
+    else:
+        return inner
 
 
 # ---------------------------------------------------------------------------
@@ -349,28 +356,43 @@ def sftp_download(ssh: paramiko.SSHClient, remote: str, local: str) -> bool:
 
 def upload_workload(ssh: paramiko.SSHClient, remote_dir: str,
                     runner: str, models: list[str],
-                    libs_dir: str | None, sysroot: str | None) -> None:
+                    libs_dir: str | None, sysroot: str | None,
+                    rootfs_tar: str | None = None) -> None:
     print("\n=== Uploading workload ===")
-    ssh_exec(ssh, f"mkdir -p {remote_dir}/lib")
 
-    # Runner
     runner_name = os.path.basename(runner)
-    sftp_upload(ssh, runner, f"{remote_dir}/{runner_name}")
 
-    # Shared libraries
-    if libs_dir and os.path.isdir(libs_dir):
-        for f in os.listdir(libs_dir):
-            if f.endswith(".so") or ".so." in f:
-                sftp_upload(ssh, os.path.join(libs_dir, f), f"{remote_dir}/lib/{f}")
+    if rootfs_tar and os.path.isfile(rootfs_tar):
+        # --- Chroot mode: upload rootfs.tar.gz ---
+        ssh_exec(ssh, f"mkdir -p {remote_dir}")
+        tar_name = os.path.basename(rootfs_tar)
+        sftp_upload(ssh, rootfs_tar, f"{remote_dir}/{tar_name}")
 
-    # Sysroot
-    if sysroot and os.path.isdir(sysroot):
-        print(f"  [SFTP] Uploading sysroot: {sysroot} -> {remote_dir}/sysroot")
-        sftp_upload(ssh, sysroot, f"{remote_dir}/sysroot")
+        # Extract and copy models into rootfs
+        print("  [SSH] Extracting rootfs...")
+        ssh_exec(ssh, f"cd {remote_dir} && tar xzf {tar_name}")
 
-    # Models
-    for model in models:
-        sftp_upload(ssh, model, f"{remote_dir}/{os.path.basename(model)}")
+        # Copy models into rootfs
+        for model in models:
+            model_name = os.path.basename(model)
+            sftp_upload(ssh, model, f"{remote_dir}/rootfs/{model_name}")
+    else:
+        # --- Direct mode: upload runner + libs (fallback) ---
+        ssh_exec(ssh, f"mkdir -p {remote_dir}/lib")
+
+        sftp_upload(ssh, runner, f"{remote_dir}/{runner_name}")
+
+        if libs_dir and os.path.isdir(libs_dir):
+            for f in os.listdir(libs_dir):
+                if f.endswith(".so") or ".so." in f:
+                    sftp_upload(ssh, os.path.join(libs_dir, f), f"{remote_dir}/lib/{f}")
+
+        if sysroot and os.path.isdir(sysroot):
+            print(f"  [SFTP] Uploading sysroot: {sysroot} -> {remote_dir}/sysroot")
+            sftp_upload(ssh, sysroot, f"{remote_dir}/sysroot")
+
+        for model in models:
+            sftp_upload(ssh, model, f"{remote_dir}/{os.path.basename(model)}")
 
     print("  [OK] Upload complete")
 
@@ -394,46 +416,63 @@ def check_remote_env(ssh: paramiko.SSHClient) -> None:
         ssh_exec(ssh, "echo 0 > /proc/sys/kernel/perf_event_paranoid")
 
 
+def setup_chroot(ssh: paramiko.SSHClient, remote_dir: str) -> None:
+    """One-time chroot setup: mount /proc /sys /dev into rootfs."""
+    rootfs = f"{remote_dir}/rootfs"
+    print("  [CHROOT] Setting up mounts...")
+    ssh_exec(ssh, f"mkdir -p {rootfs}/{{proc,dev,sys,tmp}}")
+    ssh_exec(ssh, f"mount -t proc proc {rootfs}/proc 2>/dev/null || true")
+    ssh_exec(ssh, f"mount -t sysfs sysfs {rootfs}/sys 2>/dev/null || true")
+    ssh_exec(ssh, f"mount --bind /dev {rootfs}/dev 2>/dev/null || true")
+
+
+def teardown_chroot(ssh: paramiko.SSHClient, remote_dir: str) -> None:
+    """Unmount chroot bind mounts."""
+    rootfs = f"{remote_dir}/rootfs"
+    print("  [CHROOT] Tearing down mounts...")
+    ssh_exec(ssh, f"umount {rootfs}/proc 2>/dev/null || true")
+    ssh_exec(ssh, f"umount {rootfs}/sys 2>/dev/null || true")
+    ssh_exec(ssh, f"umount {rootfs}/dev 2>/dev/null || true")
+
+
 def profile_model(ssh: paramiko.SSHClient, remote_dir: str,
                   runner_name: str, model_name: str,
                   framework: str, iterations: int, input_arg: str,
-                  freq: int, has_libs: bool) -> dict:
+                  freq: int, use_chroot: bool = False) -> dict:
     print(f"\n--- Profiling: {model_name} [{framework}] ---")
 
     work_dir = f"{remote_dir}/perf_{model_name.replace('.onnx','').replace('.gguf','')}"
     ssh_exec(ssh, f"mkdir -p {work_dir}")
 
-    # Build LD_LIBRARY_PATH
-    ld_paths = []
-    if has_libs:
-        ld_paths.append(f"{remote_dir}/lib")
-    ld_paths.append(f"{remote_dir}/sysroot/lib")
-    ld_paths.append(f"{remote_dir}/sysroot/lib/riscv64-linux-gnu")
-    ld_prefix = f"LD_LIBRARY_PATH={':'.join(ld_paths)}:$LD_LIBRARY_PATH "
+    # Build the runner command
+    chroot_path = f"{remote_dir}/rootfs" if use_chroot else None
+    run_cmd = build_run_cmd(runner_name, model_name, framework,
+                            iterations, input_arg, chroot_path)
 
-    runner_path = f"{remote_dir}/{runner_name}"
-
-    # Build the runner command for this framework
-    run_cmd = build_run_cmd(runner_path, model_name, framework, iterations, input_arg)
+    # Prefix: for chroot mode, set LD_LIBRARY_PATH so the chrooted process finds libs
+    env_prefix = ""
+    if use_chroot:
+        env_prefix = "LD_LIBRARY_PATH=/lib "
 
     # 1. perf stat
     print("  [1/3] perf stat ...")
     stat_out = f"{work_dir}/perf_stat.txt"
-    cmd = f"{ld_prefix}perf stat -d -o {stat_out} -- {run_cmd}"
-    _, err, rc = ssh_exec(ssh, f"cd {remote_dir} && {cmd}", timeout=600)
+    cmd = f"{env_prefix}perf stat -d -o {stat_out} -- {run_cmd}"
+    _, err, rc = ssh_exec(ssh, cmd, timeout=600)
 
     # 2. perf record (use cpu-clock: RISC-V SBI PMU hardware sampling often fails)
     print("  [2/3] perf record ...")
     data_file = f"{work_dir}/perf.data"
-    cmd = f"{ld_prefix}perf record -e cpu-clock -g -F {freq} -o {data_file} -- {run_cmd}"
-    _, err, rc = ssh_exec(ssh, f"cd {remote_dir} && {cmd}", timeout=600)
+    cmd = f"{env_prefix}perf record -e cpu-clock -g -F {freq} -o {data_file} -- {run_cmd}"
+    _, err, rc = ssh_exec(ssh, cmd, timeout=600)
 
     # 3. Reports
     print("  [3/3] Generating reports ...")
     report_out = f"{work_dir}/perf_report.txt"
     annotate_out = f"{work_dir}/perf_annotate.txt"
-    ssh_exec(ssh, f"cd {remote_dir} && perf report --stdio -n --percent-limit 0.5 -i {data_file} > {report_out} 2>/dev/null", timeout=300)
-    ssh_exec(ssh, f"cd {remote_dir} && perf annotate --stdio -i {data_file} > {annotate_out} 2>/dev/null", timeout=300)
+    symfs = f"--symfs {chroot_path}" if use_chroot else ""
+    ssh_exec(ssh, f"perf report --stdio -n --percent-limit 0.5 {symfs} -i {data_file} > {report_out} 2>/dev/null", timeout=300)
+    ssh_exec(ssh, f"perf annotate --stdio {symfs} -i {data_file} > {annotate_out} 2>/dev/null", timeout=300)
 
     # Extract metrics
     metrics = {"name": model_name.replace(".onnx", "").replace(".gguf", ""),
@@ -565,7 +604,9 @@ def main():
                         help="Inference iterations for ORT runner (default: 30)")
     parser.add_argument("--libs", default=None,
                         help="Local directory with shared libraries (.so)")
-    parser.add_argument("--sysroot", default=None, help="Local sysroot directory")
+    parser.add_argument("--sysroot", default=None, help="Local sysroot directory (fallback mode)")
+    parser.add_argument("--rootfs", default=None,
+                        help="Local rootfs.tar.gz for chroot profiling (recommended)")
     parser.add_argument("--outdir", default="output/perf", help="Local output directory")
     parser.add_argument("--remote-dir", default="/root", help="Remote working directory")
     parser.add_argument("--freq", type=int, default=999, help="perf sampling frequency (Hz)")
@@ -599,6 +640,7 @@ def main():
     args.models = resolved_models
 
     if args.dry_run:
+        use_chroot = bool(args.rootfs and os.path.isfile(args.rootfs))
         print("=== DRY RUN ===")
         print(f"  Host: {args.user}@{args.host}:{args.port}")
         print(f"  Remote dir: {args.remote_dir}")
@@ -606,26 +648,35 @@ def main():
         print(f"  Models: {args.models}")
         print(f"  Input args: {args.input or '(none)'}")
         print(f"  Iterations: {args.iterations}")
+        print(f"  Rootfs: {args.rootfs} ({'chroot' if use_chroot else 'not found'})")
         print(f"  Libs: {args.libs}")
         print(f"  Sysroot: {args.sysroot}")
         print(f"  Outdir: {args.outdir}")
         print(f"  Freq: {args.freq}")
         if not args.skip_upload:
-            print(f"    - Upload {args.runner} -> {args.remote_dir}/{os.path.basename(args.runner)}")
-            if args.libs:
-                print(f"    - Upload libs {args.libs} -> {args.remote_dir}/lib/")
-            if args.sysroot:
-                print(f"    - Upload sysroot {args.sysroot} -> {args.remote_dir}/sysroot/")
+            if use_chroot:
+                print(f"    - Upload {args.rootfs} -> {args.remote_dir}/rootfs.tar.gz")
+                print(f"    - Extract rootfs, copy models into rootfs/")
+            else:
+                print(f"    - Upload {args.runner} -> {args.remote_dir}/{os.path.basename(args.runner)}")
+                if args.libs:
+                    print(f"    - Upload libs {args.libs} -> {args.remote_dir}/lib/")
+                if args.sysroot:
+                    print(f"    - Upload sysroot {args.sysroot} -> {args.remote_dir}/sysroot/")
             for m in args.models:
                 print(f"    - Upload {m} -> {args.remote_dir}/{os.path.basename(m)}")
         if not args.upload_only:
+            runner_name = os.path.basename(args.runner)
             for m in args.models:
                 name = os.path.basename(m)
                 fw = detect_framework(name)
-                run_cmd = build_run_cmd(f"{args.remote_dir}/{os.path.basename(args.runner)}",
-                                        name, fw, args.iterations, args.input)
-                print(f"    - Profile {name} [{fw}]: {run_cmd}")
+                chroot_path = f"{args.remote_dir}/rootfs" if use_chroot else None
+                run_cmd = build_run_cmd(runner_name, name, fw,
+                                        args.iterations, args.input, chroot_path)
+                print(f"    - Profile {name} [{fw}]: perf ... -- {run_cmd}")
                 print(f"    - Download -> {args.outdir}/{name}/")
+            if use_chroot:
+                print(f"    - Teardown chroot mounts")
             print(f"    - Generate {args.outdir}/summary.md")
         return
 
@@ -635,10 +686,15 @@ def main():
     check_remote_env(ssh)
 
     # Upload
-    has_libs = (args.libs and os.path.isdir(args.libs)) or (args.sysroot and os.path.isdir(args.sysroot))
+    use_chroot = bool(args.rootfs and os.path.isfile(args.rootfs))
+    if use_chroot:
+        print(f"  [CHROOT] Mode: rootfs={args.rootfs}")
+    else:
+        print(f"  [DIRECT] Mode: libs={args.libs}, sysroot={args.sysroot}")
+
     if not args.skip_upload:
         upload_workload(ssh, args.remote_dir, args.runner, args.models,
-                        args.libs, args.sysroot)
+                        args.libs, args.sysroot, args.rootfs)
     else:
         print("\n  [SKIP] Upload skipped (--skip-upload)")
 
@@ -647,21 +703,30 @@ def main():
         ssh.close()
         return
 
+    # Setup chroot mounts if using rootfs
+    if use_chroot:
+        setup_chroot(ssh, args.remote_dir)
+
     # Profile
     os.makedirs(args.outdir, exist_ok=True)
     all_metrics = []
     runner_name = os.path.basename(args.runner)
 
-    for model_path in args.models:
-        model_name = os.path.basename(model_path)
-        framework = detect_framework(model_name)
-        metrics = profile_model(ssh, args.remote_dir, runner_name,
-                                model_name, framework,
-                                args.iterations, args.input,
-                                args.freq, has_libs)
-        download_results(ssh, args.remote_dir, model_name, args.outdir)
-        cleanup_remote(ssh, args.remote_dir, model_name)
-        all_metrics.append(metrics)
+    try:
+        for model_path in args.models:
+            model_name = os.path.basename(model_path)
+            framework = detect_framework(model_name)
+            metrics = profile_model(ssh, args.remote_dir, runner_name,
+                                    model_name, framework,
+                                    args.iterations, args.input,
+                                    args.freq, use_chroot)
+            download_results(ssh, args.remote_dir, model_name, args.outdir)
+            cleanup_remote(ssh, args.remote_dir, model_name)
+            all_metrics.append(metrics)
+    finally:
+        # Always teardown chroot mounts
+        if use_chroot:
+            teardown_chroot(ssh, args.remote_dir)
 
     generate_summary(all_metrics, args.outdir, args.freq, args.host, args.runner)
 
