@@ -1,7 +1,0 @@
-{
-  "eval_id": 0,
-  "eval_name": "llama-cpp-gemv-q5-q8-chinese",
-  "prompt": "为llama.cpp实现ggml_gemv_q5_0_q8_0算子的RISC-V RVV向量化，向量寄存器512bit",
-  "config": "without_skill",
-  "assertions": []
-}
