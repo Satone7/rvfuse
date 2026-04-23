@@ -406,13 +406,6 @@ build_rootfs() {
     # Runner binary
     cp "${OUTPUT_DIR}/generic_ort_runner" "${rootfs}/"
 
-    # Create /bin/sh symlink (needed by chroot)
-    [ -x "${rootfs}/bin/sh" ] || {
-        mkdir -p "${rootfs}/bin"
-        # Use ld-linux as loader; dash/busybox not needed since we invoke the runner directly
-        ln -sf ../lib/ld-linux-riscv64-lp64d.so.1 "${rootfs}/bin/sh"
-    }
-
     # Pack tarball
     tar czf "${tarball}" -C "${OUTPUT_DIR}" rootfs/
     local size

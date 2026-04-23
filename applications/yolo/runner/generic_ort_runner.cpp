@@ -39,6 +39,10 @@ int main(int argc, char* argv[]) {
     auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
     auto input_shape = input_tensor_info.GetShape();
     ONNXTensorElementDataType input_type = input_tensor_info.GetElementType();
+    if (input_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+        std::cerr << "Warning: input type is not float (type="
+                  << static_cast<int>(input_type) << "), attempting float cast" << std::endl;
+    }
 
     // Print input info
     std::cout << "Input: " << input_name << " shape=[";
@@ -51,6 +55,10 @@ int main(int argc, char* argv[]) {
         total_elements *= static_cast<size_t>(input_shape[i]);
     }
     std::cout << "] type=" << static_cast<int>(input_type) << std::endl;
+
+    if (total_elements > 100'000'000) {
+        std::cerr << "Warning: large input (" << total_elements << " elements)" << std::endl;
+    }
 
     // Print output info
     auto output_name_ptr = session.GetOutputNameAllocated(0, allocator);

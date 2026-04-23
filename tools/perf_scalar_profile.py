@@ -50,8 +50,8 @@ import re
 import sys
 import stat
 import urllib.request
-import hashlib
 from pathlib import Path
+from datetime import datetime
 
 import paramiko
 
@@ -264,7 +264,14 @@ def build_run_cmd(runner_name: str, model_name: str, framework: str,
 def ssh_connect(host: str, user: str, password: str, port: int = 22) -> paramiko.SSHClient:
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(host, username=user, password=password, port=port, timeout=15)
+    try:
+        ssh.connect(host, username=user, password=password, port=port, timeout=15)
+    except paramiko.AuthenticationException:
+        print(f"[ERROR] Authentication failed for {user}@{host}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[ERROR] Connection to {host}:{port} failed: {e}")
+        sys.exit(1)
     return ssh
 
 
@@ -528,7 +535,7 @@ def generate_summary(all_metrics: list[dict], outdir: str, freq: int,
     summary_path = os.path.join(outdir, "summary.md")
     with open(summary_path, "w") as f:
         f.write("# Perf Profiling Summary\n\n")
-        f.write(f"Generated: {os.popen('date').read().strip()}\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Host: {host}\n")
         f.write(f"Runner: {runner}\n")
         f.write(f"Sampling frequency: {freq} Hz (cpu-clock)\n\n")
@@ -585,7 +592,8 @@ def main():
     )
     parser.add_argument("--host", help="Banana Pi IP")
     parser.add_argument("--user", default="root", help="SSH username")
-    parser.add_argument("--password", help="SSH password")
+    parser.add_argument("--password", default=os.environ.get("RVFUSE_SSH_PASSWORD"),
+                        help="SSH password (or set RVFUSE_SSH_PASSWORD env var)")
     parser.add_argument("--port", type=int, default=22, help="SSH port")
     parser.add_argument("--runner", help="Local path to inference binary")
     parser.add_argument("--models", nargs="+",
