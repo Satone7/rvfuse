@@ -1,5 +1,5 @@
 ---
-name: perf-scalar-profiling
+name: perf-profiling
 description: |
   Profile RISC-V inference workloads on real hardware (Banana Pi) using Linux perf.
   Uploads cross-compiled binaries, shared libraries, sysroot, and models from the
