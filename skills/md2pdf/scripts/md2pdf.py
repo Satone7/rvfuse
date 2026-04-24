@@ -163,19 +163,54 @@ def _font_wrap(text):
     return ''.join(out)
 
 def _scan_unsupported_formats(md_text):
-    """Scan markdown for italic/strikethrough markers that bundled fonts cannot render."""
-    issues = []
-    # Italic: *text* but not **text** or ***
-    for m in re.finditer(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', md_text):
-        if not re.match(r'^\*\*.*\*\*$', m.group(0)):  # exclude bold
-            issues.append(("italic", m.group(0)))
-    # Strikethrough: ~~text~~
+    """Scan markdown for italic/strikethrough markers that bundled fonts cannot render.
+
+    Returns tuple: (confirmed_issues, uncertain_matches)
+    - confirmed_issues: definite formatting markers (need font handling)
+    - uncertain_matches: need agent judgment (could be math expressions)
+    """
+    confirmed = []
+    uncertain = []
+
+    # Pattern for single-star italic: *text*
+    # Captures the content between stars
+    italic_pattern = r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)'
+
+    for m in re.finditer(italic_pattern, md_text):
+        content = m.group(1)
+        full_match = m.group(0)
+
+        # Skip if it looks like **text** (bold)
+        if full_match.startswith('**') or full_match.endswith('**'):
+            continue
+
+        # Heuristic: detect math expressions vs text
+        # Math indicators: contains digits, operators (+,-,=,/,×), or looks like formula
+        math_chars = set('0123456789+-=/×÷^')
+        has_digit = any(c.isdigit() for c in content)
+        has_math_op = any(c in '+-/=^' for c in content)
+        # Check if content is mostly alphanumeric formula (e.g., "a0*b0")
+        # vs actual text (words with letters only)
+
+        # Likely math expression: has digit and math operator, or pattern like "var*var"
+        if has_digit or has_math_op:
+            # Additional check: if it looks like multiplication (e.g., a0*b0)
+            # Pattern: letter/digit followed by content ending with letter/digit
+            # and contains mathematical structure
+            uncertain.append(("italic?", full_match, content, m.start()))
+        else:
+            # Pure text - definitely italic marker
+            confirmed.append(("italic", full_match))
+
+    # Strikethrough: ~~text~~ - these are definite
     for m in re.finditer(r'~~(.+?)~~', md_text):
-        issues.append(("strikethrough", m.group(0)))
-    # Bold italic: ***text***
+        confirmed.append(("strikethrough", m.group(0)))
+
+    # Bold italic: ***text*** - definite
     for m in re.finditer(r'\*\*\*(.+?)\*\*\*', md_text):
-        issues.append(("bold italic", m.group(0)))
-    return issues
+        confirmed.append(("bold italic", m.group(0)))
+
+    return confirmed, uncertain
 
 # ═══════════════════════════════════════════════════════════════════════
 # MARKDOWN ESCAPE + INLINE
@@ -507,13 +542,37 @@ def main():
         if not os.path.exists(os.path.join(_FONT_DIR, "LXGWWenKaiGB-Regular.ttf")):
             print("OK: bundled font not found, system fonts will be used")
             sys.exit(0)
-        issues = _scan_unsupported_formats(md_text)
-        if not issues:
+        confirmed, uncertain = _scan_unsupported_formats(md_text)
+
+        # If only confirmed issues (no uncertain), output simple result
+        if confirmed and not uncertain:
+            types = sorted(set(t for t, _ in confirmed))
+            for t in types:
+                samples = [s for tt, s in confirmed if tt == t][:2]
+                print(f"WARN:{t}:{','.join(samples)}")
+            sys.exit(1)
+
+        # If uncertain matches exist, output for agent judgment
+        if uncertain:
+            print("UNCERTAIN: following matches need judgment (may be math expressions):")
+            for typ, full, content, pos in uncertain:
+                # Show context: line number and surrounding text
+                lines_before = md_text[:pos].split('\n')
+                line_num = len(lines_before)
+                line_text = lines_before[-1] if lines_before else ""
+                print(f"  line {line_num}: {full}")
+                print(f"    content: '{content}'")
+            sys.exit(2)  # Special exit code for "need judgment"
+
+        # No issues at all
+        if not confirmed and not uncertain:
             print("OK: no unsupported format markers found")
             sys.exit(0)
-        types = sorted(set(t for t, _ in issues))
+
+        # Has confirmed issues
+        types = sorted(set(t for t, _ in confirmed))
         for t in types:
-            samples = [s for tt, s in issues if tt == t][:2]
+            samples = [s for tt, s in confirmed if tt == t][:2]
             print(f"WARN:{t}:{','.join(samples)}")
         sys.exit(1)
 

@@ -28,6 +28,11 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv")
 SET(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
 SET(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=lld")
 
+# Debug symbols: preserved for profiling and debugging (DFG analysis, BBV).
+# Symbols allow analyze_bbv.py to resolve addresses to function names.
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
 SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
