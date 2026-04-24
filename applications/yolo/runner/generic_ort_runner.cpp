@@ -39,10 +39,6 @@ int main(int argc, char* argv[]) {
     auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
     auto input_shape = input_tensor_info.GetShape();
     ONNXTensorElementDataType input_type = input_tensor_info.GetElementType();
-    if (input_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-        std::cerr << "Warning: input type is not float (type="
-                  << static_cast<int>(input_type) << "), attempting float cast" << std::endl;
-    }
 
     // Print input info
     std::cout << "Input: " << input_name << " shape=[";
@@ -65,19 +61,65 @@ int main(int argc, char* argv[]) {
     std::string output_name = output_name_ptr.get();
     std::cout << "Output: " << output_name << std::endl;
 
-    // Generate random input data
-    std::vector<float> input_data(total_elements);
-    std::mt19937 gen(42);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    for (auto& v : input_data) {
-        v = dist(gen);
-    }
-
-    // Create input tensor
+    // Generate random input data and create tensor matching the model's input type
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, input_data.data(), total_elements,
-        input_shape.data(), input_shape.size());
+    std::mt19937 gen(42);
+    Ort::Value input_tensor = [&]() -> Ort::Value {
+        switch (input_type) {
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: {
+                std::vector<float> data(total_elements);
+                std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+                for (auto& v : data) v = dist(gen);
+                return Ort::Value::CreateTensor<float>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE: {
+                std::vector<double> data(total_elements);
+                std::uniform_real_distribution<double> dist(0.0, 1.0);
+                for (auto& v : data) v = dist(gen);
+                return Ort::Value::CreateTensor<double>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: {
+                std::vector<int8_t> data(total_elements);
+                std::uniform_int_distribution<int> dist(0, 127);
+                for (auto& v : data) v = static_cast<int8_t>(dist(gen));
+                return Ort::Value::CreateTensor<int8_t>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: {
+                std::vector<uint8_t> data(total_elements);
+                std::uniform_int_distribution<int> dist(0, 255);
+                for (auto& v : data) v = static_cast<uint8_t>(dist(gen));
+                return Ort::Value::CreateTensor<uint8_t>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: {
+                std::vector<int32_t> data(total_elements);
+                std::uniform_int_distribution<int32_t> dist(0, 100);
+                for (auto& v : data) v = dist(gen);
+                return Ort::Value::CreateTensor<int32_t>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: {
+                std::vector<int64_t> data(total_elements);
+                std::uniform_int_distribution<int64_t> dist(0, 100);
+                for (auto& v : data) v = dist(gen);
+                return Ort::Value::CreateTensor<int64_t>(
+                    memory_info, data.data(), total_elements,
+                    input_shape.data(), input_shape.size());
+            }
+            default:
+                std::cerr << "Error: unsupported input type " << static_cast<int>(input_type)
+                          << ". Supported: float, double, int8, uint8, int32, int64." << std::endl;
+                std::exit(1);
+        }
+    }();
 
     // Warm-up run
     std::cout << "Warm-up run..." << std::endl;

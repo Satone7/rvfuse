@@ -126,7 +126,7 @@ MODEL_REGISTRY = {
 }
 
 
-def list_available_models():
+def list_available_models() -> None:
     """Print all models in the registry."""
     print("Available models (short name → download):")
     print(f"  {'Name':<22s} {'Framework':<8s} {'Description'}")
@@ -312,7 +312,7 @@ def sftp_upload(ssh: paramiko.SSHClient, local: str, remote: str) -> None:
     sftp.close()
 
 
-def sftp_upload_file(sftp, local: str, remote: str) -> None:
+def sftp_upload_file(sftp: paramiko.SFTPClient, local: str, remote: str) -> None:
     remote_dir = os.path.dirname(remote)
     try:
         sftp.stat(remote_dir)
@@ -328,7 +328,7 @@ def sftp_upload_file(sftp, local: str, remote: str) -> None:
             pass
 
 
-def _sftp_mkdir_p(sftp, path):
+def _sftp_mkdir_p(sftp: paramiko.SFTPClient, path: str) -> None:
     parts = path.split("/")
     current = ""
     for part in parts:
@@ -593,7 +593,8 @@ def main():
     parser.add_argument("--host", help="Banana Pi IP")
     parser.add_argument("--user", default="root", help="SSH username")
     parser.add_argument("--password", default=os.environ.get("RVFUSE_SSH_PASSWORD"),
-                        help="SSH password (or set RVFUSE_SSH_PASSWORD env var)")
+                        help="SSH password (prefer RVFUSE_SSH_PASSWORD env var to avoid "
+                             "exposing in shell history / ps)")
     parser.add_argument("--port", type=int, default=22, help="SSH port")
     parser.add_argument("--runner", help="Local path to inference binary")
     parser.add_argument("--models", nargs="+",
