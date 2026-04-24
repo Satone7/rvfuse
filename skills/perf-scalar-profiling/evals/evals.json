@@ -1,0 +1,29 @@
+{
+  "skill_name": "perf-scalar-profiling",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想在香蕉派上对 ResNet50 做 perf profiling，用 generic_ort_runner 跑 30 次迭代，采样 999Hz。板子 IP 是 192.168.1.22，密码 bianbu。",
+      "expected_output": "Agent runs: python3 tools/perf_scalar_profile.py --host 192.168.1.22 --user root --password bianbu --remote-dir /root/ort-perf --runner output/cross-ort/generic_ort_runner --libs output/cross-ort/lib --sysroot output/cross-ort/sysroot --models output/models/resnet50.onnx --iterations 30 --freq 999 --outdir output/perf/ort. Explains the upload-profile-download workflow. Auto-detects framework as 'ort' from .onnx extension.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "帮我对 ResNet50、MobileNetV2 两个模型做批量 perf profiling，对比热点函数。香蕉派 192.168.1.22，密码 bianbu。",
+      "expected_output": "Agent runs perf_scalar_profile.py with --models resnet50.onnx mobilenetv2.onnx --iterations 30 --freq 999. Reads the generated summary.md and compares top functions, IPC, and cycles across models. Identifies shared hot functions as priority fusion targets. Notes cpu-clock event is used for RISC-V.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "帮我对 Qwen2.5-0.5B-Q4_0.gguf 用 llama.cpp 做 perf profiling，prompt 是 'Hello world'，生成 128 tokens。香蕉派 192.168.1.22。",
+      "expected_output": "Agent runs: python3 tools/perf_scalar_profile.py --host 192.168.1.22 --user root --password bianbu --runner output/llama.cpp/bin/llama-cli --libs output/llama.cpp/lib --sysroot output/llama.cpp/sysroot --models Qwen2.5-0.5B-Q4_0.gguf --input '-p \"Hello world\" -n 128' --outdir output/perf/llama. Auto-detects framework as 'llama' from .gguf extension. Builds llama-cli command with -m flag.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "我从 perf annotate 里看到一段热点汇编，连续的 ld + addw + sw 占了 30% 的采样，这是什么类型的 fusion 候选？还有 mulw + addw 的链式组合占了 25%，这两种哪个收益更大？",
+      "expected_output": "Agent identifies: (1) ld+addw+sw as load-compute-store (memory-ALU fusion) pattern, (2) mulw+addw as multiply-accumulate chain (MAC fusion) pattern. Explains both are high-value candidates. Compares: MAC fusion likely has higher benefit because multiply has longer latency and MAC is common in CNN kernels. Recommends profiling more models to see if both patterns appear consistently across workloads.",
+      "files": []
+    }
+  ]
+}

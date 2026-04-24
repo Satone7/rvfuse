@@ -191,7 +191,7 @@ cross_compile() {
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -G Ninja \
             && ninja -j${JOBS} \
-            && ninja install/strip
+            && ninja install
         "
 
     info "ONNX Runtime cross-compiled to ${ort_install}"

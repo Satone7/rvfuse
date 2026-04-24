@@ -162,8 +162,10 @@ Copy the build.sh skeleton to `applications/<name>/build.sh` and customize:
        -DCMAKE_INSTALL_PREFIX="${install_dir}" \
        -DCMAKE_BUILD_TYPE=Release -G Ninja
    ninja -C "${build_dir}" -j"${JOBS}"
-   ninja -C "${build_dir}" install/strip
+   ninja -C "${build_dir}" install
    ```
+   Note: Use `install` (not `install/strip`) to preserve debug symbols for
+   profiling and DFG analysis. The toolchain file includes `-g` flags.
 
    **Autotools** (configure.ac / autogen.sh present):
    ```bash
@@ -273,10 +275,21 @@ cd applications/<name> && ./build.sh --skip-sysroot
 ```bash
 file output/<name>/bin/<binary>
 # Expected: ELF 64-bit LSB executable, UCB RISC-V, ...
+
+# Verify debug symbols are preserved (needed for profiling and DFG analysis)
+readelf -S output/<name>/bin/<binary> | grep -E '\.debug_info|\.debug_line'
+# Expected: at least .debug_info section present
+
+# Or check for symbol names (sufficient for basic profiling)
+nm output/<name>/bin/<binary> | head -20
+# Expected: function symbols visible (e.g., main, application-specific functions)
 ```
 
 If output shows x86-64 or a different architecture, the cross-compilation failed.
 Re-check the toolchain file and environment variables.
+
+If debug symbols are missing, verify the toolchain file includes `-g` flags and
+build.sh uses `install` (not `install/strip`).
 
 ### 3.4 Build Gate
 
@@ -293,6 +306,10 @@ file output/<name>/bin/<binary> | grep -q "ld-linux-riscv64"
 
 # Sysroot has the dynamic linker
 test -f output/<name>/sysroot/lib/ld-linux-riscv64-lp64d.so.1
+
+# Debug symbols are present (required for BBV profiling and DFG analysis)
+readelf -S output/<name>/bin/<binary> | grep -q '.debug_info'
+# If missing, check toolchain file has -g flags and build.sh uses install (not install/strip)
 ```
 
 If the binary is not RISC-V ELF, stop and re-check the toolchain `-march` flag and
@@ -362,8 +379,10 @@ After completing all 4 phases, verify:
 ```
 - [ ] applications/<name>/build.sh exists, is executable, has set -euo pipefail
 - [ ] riscv64-linux-toolchain.cmake uses $ENV{LLVM_INSTALL} and $ENV{SYSROOT}
+- [ ] riscv64-linux-toolchain.cmake includes -g flags for debug symbols
 - [ ] Sysroot contains lib/ld-linux-riscv64-lp64d.so.1
 - [ ] Build output is RISC-V ELF (file command confirms)
+- [ ] Binary has debug symbols (readelf -S shows .debug_info, or nm shows symbols)
 - [ ] QEMU can run the binary
 - [ ] ZVL flags match QEMU -cpu vlen (if applicable)
 - [ ] README.md has Application Profile
