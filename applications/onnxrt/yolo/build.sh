@@ -47,7 +47,7 @@ check_prerequisites
 COMMON_FLAGS=(
     --target=riscv64-unknown-linux-gnu
     --sysroot="${OUTPUT_DIR}/sysroot"
-    -march=rv64gcv
+    -march=rv64gcv_zvl256b
     -isystem "${OUTPUT_DIR}/sysroot/usr/include/riscv64-linux-gnu"
     -std=c++17
     -O2

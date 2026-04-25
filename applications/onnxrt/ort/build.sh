@@ -204,33 +204,36 @@ cross_compile() {
     local ort_install="${OUTPUT_DIR}"
     local sysroot="${OUTPUT_DIR}/sysroot"
 
-    if [[ "${FORCE}" != "true" && -d "${ort_install}/lib" ]]; then
-        info "ORT already built at ${ort_install}. Use --force to rebuild."
-        return 0
-    fi
-
     [ -d "${ORT_SOURCE}/cmake" ] || error "ORT source not found at ${ORT_SOURCE}. Run without --skip-source."
     [ -d "${sysroot}/usr" ] || error "Sysroot not found at ${sysroot}. Run without --skip-sysroot."
-
-    info "Cross-compiling ONNX Runtime v${ONNXRUNTIME_VERSION} (full build, rv64gcv)..."
-    rm -rf "${ort_build}"
-    mkdir -p "${ort_build}" "${ort_install}"
 
     export LLVM_INSTALL="${LLVM_INSTALL}"
     export SYSROOT="${sysroot}"
 
-    cmake -S "${ORT_SOURCE}/cmake" -B "${ort_build}" \
-        -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
-        -DCMAKE_INSTALL_PREFIX="${ort_install}" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -Donnxruntime_BUILD_SHARED_LIB=ON \
-        -Donnxruntime_BUILD_UNIT_TESTS=OFF \
-        -Donnxruntime_DISABLE_RTTI=ON \
-        -DFETCHCONTENT_SOURCE_DIR_EIGEN="${EIGEN_SOURCE}" \
-        -DCMAKE_CXX_FLAGS='-Wno-stringop-overflow -Wno-unknown-warning-option' \
-        -DIconv_IS_BUILT_IN=TRUE \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-        -G Ninja
+    if [[ "${FORCE}" == "true" ]]; then
+        info "Force rebuild requested. Cleaning build directory..."
+        rm -rf "${ort_build}"
+    fi
+
+    if [ -d "${ort_build}" ]; then
+        info "Incremental build: reusing existing build directory..."
+    else
+        info "Cross-compiling ONNX Runtime v${ONNXRUNTIME_VERSION} (full build, rv64gcv)..."
+        mkdir -p "${ort_build}" "${ort_install}"
+
+        cmake -S "${ORT_SOURCE}/cmake" -B "${ort_build}" \
+            -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
+            -DCMAKE_INSTALL_PREFIX="${ort_install}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Donnxruntime_BUILD_SHARED_LIB=ON \
+            -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+            -Donnxruntime_DISABLE_RTTI=ON \
+            -DFETCHCONTENT_SOURCE_DIR_EIGEN="${EIGEN_SOURCE}" \
+            -DCMAKE_CXX_FLAGS='-Wno-stringop-overflow -Wno-unknown-warning-option' \
+            -DIconv_IS_BUILT_IN=TRUE \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -G Ninja
+    fi
 
     info "Building (ninja -j${JOBS})..."
     ninja -C "${ort_build}" -j"${JOBS}"
@@ -255,12 +258,6 @@ install_ort_to_sysroot() {
 
     if [ ! -f "${ort_so}" ]; then
         error "libonnxruntime.so not found at ${ort_so}"
-    fi
-
-    # Already installed?
-    if [[ "${FORCE}" != "true" && -f "${sysroot_lib}/libonnxruntime.so.1.24.4" ]]; then
-        info "ORT already in sysroot. Use --force to reinstall."
-        return 0
     fi
 
     info "Installing libonnxruntime.so into sysroot..."

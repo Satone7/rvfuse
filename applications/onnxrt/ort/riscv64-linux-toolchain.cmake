@@ -17,9 +17,9 @@ SET(CMAKE_FIND_ROOT_PATH $ENV{SYSROOT})
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -isystem ${CMAKE_SYSROOT}/usr/include/riscv64-linux-gnu")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${CMAKE_SYSROOT}/usr/include/riscv64-linux-gnu")
 
-# Enable RVV 1.0 auto-vectorization (LLVM 22)
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=rv64gcv")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv")
+# Enable RVV 1.0 with VLEN=256 for Banana Pi K1 (SpacemiT K1, zvl256b)
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=rv64gcv_zvl256b")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv_zvl256b")
 
 # Use lld for linking (no GCC cross-compiler dependency).
 # Previous c920-onnxrt toolchain used GCC's ld to work around R_RISCV_ALIGN
