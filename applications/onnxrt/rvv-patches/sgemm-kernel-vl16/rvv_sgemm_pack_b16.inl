@@ -18,7 +18,10 @@
 
 #if defined(MLAS_TARGET_RISCV)
 
-inline void
+// NOT inline - must be emitted in object file for platform.cpp dispatch.
+// extern "C" required for C linkage matching declaration in mlasi.h.
+extern "C"
+void
 MLASCALL
 MlasSgemmPackB16(
     float* D,
