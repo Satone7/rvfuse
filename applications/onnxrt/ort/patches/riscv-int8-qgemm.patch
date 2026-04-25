@@ -1,0 +1,309 @@
+diff --git a/onnxruntime/core/mlas/inc/mlas.h b/onnxruntime/core/mlas/inc/mlas.h
+index db7ec28..619bc02 100644
+--- a/onnxruntime/core/mlas/inc/mlas.h
++++ b/onnxruntime/core/mlas/inc/mlas.h
+@@ -79,6 +79,9 @@ Abstract:
+ #if defined(__loongarch64)
+ #define MLAS_TARGET_LARCH64
+ #endif
++#if defined(__riscv) && defined(__riscv_v)
++#define MLAS_TARGET_RISCV
++#endif
+ //
+ // Define the support levels for the target architecture.
+ //
+diff --git a/onnxruntime/core/mlas/lib/mlasi.h b/onnxruntime/core/mlas/lib/mlasi.h
+index ac75288..ded322c 100644
+--- a/onnxruntime/core/mlas/lib/mlasi.h
++++ b/onnxruntime/core/mlas/lib/mlasi.h
+@@ -352,7 +352,8 @@ static_assert(sizeof(MLAS_FP16) == FP16_SIZE);
+ //
+ 
+ #if defined(MLAS_TARGET_AMD64_IX86) || defined(MLAS_TARGET_POWER) || \
+-    defined(MLAS_TARGET_LARCH64) || defined(MLAS_TARGET_S390X)
++    defined(MLAS_TARGET_LARCH64) || defined(MLAS_TARGET_S390X) || \
++    defined(MLAS_TARGET_RISCV)
+ 
+ typedef
+ size_t
+@@ -960,6 +961,21 @@ extern "C" {
+     MLAS_REDUCE_MAXIMUM_FLOAT_KERNEL MlasReduceMaximumF32KernelLasx;
+     MLAS_COMPUTE_SOFTMAX_OUTPUT_FLOAT_KERNEL MlasComputeSoftmaxOutputF32KernelLasx;
+     MLAS_COMPUTE_LOGSOFTMAX_OUTPUT_FLOAT_KERNEL MlasComputeLogSoftmaxOutputF32KernelLasx;
++#elif defined(MLAS_TARGET_RISCV)
++    // RISC-V uses scalar kernels without ZeroMode parameter
++    typedef size_t (MLASCALL MLAS_GEMM_FLOAT_KERNEL_RISCV)(
++        const float* A,
++        const float* B,
++        float* C,
++        size_t CountK,
++        size_t CountM,
++        size_t CountN,
++        size_t lda,
++        size_t ldc,
++        float alpha
++        );
++    MLAS_GEMM_FLOAT_KERNEL_RISCV MlasSgemmKernelZero;
++    MLAS_GEMM_FLOAT_KERNEL_RISCV MlasSgemmKernelAdd;
+ #else
+     MLAS_GEMM_FLOAT_KERNEL MlasSgemmKernelZero;
+     MLAS_GEMM_FLOAT_KERNEL MlasSgemmKernelAdd;
+@@ -1391,6 +1407,13 @@ struct MLAS_PLATFORM {
+     MLAS_POOL_FLOAT_KERNEL* PoolFloatKernel[MlasPoolingKindCount];
+     uint32_t NchwcBlockSize;
+ #endif
++#endif
++#if defined(MLAS_TARGET_RISCV)
++    MLAS_GEMM_FLOAT_KERNEL* GemmFloatKernel;
++    const MLAS_GEMM_QUANT_DISPATCH* GemmU8U8Dispatch;
++    const MLAS_GEMM_QUANT_DISPATCH* GemmS8U8Dispatch;
++    const MLAS_GEMM_QUANT_DISPATCH* GemmU8S8Dispatch;
++    const MLAS_GEMM_QUANT_DISPATCH* GemmS8S8Dispatch;
+ #endif
+     const MLAS_SYMM_QGEMM_DISPATCH* SymmQgemmDispatch{nullptr};
+ 
+diff --git a/onnxruntime/core/mlas/lib/platform.cpp b/onnxruntime/core/mlas/lib/platform.cpp
+index 6ebd6be..8035ede 100644
+--- a/onnxruntime/core/mlas/lib/platform.cpp
++++ b/onnxruntime/core/mlas/lib/platform.cpp
+@@ -234,6 +234,33 @@ MLAS_INTERNAL_DATA MLAS_DECLSPEC_ALIGN(const uint32_t MlasMaskMoveTableLasx[16],
+ };
+ 
+ #endif
++
++#if defined(MLAS_TARGET_RISCV)
++//
++// RISC-V wrapper for scalar SGEMM kernels to match MLAS_GEMM_FLOAT_KERNEL signature
++//
++static size_t MLASCALL
++MlasGemmFloatKernelRiscv(
++    const float* A,
++    const float* B,
++    float* C,
++    size_t CountK,
++    size_t CountM,
++    size_t CountN,
++    size_t lda,
++    size_t ldc,
++    float alpha,
++    bool ZeroMode
++)
++{
++    if (ZeroMode) {
++        return MlasSgemmKernelZero(A, B, C, CountK, CountM, CountN, lda, ldc, alpha);
++    } else {
++        return MlasSgemmKernelAdd(A, B, C, CountK, CountM, CountN, lda, ldc, alpha);
++    }
++}
++#endif
++
+ MLAS_PLATFORM::MLAS_PLATFORM(
+     void
+     )
+@@ -792,6 +819,20 @@ Return Value:
+ 
+ #endif // MLAS_TARGET_LARCH64
+ 
++#if defined(MLAS_TARGET_RISCV)
++
++    //
++    // Use scalar kernels for RISC-V (compatible with any VLEN configuration)
++    //
++
++    this->GemmFloatKernel = MlasGemmFloatKernelRiscv;
++    this->GemmU8U8Dispatch = &MlasGemmQuantDispatchDefault;
++    this->GemmS8U8Dispatch = &MlasGemmQuantDispatchDefault;
++    this->GemmU8S8Dispatch = &MlasGemmQuantDispatchDefault;
++    this->GemmS8S8Dispatch = &MlasGemmQuantDispatchDefault;
++
++#endif // MLAS_TARGET_RISCV
++
+ }
+ 
+ size_t
+diff --git a/onnxruntime/core/mlas/lib/q4gemm.h b/onnxruntime/core/mlas/lib/q4gemm.h
+index 89528fd..db4751a 100644
+--- a/onnxruntime/core/mlas/lib/q4gemm.h
++++ b/onnxruntime/core/mlas/lib/q4gemm.h
+@@ -126,7 +126,7 @@ MlasQ4GemmOperation(
+ 
+         size_t RowsRemaining = RangeCountM;
+         while (RowsRemaining > 0) {
+-#if defined(MLAS_TARGET_AMD64_IX86) || defined(MLAS_TARGET_POWER) || defined(MLAS_TARGET_LARCH64) || defined(MLAS_TARGET_S390X)
++#if defined(MLAS_TARGET_AMD64_IX86) || defined(MLAS_TARGET_POWER) || defined(MLAS_TARGET_LARCH64) || defined(MLAS_TARGET_S390X) || defined(MLAS_TARGET_RISCV)
+             auto RowsHandled = GetMlasPlatform().GemmFloatKernel(
+                 a_row, dequant_b, c_blk, K, RowsRemaining, CountN, lda, ldc, 1.f, true);
+ #else
+diff --git a/onnxruntime/core/mlas/lib/qgemm.h b/onnxruntime/core/mlas/lib/qgemm.h
+index b2b0be9..96cf8f2 100644
+--- a/onnxruntime/core/mlas/lib/qgemm.h
++++ b/onnxruntime/core/mlas/lib/qgemm.h
+@@ -916,6 +916,14 @@ MlasGemmQuantGetDispatch(
+     if (GetMlasPlatform().GemmU8X8Dispatch == &MlasGemm8X8DispatchZVECTOR) {
+         GemmQuantDispatch = GetMlasPlatform().GemmU8X8Dispatch;
+     }
++#elif defined(MLAS_TARGET_RISCV)
++    if (AIsSigned) {
++        GemmQuantDispatch =
++            BIsSigned ? GetMlasPlatform().GemmS8S8Dispatch : GetMlasPlatform().GemmS8U8Dispatch;
++    } else {
++        GemmQuantDispatch =
++            BIsSigned ? GetMlasPlatform().GemmU8S8Dispatch : GetMlasPlatform().GemmU8U8Dispatch;
++    }
+ #endif
+ #endif // !defined(FORCE_GENERIC_ALGORITHMS)
+ 
+diff --git a/onnxruntime/core/mlas/lib/scalar/SgemmKernelScalar.cpp b/onnxruntime/core/mlas/lib/scalar/SgemmKernelScalar.cpp
+index cbec5d8..5208b1f 100644
+--- a/onnxruntime/core/mlas/lib/scalar/SgemmKernelScalar.cpp
++++ b/onnxruntime/core/mlas/lib/scalar/SgemmKernelScalar.cpp
+@@ -371,6 +371,8 @@ Return Value:
+     return RowsHandled;
+ }
+ 
++extern "C" {
++
+ size_t
+ MLASCALL
+ MlasSgemmKernelZero(
+@@ -478,3 +480,5 @@ Return Value:
+ {
+     return MlasSgemmKernel<false>(A, B, C, CountK, CountM, CountN, lda, ldc, alpha);
+ }
++
++}  // extern "C"
+diff --git a/onnxruntime/core/mlas/lib/sgemm.cpp b/onnxruntime/core/mlas/lib/sgemm.cpp
+index 7117f20..3e30899 100644
+--- a/onnxruntime/core/mlas/lib/sgemm.cpp
++++ b/onnxruntime/core/mlas/lib/sgemm.cpp
+@@ -1061,7 +1061,7 @@ Return Value:
+ 
+         size_t RowsHandled;
+ 
+-#if (defined(MLAS_TARGET_AMD64_IX86) || defined(MLAS_TARGET_POWER) || defined(MLAS_TARGET_S390X) || defined(MLAS_TARGET_LARCH64)) && !defined(FORCE_GENERIC_ALGORITHMS)
++#if (defined(MLAS_TARGET_AMD64_IX86) || defined(MLAS_TARGET_POWER) || defined(MLAS_TARGET_S390X) || defined(MLAS_TARGET_LARCH64) || defined(MLAS_TARGET_RISCV)) && !defined(FORCE_GENERIC_ALGORITHMS)
+         RowsHandled = GetMlasPlatform().GemmFloatKernel(A, B, C, CountK, CountM, CountN, lda, ldc, alpha, ZeroMode);
+ #else
+         if (ZeroMode) {
+diff --git a/onnxruntime/core/mlas/lib/threading.cpp b/onnxruntime/core/mlas/lib/threading.cpp
+index dc5daf9..0d85ffb 100644
+--- a/onnxruntime/core/mlas/lib/threading.cpp
++++ b/onnxruntime/core/mlas/lib/threading.cpp
+@@ -12,6 +12,9 @@ Abstract:
+ 
+     This module implements platform specific threading support.
+ 
++    Modified for RISC-V: Force all parallel work to run serially on the
++    calling thread to avoid thread_local buffer issues (ThreadedBufHolder).
++
+ --*/
+ 
+ #include "mlasi.h"
+@@ -24,37 +27,14 @@ MlasExecuteThreaded(
+     MLAS_THREADPOOL* ThreadPool
+     )
+ {
+-    //
+-    // Execute the routine directly if only one iteration is specified.
+-    //
+-
+-    if (Iterations == 1) {
+-        ThreadedRoutine(Context, 0);
+-        return;
+-    }
+-
+-#if defined(BUILD_MLAS_NO_ONNXRUNTIME)
+     MLAS_UNREFERENCED_PARAMETER(ThreadPool);
+ 
+-    //
+-    // Fallback to OpenMP or a serialized implementation.
+-    //
+-
+     //
+     // Execute the routine for the specified number of iterations.
+     //
+     for (ptrdiff_t tid = 0; tid < Iterations; tid++) {
+         ThreadedRoutine(Context, tid);
+     }
+-#else
+-    //
+-    // Schedule the threaded iterations using the thread pool object.
+-    //
+-
+-    MLAS_THREADPOOL::TrySimpleParallelFor(ThreadPool, Iterations, [&](ptrdiff_t tid) {
+-        ThreadedRoutine(Context, tid);
+-    });
+-#endif
+ }
+ 
+ 
+@@ -64,34 +44,14 @@ MlasTrySimpleParallel(
+     const std::ptrdiff_t Iterations,
+     const std::function<void(std::ptrdiff_t tid)>& Work)
+ {
+-    //
+-    // Execute the routine directly if only one iteration is specified.
+-    //
+-    if (Iterations == 1) {
+-        Work(0);
+-        return;
+-    }
+-
+-#if defined(BUILD_MLAS_NO_ONNXRUNTIME)
+     MLAS_UNREFERENCED_PARAMETER(ThreadPool);
+ 
+-    //
+-    // Fallback to OpenMP or a serialized implementation.
+-    //
+-
+     //
+     // Execute the routine for the specified number of iterations.
+     //
+     for (ptrdiff_t tid = 0; tid < Iterations; tid++) {
+         Work(tid);
+     }
+-#else
+-    //
+-    // Schedule the threaded iterations using the thread pool object.
+-    //
+-
+-    MLAS_THREADPOOL::TrySimpleParallelFor(ThreadPool, Iterations, Work);
+-#endif
+ }
+ 
+ 
+@@ -101,33 +61,12 @@ MlasTryBatchParallel(
+ 	const std::ptrdiff_t Iterations,
+ 	const std::function<void(std::ptrdiff_t tid)>& Work)
+ {
+-    //
+-    // Execute the routine directly if only one iteration is specified.
+-    //
+-    if (Iterations == 1) {
+-        Work(0);
+-        return;
+-    }
+-
+-#if defined(BUILD_MLAS_NO_ONNXRUNTIME)
+     MLAS_UNREFERENCED_PARAMETER(ThreadPool);
+ 
+-    //
+-    // Fallback to OpenMP or a serialized implementation.
+-    //
+-
+     //
+     // Execute the routine for the specified number of iterations.
+     //
+     for (ptrdiff_t tid = 0; tid < Iterations; tid++) {
+         Work(tid);
+     }
+-#else
+-    //
+-    // Schedule the threaded iterations using the thread pool object.
+-    //
+-
+-    MLAS_THREADPOOL::TryBatchParallelFor(ThreadPool, Iterations, Work, 0);
+-#endif
+-
+ }
+\ No newline at end of file
