@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "ort-perf");
     Ort::SessionOptions session_options;
     session_options.SetIntraOpNumThreads(1);
-    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
     std::cout << "Loading model: " << model_path << std::endl;
     Ort::Session session(env, model_path, session_options);

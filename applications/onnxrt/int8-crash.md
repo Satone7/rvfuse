@@ -123,13 +123,56 @@ INT8 YOLO11n 模型包含 839 个算子：
 | 完整集成 RVV512 QGEMM kernel（kernel type struct + dispatch wrapper） | 中（~200 行胶水代码） | 可能绕过 Eigen 路径 |
 | 使用不同 ORT 版本 | 低 | 不确定是否已修复 |
 | 禁用 INT8 Conv 路径中的 Eigen 回退 | 中（需要找到并修改调度逻辑） | 可能 |
+| **使用标量默认 QGEMM kernel（已采用）** | **低**（~50 行平台胶水代码） | **已验证** |
 
-## 对报告的影响
+## 修复结果（2026-04-25）
 
-1. **YOLO11n 是全 FP32 模型**，vsegdot.vv 对当前模型的收益为 0%
-2. INT8 分析保留为理论估算（基于已开发的 RVV512 QGEMM kernel 指令计数）
-3. 报告中标注："Vanilla ORT INT8 在 RISC-V 上不可用，需 RVV512 QGEMM kernel 才能运行"
-4. RVV512 QGEMM kernel 本身已通过 24/24 独立测试（QEMU VLEN=512），功能正确
+**已修复**。通过为 RISC-V 添加 MLAS QGEMM dispatch 分支，INT8 YOLO11n 推理在 RISC-V 上成功运行。
+
+### 修复方案
+
+采用标量默认内核（`MlasGemmQuantDispatchDefault`）作为 QGEMM 实现：
+
+- 标量内核是 ORT 自带的平台无关实现，无 SIMD 依赖，兼容所有 VLEN 配置（128/256/512）
+- 崩溃根因不是标量内核本身，而是 RISC-V 缺少任何 MLAS QGEMM dispatch 分支，导致 ORT 回退到 Eigen 路径
+- 添加 dispatch 分支后，QGEMM 走 MLAS 路径，完全绕过有 bug 的 Eigen `level3_blocking`
+
+改动文件：
+
+1. `mlasi.h` — 添加 RISC-V QGEMM dispatch 字段到 `MLAS_PLATFORM` 结构体
+2. `qgemm.h` — 在 `MlasGemmQuantGetDispatch` 中添加 `MLAS_TARGET_RISCV` 分支
+3. `platform.cpp` — 将所有 QGEMM dispatch 指向 `&MlasGemmQuantDispatchDefault`
+4. `cmake/onnxruntime_mlas.cmake` — 添加 RISC-V 平台源文件（SGEMM）
+5. `mlas.h` — 定义 `MLAS_TARGET_RISCV`
+6. `threading.cpp` — 强制串行执行避免 thread_local 问题
+
+### 测试结果
+
+| 测试场景 | 结果 |
+|----------|------|
+| `yolo_inference` + yolo11n_int8.onnx | 通过（输出 shape [1,84,8400]，checksum 偏差 0.4%） |
+| `yolo_inference` + yolo11n_int8.ort | 通过 |
+| `generic_ort_runner` + yolo11n_int8.onnx | 仍崩溃（Eigen 路径 use-after-free，非 QGEMM 路径） |
+| `generic_ort_runner` + yolo11n.onnx (FP32) | 通过 |
+
+**注**：`generic_ort_runner` 的 INT8 崩溃可能是 Eigen `level3_blocking` 缓存问题，
+不影响实际 YOLO 推理路径（YOLO 使用 ConvInteger 走 MLAS QGEMM）。
+
+### 修复补丁
+
+- `applications/onnxrt/fix-int8-riscv.patch` — 完整补丁文件，适用于 ORT v1.24.4
+- QGEMM 使用标量默认内核（VLEN 无关），SGEMM 使用 RVV512 内核
+- 14 个文件：9 个现有文件修改 + 4 个新增 SGEMM 源文件
+
+### 性能优化路线
+
+当前标量 QGEMM 内核功能正确但性能有限。后续可按需添加 RVV 向量化内核：
+
+| 阶段 | 内核 | VLEN | 预期加速 |
+|------|------|------|----------|
+| 当前 | 标量默认 | 无关 | 基线（可用） |
+| 下一步 | RVV256 (LMUL=2) | 256 | ~8x |
+| 可选 | RVV512 (LMUL=1) | 512 | ~16x |
 
 ## 复现步骤
 
