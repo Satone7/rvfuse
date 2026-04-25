@@ -1,0 +1,15 @@
+diff --git a/onnxruntime/core/mlas/lib/quantize.cpp b/onnxruntime/core/mlas/lib/quantize.cpp
+index abc1234..def5678 100644
+--- a/onnxruntime/core/mlas/lib/quantize.cpp
++++ b/onnxruntime/core/mlas/lib/quantize.cpp
+@@ -22,6 +22,10 @@
+
+ #include "mlasi.h"
+
++#if defined(MLAS_TARGET_RISCV) && defined(__riscv_v_intrinsic)
++#include "rvv_quantize_linear.inl"
++#endif
++
+ #if defined(MLAS_NEON64_INTRINSICS) || defined(MLAS_SSE2_INTRINSICS) || \
+     defined(MLAS_LSX_INTRINSICS)
+

@@ -23,6 +23,8 @@
 // ---------------------------------------------------------------------------
 // Logistic constants (same as MlasLogisticConstants in logistic.cpp)
 // ---------------------------------------------------------------------------
+#ifndef LOGISTIC_CONSTANTS_DEFINED
+#define LOGISTIC_CONSTANTS_DEFINED
 struct LogisticConstants {
     float LowerRange = -18.0f;
     float UpperRange = 18.0f;
@@ -39,6 +41,7 @@ struct LogisticConstants {
     float beta_0   = 9.93151921023180e-01f;
     float one_half = 0.5f;
 };
+#endif
 
 // =============================================================================
 // RVV implementation: logistic (sigmoid) activation

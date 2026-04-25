@@ -1,0 +1,77 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 232K of event 'cpu-clock'
+# Event count (approx.): 232436436204
+#
+# Children      Self       Samples  Command         Shared Object                Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ........  ............  ..............  ...........................  .........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    74.54%    74.51%        173011  yolo_inference  libonnxruntime.so.1.24.4     [.] void MlasGemmQuantOperation<MLAS_GEMM_QUANT_KERNEL_DEFAULT>(MLAS_GEMM_QUANT_SHAPE_PARAMS const*, MLAS_GEMM_QUANT_DATA_PARAMS const*, unsigned long, unsigned long, unsigned long, unsigned long)
+            |          
+             --74.54%--void MlasGemmQuantOperation<MLAS_GEMM_QUANT_KERNEL_DEFAULT>(MLAS_GEMM_QUANT_SHAPE_PARAMS const*, MLAS_GEMM_QUANT_DATA_PARAMS const*, unsigned long, unsigned long, unsigned long, unsigned long)
+                       |          
+                        --34.57%--void MlasGemmQuantOperation<MLAS_GEMM_QUANT_KERNEL_DEFAULT>(MLAS_GEMM_QUANT_SHAPE_PARAMS const*, MLAS_GEMM_QUANT_DATA_PARAMS const*, unsigned long, unsigned long, unsigned long, unsigned long)
+
+     9.80%     9.80%         22749  yolo_inference  libonnxruntime.so.1.24.4     [.] MlasComputeLogistic(float const*, float*, unsigned long)
+            |          
+             --9.41%--onnxruntime::contrib::QuickGelu<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(long)#1}::operator()(long) const
+                       MlasComputeLogistic(float const*, float*, unsigned long)
+
+     9.42%     0.01%            32  yolo_inference  libonnxruntime.so.1.24.4     [.] onnxruntime::contrib::QuickGelu<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(long)#1}::operator()(long) const
+            |          
+             --9.42%--onnxruntime::contrib::QuickGelu<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(long)#1}::operator()(long) const
+                       |          
+                        --9.41%--MlasComputeLogistic(float const*, float*, unsigned long)
+
+     4.63%     4.63%         10746  yolo_inference  libonnxruntime.so.1.24.4     [.] MlasReduceMinimumMaximumF32Kernel
+            |          
+             --4.63%--MlasReduceMinimumMaximumF32Kernel
+
+     3.34%     0.00%             0  yolo_inference  libonnxruntime.so.1.24.4     [.] onnxruntime::concurrency::ThreadPool::TryParallelFor(onnxruntime::concurrency::ThreadPool*, long, onnxruntime::TensorOpCost const&, std::function<void (long, long)> const&)
+            |
+            ---onnxruntime::concurrency::ThreadPool::TryParallelFor(onnxruntime::concurrency::ThreadPool*, long, onnxruntime::TensorOpCost const&, std::function<void (long, long)> const&)
+               |          
+                --2.94%--void MlasQuantizeLinear<unsigned char>(float const*, unsigned char*, unsigned long, float, unsigned char)
+
+     2.94%     2.94%          6829  yolo_inference  libonnxruntime.so.1.24.4     [.] void MlasQuantizeLinear<unsigned char>(float const*, unsigned char*, unsigned long, float, unsigned char)
+            |          
+             --2.94%--onnxruntime::concurrency::ThreadPool::TryParallelFor(onnxruntime::concurrency::ThreadPool*, long, onnxruntime::TensorOpCost const&, std::function<void (long, long)> const&)
+                       void MlasQuantizeLinear<unsigned char>(float const*, unsigned char*, unsigned long, float, unsigned char)
+
+     1.36%     1.35%          3140  yolo_inference  libonnxruntime.so.1.24.4     [.] onnxruntime::math::Im2col<unsigned char, 2>::operator()(unsigned char const*, long, long, long, long, long, long, long, long, long, long, long, long, long, unsigned char*, unsigned char)
+            |
+            ---onnxruntime::math::Im2col<unsigned char, 2>::operator()(unsigned char const*, long, long, long, long, long, long, long, long, long, long, long, long, long, unsigned char*, unsigned char)
+
+     1.10%     0.01%            21  yolo_inference  libonnxruntime.so.1.24.4     [.] void onnxruntime::BroadcastLooper<onnxruntime::BroadcastHelper>(onnxruntime::BroadcastHelper&, onnxruntime::ProcessBroadcastSpanFuncs const&)
+            |          
+             --1.09%--void onnxruntime::BroadcastLooper<onnxruntime::BroadcastHelper>(onnxruntime::BroadcastHelper&, onnxruntime::ProcessBroadcastSpanFuncs const&)
+                       |          
+                        --0.57%--onnxruntime::Mul<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(onnxruntime::BroadcastHelper&)#2}::__invoke(onnxruntime::BroadcastHelper&)
+
+     0.74%     0.74%          1708  yolo_inference  libonnxruntime.so.1.24.4     [.] void MlasEltwiseMul<float>(float const*, float const*, float*, unsigned long)
+            |
+            ---void MlasEltwiseMul<float>(float const*, float const*, float*, unsigned long)
+
+     0.60%     0.60%          1398  yolo_inference  libonnxruntime.so.1.24.4     [.] $x
+            |          
+             --0.60%--$x
+                       |          
+                        --0.60%--$x
+
+     0.57%     0.56%          1310  yolo_inference  libonnxruntime.so.1.24.4     [.] onnxruntime::Mul<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(onnxruntime::BroadcastHelper&)#2}::__invoke(onnxruntime::BroadcastHelper&)
+            |          
+             --0.56%--void onnxruntime::BroadcastLooper<onnxruntime::BroadcastHelper>(onnxruntime::BroadcastHelper&, onnxruntime::ProcessBroadcastSpanFuncs const&)
+                       onnxruntime::Mul<float>::Compute(onnxruntime::OpKernelContext*) const::{lambda(onnxruntime::BroadcastHelper&)#2}::__invoke(onnxruntime::BroadcastHelper&)
+
+     0.52%     0.52%          1203  yolo_inference  libc.so.6                    [.] memset
+            |          
+             --0.52%--memset
+
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

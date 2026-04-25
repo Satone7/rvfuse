@@ -22,6 +22,7 @@
 // ---------------------------------------------------------------------------
 // Logistic constants (same as MlasLogisticConstants in MLAS)
 // ---------------------------------------------------------------------------
+#define LOGISTIC_CONSTANTS_DEFINED
 struct LogisticConstants {
     float LowerRange = -18.0f;
     float UpperRange = 18.0f;

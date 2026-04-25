@@ -1,0 +1,51 @@
+diff --git a/onnxruntime/core/mlas/lib/compute.cpp b/onnxruntime/core/mlas/lib/compute.cpp
+index a1b2c3d..e4f5g6h 100644
+--- a/onnxruntime/core/mlas/lib/compute.cpp
++++ b/onnxruntime/core/mlas/lib/compute.cpp
+@@ -22,6 +22,11 @@
+
+ #include "mlasi.h"
+ #include "softmax.h"
++
++#if defined(__riscv_v_intrinsic)
++// RVV implementation for reduce-minmax-f32
++#include "rvv_reduce_minmax_f32.inl"
++#endif
+
+ //
+ // Bundles the constants for use by kernels written in assembly.
+@@ -574,6 +579,14 @@
+     return Maximum;
+ }
+
++#if defined(__riscv_v_intrinsic)
++// RVV implementation provided by rvv_reduce_minmax_f32.inl
++// The function MlasReduceMinimumMaximumF32KernelRVV is defined in that file
++// and called from the wrapper below.
++#endif
++
+ void
+ MLASCALL
+ MlasReduceMinimumMaximumF32Kernel(
+@@ -583,6 +596,14 @@
+     size_t N
+     )
+ {
++#if defined(__riscv_v_intrinsic)
++    // Use RVV vectorized implementation
++    MlasReduceMinimumMaximumF32KernelRVV(Input, Min, Max, N);
++    return;
++#else
++    // Scalar/SSE2 fallback implementation
++
+     float tmp_min = std::numeric_limits<float>::max();
+     float tmp_max = std::numeric_limits<float>::lowest();
+
+@@ -650,6 +671,7 @@
+
+     *Min = tmp_min;
+     *Max = tmp_max;
++#endif // __riscv_v_intrinsic
+ }
+
+ void
