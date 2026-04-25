@@ -1,0 +1,34 @@
+# Build artifacts
+*.o
+*.elf
+*.so
+*.a
+build/
+install/
+
+# Output files (BBV profiling results - worktree-specific)
+*.bbv
+*.bb
+*.disas
+*.json
+
+# Test data (large video files)
+*.mp4
+*.avi
+*.mkv
+*.webm
+
+# OpenCV source (managed by build.sh)
+vendor/opencv/
+vendor/opencv_contrib/
+
+# KCFcpp vendor (separate repo, managed by build.sh)
+vendor/KCFcpp/
+
+# Compiled test binaries
+rvv-patches/*/test
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
