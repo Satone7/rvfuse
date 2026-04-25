@@ -483,8 +483,11 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
         switch (state) {
         case STATE_DETECTING:
             detect_target_symbol(tb);
-            return;
-
+            if (state != STATE_RECORDING) {
+                return;
+            }
+            /* Fall through: detection succeeded on this TB, instrument it */
+            /* fall through */
         case STATE_RECORDING:
             if (vaddr < func_start_vaddr || vaddr >= func_end_vaddr) {
                 return;
