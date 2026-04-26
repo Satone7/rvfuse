@@ -5,7 +5,7 @@
 **分析目标**: `MlasReduceMinimumMaximumF32Kernel` — 在float32数组中同时查找最小值和最大值
 **基准实现**: RVV VL=16 (VLEN=512bit, SEW=32bit, LMUL=1)
 **分析平台**: x86 AVX/AVX2, ARM NEON/SVE, LoongArch LASX/LSX, Power VSX (POWER10), S390X Z-Vector, WASM SIMD
-**BBV数据**: 未提供，收益为理论估算（基于MLAS profiling热点占比约4.68%）
+**BBV数据**: 基于QEMU-BBV profiling on 独立测试可执行文件 (output/bbv_rvv512/reduce-minmax-f32/)，收益估算结合BBV热点数据与MLAS profiling热点占比约4.68%
 
 ---
 
@@ -17,9 +17,17 @@
 | P1 | vshufi.vi | LoongArch LSX | 潜在用于数据重排场景 | 低 | RVV无立即数shuffle |
 | P2 | （已废弃） | - | - | - | min/max归约已支持并行 |
 
-**收益计算方式**（无BBV数据，仅BB范围内估算）：
+**收益计算方式**（基于BBV热点数据估算）：
 - BB内收益 = (原BB指令数 - 扩展后BB指令数) / 原BB指令数 × 100%
-- 整体收益需BBV profiling数据支持，建议通过 `./tools/profile_to_dfg.sh` 获取
+- 整体收益 = BB指令减少比例 × 函数执行占比（4.68%，来自perf profiling）
+
+**BBV热点数据**（独立测试，VLEN=512）：
+- 4×展开主循环BB: 18条指令/迭代，3,114次执行
+  指令序列: 4×vle32 → 4×vfmin → 4×vfmax (+ 地址计算)
+- 树形归约BB: 8条指令，40次执行
+  指令序列: 3×vfmin → 3×vfmax
+- 最终归约BB: vfredmin → vfredmax → vfmv.f.s
+- 整体收益估算: BB指令减少比例 × 函数执行占比（4.68%，来自perf profiling）
 
 ---
 
@@ -476,6 +484,12 @@ vfredmin.unordered.vs vd, vs2, vs1
 |------|-----------|--------|------|
 | R1   | 2 Critical + 5 Major + 6 Minor | 13 | 0 |
 | R2   | 5 Minor | 5 | 0 |
+| R3   | 3 | 3 | 0 |
+
+**R3修复内容**：
+1. BBV数据声明更新：从"未提供"改为引用QEMU-BBV profiling数据（output/bbv_rvv512/reduce-minmax-f32/）
+2. 收益计算方式更新：从"无BBV数据"改为基于BBV热点数据估算，含整体收益公式
+3. 新增BBV热点数据章节：4×展开主循环BB、树形归约BB、最终归约BB指令序列及整体收益估算方法
 
 **最终审查结论**：所有问题已修复。报告内容准确，符合RVV规范和平台ISA文档。vfredmin/vfredmax的顺序无关性已正确说明；P2无序归约变体已正确废弃；指令计数和收益百分比一致；RVV等价指令描述准确。
 

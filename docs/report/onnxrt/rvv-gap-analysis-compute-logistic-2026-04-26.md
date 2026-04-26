@@ -6,7 +6,7 @@
 **算法**: sigmoid(x) = 1 / (1 + exp(-x))，使用有理多项式近似
 **基准实现**: RVV VLEN=512, VL=16 (float32), LMUL=1
 **分析平台**: x86 AVX/AVX2, ARM NEON, LoongArch LSX, Power VSX, S390X, WASM SIMD
-**BBV数据**: 未提供，收益为理论估算（基于MLAS profiling热点占比约10.01%）
+**BBV数据**: 基于QEMU-BBV profiling on 独立测试可执行文件 (output/bbv_rvv512/compute-logistic/)，收益估算结合BBV热点数据与MLAS profiling热点占比约10.01%
 
 ---
 
@@ -18,9 +18,14 @@
 | P1 | vexp.approx | ARM NEON | 指数计算加速 | 高 | RVV无近似指数指令 |
 | P2 | vclamp.vv | Power VSX | 单指令clamp替代vfmin/vfmax | 低 | RVV需2条vfmin+vfmax |
 
-**收益计算方式**（无BBV数据，仅BB范围内估算）：
+**收益计算方式**（基于BBV热点数据估算）：
 - BB内收益 = (原BB指令数 - 扩展后BB指令数) / 原BB指令数 × 100%
-- 整体收益需BBV profiling数据支持
+- 整体收益 = BB指令减少比例 × 函数执行占比（10.01%，来自perf profiling）
+
+**BBV热点数据**（独立测试，VLEN=512）：
+- 核心循环BB: 25条指令/迭代，9,050次执行
+- 指令序列: vle32 → vfmax → vfmin → vfmul → 9×vfmacc → vfdiv → vfadd → vfmax → vfmin → vse32
+- 整体收益估算: BB指令减少比例 × 函数执行占比（10.01%，来自perf profiling）
 
 ---
 
@@ -323,6 +328,7 @@ vclamp.vf vd, vs2, min, max        # vd[i] = clamp(vs2[i], min, max)
 |------|-----------|--------|------|
 | R1 | - | - | 待审查 |
 | R2 | 6 | 6 | 已完成 |
+| R3 | 3 | 3 | 已完成 |
 
 **R2修复内容**：
 1. P0声明修正：`vfrsqrt7.v`/`vfrec7.v`已是RVV基础扩展，非新指令提议
@@ -331,5 +337,10 @@ vclamp.vf vd, vs2, min, max        # vd[i] = clamp(vs2[i], min, max)
 4. NR迭代计数修正：24-bit精度需3条指令（vfrsqrt7 + 2×vfmacc）
 5. p(x)指令计数修正：4×vfmacc（非5×）
 6. vfmacc语义说明：`vd = vs2 * rs1 + vd`
+
+**R3修复内容**：
+1. BBV数据声明更新：从"未提供"改为引用QEMU-BBV profiling数据（output/bbv_rvv512/compute-logistic/）
+2. 收益计算方式更新：从"无BBV数据"改为基于BBV热点数据估算，含整体收益公式
+3. 新增BBV热点数据章节：核心循环BB指令序列、执行次数及整体收益估算方法
 
 ---

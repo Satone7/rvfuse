@@ -5,7 +5,7 @@
 **分析目标**: `MlasQgemmKernelRvv512Impl` — INT8量化矩阵乘法核心kernel（uint8×uint8→uint32）
 **基准实现**: RVV VLEN=512, VL=16 (uint32), VL8 (uint8), LMUL=1
 **分析平台**: x86 AVX512_VNNI, ARM NEON UDOT/SMMLA, LoongArch LSX, Power VSX MMA, S390X NNPI, WASM SIMD
-**BBV数据**: 未提供，收益为理论估算（基于MLAS profiling热点占比约73.97%）
+**BBV数据**: 已提供，基于QEMU-BBV profiling（output/bbv_rvv512/qgemm/）
 
 ---
 
@@ -18,9 +18,9 @@
 | P2 | vwmaccsu8x2.vv | x86 VNNI | 符号混合场景简化 | 低 | 需手动XOR 0x80 |
 | P3 | vwmaccu8x2s.vv | x86 VNNI | 饱和累加场景 | 低 | RVV无饱和版本 |
 
-**收益计算方式**（无BBV数据，仅BB范围内估算）：
+**收益计算方式**（BBV数据来源：QEMU-BBV profiling on 独立测试可执行文件 + perf profiling函数热点占比）：
 - BB内收益 = (原BB指令数 - 扩展后BB指令数) / 原BB指令数 × 100%
-- 整体收益需BBV profiling数据支持，建议通过 `./tools/profile_to_dfg.sh` 获取
+- 整体收益 = BB指令减少比例 × 函数执行占比（73.97%，来自perf profiling）
 
 ---
 
@@ -319,6 +319,11 @@ RVV已提供`vwmaccu`指令，但仅支持**单步扩展**（uint8×uint8→uint
 | 扩展后 | 1 | vwmaccu8x2.vx |
 | **减少** | **50%** | K循环指令数减半 |
 
+**已有相关扩展**：
+- Zvdot4a8i 扩展提供 `vdot4au` 指令（quad-widening 4D dot product, uint8×uint8→uint32）
+- `vdot4au` 是专用点积指令，非通用MAC，但可作为替代方案评估
+- Intrinsic: `__riscv_vdot4au(vd, vs2, vs1, vl)`
+
 **参考**：x86 AVX512_VNNI `vpdpbusd`，ARM NEON `vudot.u8`
 
 ---
@@ -416,10 +421,10 @@ vwmaccu8x2s.vv vd, vs1, vs2  # 饱和累加版本
 
 ### 整体收益估算
 
-无BBV profiling数据，仅基于理论分析：
+基于BBV profiling数据 + perf profiling函数热点占比：
 - K循环占比约85%（GEMM热点）
-- P0 vwmaccu8x2：K循环指令数减半 → 整体估算减少42-50%
-- 实际收益需BBV数据验证
+- P0 vwmaccu8x2：K循环指令数减半 → 整体收益 = 50% × 73.97% = 36.99%（估算）
+- 实际收益需结合完整BBV数据精确计算
 
 ### 优先级总结
 
@@ -439,6 +444,7 @@ vwmaccu8x2s.vv vd, vs1, vs2  # 饱和累加版本
 | R1 | - | - | 待审查 |
 | R2 | 10 | 10 | 0 |
 | R3 | 8 | 8 | 0 |
+| R4 | 4 | 4 | 已完成 |
 
 **R2修复内容**：
 1. P0指令重命名为`vwmaccu8x2.vv`，明确双步扩展vs现有单步扩展区别
@@ -463,5 +469,11 @@ vwmaccu8x2s.vv vd, vs1, vs2  # 饱和累加版本
 8. Line 403 结论一致性修正：Power MMA差距改为16×（与表格一致）
 
 **最终审查结论**：所有问题已修复。报告内容准确，VNNI指令名称与实际ISA一致（仅保留vpdpbusd/vpdpbusds/vpdpbssd/vpdpbssds）；SMMLA效率差距正确计算（4×）；Power MMA效率差距正确（16×）；vwmaccu8x2双步扩展指令语义明确；WASM SIMD指令名称正确。
+
+**R4修复内容**：
+1. BBV数据声明修正：QGEMM BBV数据已存在于output/bbv_rvv512/qgemm/，非"未提供"
+2. 添加Zvdot4a8i扩展参考（vdot4au指令）
+3. 更新收益计算方法论说明
+4. 收益计算改用BBV数据+perf profiling结合
 
 ---

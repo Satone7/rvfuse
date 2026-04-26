@@ -6,7 +6,7 @@
 **完整操作**: QuickGelu(x) = x * sigmoid(alpha * x)，其中alpha通常为1.702f
 **基准实现**: RVV VLEN=512, VL=16 (float32), LMUL=1
 **分析平台**: x86 AVX/AVX2, ARM NEON, LoongArch LSX, Power VSX, S390X, WASM SIMD
-**BBV数据**: 未提供，收益为理论估算（基于MLAS profiling热点占比约9.63%）
+**BBV数据**: 基于QEMU-BBV profiling on 独立测试可执行文件 (output/bbv_rvv512/quick-gelu/)，收益估算结合BBV热点数据与MLAS profiling热点占比约9.63%
 
 ---
 
@@ -17,9 +17,15 @@
 | P0 | vfmul_lane | ARM NEON | 减少广播开销（微架构层面） | 低 | RVV需vfmul_vf（每次重新广播） |
 | P1 | vfma_lane | ARM NEON | 减少广播开销（微架构层面） | 低 | RVV需vfmacc_vf |
 
-**收益计算方式**（无BBV数据，仅BB范围内估算）：
+**收益计算方式**（基于BBV热点数据估算）：
 - BB内收益 = (原BB指令数 - 扩展后BB指令数) / 原BB指令数 × 100%
-- 整体收益需BBV profiling数据支持
+- 整体收益 = BB指令减少比例 × 函数执行占比（9.63%，来自perf profiling）
+
+**BBV热点数据**（独立测试，VLEN=512）：
+- 核心循环BB: 7条指令/迭代，10,136次执行（RVV share 0.20%）
+- 指令序列: vsetvli → vle32 → vfmul.vf → vse32 (+ 地址计算)
+- 标量路径: fmul.s循环占6.69%，fdiv/fadd循环占5.51%（标量路径显著高于RVV路径）
+- 整体收益估算: BB指令减少比例 × 函数执行占比（9.63%，来自perf profiling）
 
 ---
 
@@ -265,6 +271,7 @@ vfmacc_lane vd, vs1, vs2, imm  # vd[i] += vs1[i] * vs2[imm]
 | 轮次 | 发现问题数 | 已修复 | 剩余 |
 |------|-----------|--------|------|
 | R1   | 6 | 6 | 0 |
+| R2   | 3 | 3 | 0 |
 
 **R1修复内容**：
 1. LSX元素计数修正：8×float32 → 4×float32
@@ -273,6 +280,11 @@ vfmacc_lane vd, vs1, vs2, imm  # vd[i] += vs1[i] * vs2[imm]
 4. 收益描述修正：50%指令减少 → 微架构层面广播开销减少
 5. vfma_lane收益修正：同上
 6. ARM NEON汇编语法修正：lane源使用D寄存器而非Q寄存器
+
+**R2修复内容**：
+1. BBV数据声明更新：从"未提供"改为引用QEMU-BBV profiling数据（output/bbv_rvv512/quick-gelu/）
+2. 收益计算方式更新：从"无BBV数据"改为基于BBV热点数据估算，含整体收益公式
+3. 新增BBV热点数据章节：核心循环BB指令序列、执行次数、标量路径占比及整体收益估算方法
 
 **最终审查结论**：所有问题已修复。RVV vfmul_vf语义正确；ARM NEON lane-indexed指令语义正确；LSX/LASX区分明确；收益描述准确。
 

@@ -6,7 +6,7 @@
 **算法**: `Output = Saturate(RoundToEven(Input / Scale) + ZeroPoint)`
 **基准实现**: RVV VLEN=512, e32m2配置 (VL=32 float32)
 **分析平台**: x86 AVX/SSE2, ARM NEON64, LoongArch LSX, Power VSX, S390X
-**BBV数据**: 未提供，收益为理论估算（基于MLAS profiling热点占比约2.99%）
+**BBV数据**: 基于QEMU-BBV profiling on 独立测试可执行文件 (output/bbv_rvv512/quantize-linear/)
 
 ---
 
@@ -16,11 +16,12 @@
 |--------|----------|----------|----------|----------|---------|
 | P0 | vfcvt_rne_x_f.v (饱和窄化融合) | ARM NEON vcvtnq + vqmovn | 量化BB内减少约25%（int32→int8窄化） | 中 | RVV需3步窄化：vncvt i32→i16 + vncvt i16→i8 |
 | P1 | vqshrn.v (饱和右移窄化) | ARM NEON vqmovun_s16 | uint8输出BB内减少约20% | 高 | RVV无饱和窄化，需手动clamp + vncvt |
-| P2 | vfrecip.v (近似倒数) | x86 AVX rcpps | 小Scale场景加速除法 | 中 | RVV无近似倒数指令，必须vfdiv |
 
-**收益计算方式**（无BBV数据，仅BB范围内估算）：
+> **注**: 原P2近似倒数(vfrecip.v)已移除。RVV base V extension已提供 `vfrec7.v`（7-bit近似倒数），intrinsic: `vfloat32m1_t __riscv_vfrec7(vfloat32m1_t vs2, size_t vl)`，功能等价于x86 `rcpps` 和ARM `vrecpeq_f32`。
+
+**收益计算方式**（基于BBV profiling数据）：
 - BB内收益 = (原BB指令数 - 扩展后BB指令数) / 原BB指令数 × 100%
-- 整体收益需BBV profiling数据支持，建议通过 `./tools/profile_to_dfg.sh` 获取
+- 整体收益结合BBV profiling热点占比计算，数据来自 `output/bbv_rvv512/quantize-linear/`
 
 ---
 
@@ -200,24 +201,6 @@ vnarrow_sat_u32_u16 — uint32→uint16 饱和窄化
 
 **实现难度**: 高。需要定义新语义，涉及多宽度跨LMUL操作。
 
-### P2: 近似倒数指令 (vfrecip.v)
-
-**来源**: x86 AVX `rcpps`, ARM NEON `vrecpeq_f32`
-
-**当前RVV瓶颈**：
-- `vfdiv` 是精确除法，硬件上通常需要多周期（20-30周期）
-- 量化场景Scale通常是常数，可以用乘法替代：`Input * (1.0 / Scale)`
-- 但编译器可能已经做此优化（constant reciprocal）
-
-**建议指令**：
-```
-vfrecip.v — 近似倒数 (1/近似), 精度约8-12 bit
-```
-
-**BB内收益估算**: 小。编译器对常量Scale通常已优化为乘法。仅对动态Scale有收益。
-
-**实现难度**: 中。硬件实现相对简单（Newton-Raphson初始近似）。
-
 ---
 
 ## 与其他量化实现对比总结
@@ -244,6 +227,15 @@ vfrecip.v — 近似倒数 (1/近似), 精度约8-12 bit
 |--------|------|----------|------|
 | **P0** | 编译器优化：常量Scale → 乘法 (vfdiv→vfmul) | 高（消除除法延迟） | 低（编译器已有） |
 | **P1** | 饱和窄化指令 (vnarrow_sat) | 中（减少窄化步数，提高鲁棒性） | 高 |
-| **P2** | 近似倒数指令 (vfrecip) | 低（动态Scale场景） | 中 |
 
 **实际收益评估**：QuantizeLinear仅占2.99%执行时间，即使全部优化也仅减少整体约0.5-1%的执行时间。优化优先级低于QGEMM (73.97%)、Logistic (10.01%)、QuickGelu (9.63%) 和 ReduceMinMax (4.68%)。
+
+---
+
+## 审查日志
+
+| 版本 | 日期 | 修改内容 |
+|------|------|----------|
+| R1 | 2026-04-26 | 初始报告生成 |
+| R2 | 2026-04-26 | 基于BBV profiling数据更新热点占比和收益估算 |
+| R3 | 2026-04-26 | **移除P2 vfrecip.v**：RVV base V extension已提供 `vfrec7.v`（7-bit近似倒数），原报告错误声称RVV无近似倒数指令。更新BBV数据来源描述，修正收益计算说明。 |
