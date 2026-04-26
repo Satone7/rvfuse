@@ -2,7 +2,7 @@
 
 **Version**: 2.1 | **Date**: 2026-04-08 | **Status**: Active
 
-**Purpose**: This document describes the architecture of RVFuse, a RISC-V instruction fusion research platform. The project has completed Phase 1 (setup and DFG generation foundation), and is entering Phase 2 (fusion candidate discovery and design) of a four-phase research roadmap.
+**Purpose**: This document describes the architecture of RVFuse, a RISC-V vector extension research platform. The project has completed Phase 1 (setup and profiling foundation), and is currently in Phase 2 (cross-platform RVV gap analysis and extension proposals) of a four-phase research roadmap.
 
 ---
 
@@ -21,10 +21,10 @@
 
 ## 1. Executive Summary
 
-- **What**: RVFuse is a RISC-V instruction fusion research platform that profiles applications via QEMU emulation, generates Data Flow Graphs (DFG) from hot basic blocks, and aims to identify high-frequency instruction combinations suitable for hardware fusion.
-- **Why**: RISC-V's modular extension mechanism is naturally suited for instruction fusion optimization. Data-driven analysis of real workloads provides evidence for custom extension design.
-- **Completed Scope**: Repository structure, dependency management, QEMU BBV profiling pipeline, DFG generation engine with I/F/M ISA extensions, and a fully automated setup pipeline (`setup.sh` Steps 0-7).
-- **Current Scope**: Fusion candidate discovery and design — identifying fusible instruction patterns from DFG output.
+- **What**: RVFuse is a RISC-V vector extension research platform that profiles applications via QEMU emulation and hardware perf, compares RVV implementations against other platform vector ISAs, and proposes extension instructions with quantified benefits.
+- **Why**: RISC-V's modular extension mechanism is naturally suited for custom instruction optimization. Data-driven cross-platform analysis of real workloads provides evidence for extension proposals.
+- **Completed Scope**: Repository structure, dependency management, QEMU BBV profiling pipeline, cross-platform vector ISA comparison (RVV vs 6 platforms), BBV+perf quantified extension proposals, RVV-patched ONNX Runtime operators, and a fully automated setup pipeline (`setup.sh` Steps 0-7).
+- **Current Scope**: Cross-platform RVV gap analysis and extension proposal design — comparing RVV implementations against other vector ISAs to identify instruction design gaps.
 - **Future Scope**: Simulation and benefit quantification; ISA extension (D, C, V) and multi-workload diversification.
 
 ### Research Roadmap
@@ -32,7 +32,7 @@
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1 | Setup + profiling + DFG generation | Completed |
-| 2 | Fusion candidate discovery and design | Current |
+| 2 | Cross-platform RVV gap analysis and extension proposals | Current |
 | 3 | Simulation and benefit quantification | Planned |
 | 4 | Extension and diversification (ISA D/C/V, multi-workload) | Planned |
 
@@ -42,22 +42,22 @@
 
 - **Business Goals**:
   1. Profile real workloads (e.g., YOLO11n inference) to identify hot basic blocks
-  2. Generate accurate Data Flow Graphs from hot basic blocks
-  3. Discover instruction fusion candidates with data dependencies
-  4. Quantify fusion benefits through simulation and cycle comparison
+  2. Compare RVV implementations against other platform vector ISAs
+  3. Identify RVV instruction design gaps through cross-platform vector ISA comparison
+  4. Propose extension instructions with BBV+perf quantified benefits
 
 - **Constraints**:
   - Development is local-first on Linux x86_64 hosts
   - External repositories are managed as Git submodules (`third_party/`)
   - ISA descriptions are derived from LLVM `.td` files via `llvm-tblgen` for accuracy
-  - Agent integration uses Claude Code CLI subprocess (no separate API key management)
+  - Agent integration uses Claude Code CLI subprocess with 8+ specialized skills for profiling, compilation, and analysis
   - newlib remains optional (not required for current workloads)
 
 - **Quality Targets**:
   - Full pipeline runnable from `git clone` via `./setup.sh`
-  - DFG engine tested with ~1300 lines of unit tests
+  - DFG engine tested with ~1300 lines of unit tests (shelved)
   - ISA register semantics consistent with LLVM backend definitions
-  - Agent check/generate provides advisory verification without blocking the pipeline
+  - Cross-platform gap analysis validated against BBV + perf measurements
 
 - **Key Dependencies**:
   - QEMU: https://gitlab.com/qemu-project/qemu (user-mode emulation + BBV plugin)
@@ -77,7 +77,7 @@ graph TB
     BBVProfiling -->|Step 5| HotspotReport[Hotspot Analysis<br/>analyze_bbv.py]
     HotspotReport -->|Step 6| DFGEngine[DFG Generation<br/>tools/dfg/]
     DFGEngine -->|DOT/JSON/PNG| Output[DFG Output]
-    DFGEngine --> Phase2[Phase 2: Fusion Candidate Discovery<br/>Current]
+    DFGEngine --> Phase2[Phase 2: RVV Gap Analysis & Extension Proposals<br/>Current]
     Phase2 --> Phase3[Phase 3: Simulation & Quantification<br/>Planned]
     Phase3 --> Phase4[Phase 4: Extension & Diversification<br/>Planned]
 ```
@@ -88,7 +88,7 @@ graph TB
 - **QEMU + BBV Plugin**: User-mode RISC-V emulation with basic block vector sampling
 - **analyze_bbv.py**: Resolves BB addresses to source locations, produces hotspot JSON report
 - **DFG Engine**: Parses `.disas` files, builds RAW dependency graphs, supports I/F/M ISA extensions
-- **Phases 2-4**: Future research work (fusion discovery, simulation, diversification)
+- **Phases 2-4**: Current and future research work (RVV gap analysis, simulation, diversification)
 
 ### 3.2 Containers
 
@@ -124,7 +124,7 @@ graph TB
 |-----------|---------|
 | Build Infrastructure | QEMU emulation, Docker cross-build, LLVM toolchain |
 | Analysis Tools | BBV hotspot analysis, DFG generation, end-to-end orchestration |
-| ISA Descriptors | Per-extension instruction register flow definitions, generated from LLVM `.td` files |
+| ISA Descriptors | Per-extension instruction register flow definitions, generated from LLVM `.td` files (DFG engine shelved) |
 
 ### 3.3 Components
 
@@ -161,7 +161,7 @@ graph TB
 
 - **Runtime**: Local Linux x86_64 workstation
 - **Primary Audience**: Researchers analyzing RISC-V instruction fusion opportunities
-- **Current Deliverables**: Fully automated pipeline (`setup.sh` Steps 0-7), DFG engine with I/F/M ISA support, BBV hotspot analysis, two Agent SKILLs (dfg-check, dfg-generate)
+- **Current Deliverables**: Fully automated pipeline (`setup.sh` Steps 0-7), BBV hotspot analysis, cross-platform RVV gap analysis with 8 agent skills, RVV-patched ONNX Runtime operators (SGEMM, QGEMM, Logistic, QuickGelu, ReduceMinMax, QuantizeLinear)
 - **Dependency Access Model**: External toolchain repositories tracked as Git submodules in `third_party/`
 
 **Current Workspace Layout**:
@@ -325,8 +325,8 @@ RVFuse/
 | R-002 | Large dependency footprint (QEMU, LLVM) | Medium | `--shallow` clone support; separate build artifacts from source |
 | R-003 | QEMU disassembly mnemonics differ from LLVM names | Medium | Name mapping table in `gen_isadesc.py`; verify against actual `.disas` output |
 | R-004 | Agent CLi unavailable in CI/headless environments | Low | Agent is advisory; pipeline runs in script-only mode without it |
-| TD-001 | Fusion candidate search algorithm undefined | High | Phase 2 deliverable — design fusion pattern recognition on DFG |
-| TD-002 | Hardware constraint modeling undefined | Medium | Phase 2 deliverable — encode encoding space, pipeline, timing constraints |
+| TD-001 | Fusion candidate search algorithm (DFG-based approach shelved) | Medium | Tools preserved in tools/fusion/; to be reactivated after cross-platform analysis |
+| TD-002 | Hardware constraint modeling deferred | Medium | To be addressed when fusion tools are reactivated |
 | TD-003 | Simulation/benefit quantification pipeline undefined | Medium | Phase 3 deliverable — BBV-weighted benefit calculation |
 | TD-004 | D/A/V ISA extensions not yet supported | Low | Phase 4 — `gen_isadesc.py` architecture already supports extension |
 
@@ -339,12 +339,12 @@ RVFuse/
 - Repository structure and module responsibilities
 - DFG engine architecture (parser → instruction → builder → output)
 - ISA descriptor generation pipeline (`llvm-tblgen` → `gen_isadesc.py` → `isadesc/`)
-- Existing Agent SKILLs: `dfg-check`, `dfg-generate`
+- Existing Agent SKILLs: `rvv-gap-analysis`, `rvv-op`, `rvv512-optimization-pipeline`, `cross-compile-app`, `perf-profiling`, `qemu-bbv-usage`, `worktree-setup` (DFG/fusion skills archived)
 
 ### Outputs
-- Fusion candidate search design (Phase 2)
-- Hardware constraint model (Phase 2)
-- Fusion scheme Skill specification (Phase 2)
+- Cross-platform RVV gap analysis reports
+- Extension instruction proposals with quantified benefits
+- Fusion scheme Skill specification (Phase 2, deferred)
 
 ### Acceptance Guardrails
 - Do not treat simulation or ISA extension work as Phase 2 deliverables

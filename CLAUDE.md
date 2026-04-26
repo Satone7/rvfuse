@@ -4,41 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RVFuse is a RISC-V instruction fusion research platform. The goal is to:
-1. Profile applications (e.g., ONNX Runtime) via QEMU emulation to identify hot functions and basic blocks
-2. Generate Data Flow Graphs (DFG) from basic blocks
-3. Identify high-frequency instruction combinations with data dependencies
-4. Test fused instructions in the emulator and compare cycle counts
+RVFuse is a RISC-V vector extension research platform. The goal is to:
+1. Profile applications (e.g., ONNX Runtime, llama.cpp) via QEMU emulation and hardware perf to identify hot functions and basic blocks
+2. Compare RVV implementations against other platform vector ISAs (x86 AVX, ARM NEON/SVE, LoongArch LASX, Power VSX, S390X Z-Vector, WASM SIMD) to identify instruction design gaps
+3. Propose extension instructions with BBV+perf quantified benefits
+4. Test proposed instructions in the emulator and quantify improvement
 
-**Current Phase**: Fusion candidate discovery and design (Phase 2 of 4).
+**Current Phase**: Cross-platform RVV gap analysis and extension proposal design (Phase 2 of 4).
 
 **Completed phases**:
-- Phase 1: Setup + profiling + DFG generation (repository structure, QEMU BBV profiling, DFG engine with I/F/M ISA extensions, automated setup pipeline)
+- Phase 1: Setup + profiling + DFG generation (repository structure, QEMU BBV profiling, DFG engine, automated setup pipeline)
 
 **Roadmap**:
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1 | Setup + profiling + DFG generation | Completed |
-| 2 | Fusion candidate discovery and design | Current |
+| 2 | Cross-platform RVV gap analysis and extension proposals | Current |
 | 3 | Simulation and benefit quantification | Planned |
 | 4 | Extension and diversification | Planned |
 
-**Phase 2 Feature Roadmap**: F1 → F2 → F3 in order. Each feature needs its own design doc before implementation begins.
-
-| Feature | Description | Status | Design Doc |
-|---------|-------------|--------|------------|
-| F1: Pattern Mining | Discover fusible instruction subgraphs from DFG output | Not started | TBD |
-| F2: Scoring & Constraints | Rank candidates by frequency and hardware feasibility | Not started | TBD (blocked by F1) |
-| F3: Scheme Specification | Agent skill for fusion encoding scheme generation | Not started | TBD (blocked by F2) |
-
-**IMPORTANT**: When starting Phase 1 work, always read the feature roadmap first.
-Pick up features in order (F1 → F2 → F3). Each feature needs its own design doc
-in `docs/plans/` before implementation begins.
+**Shelved Tools**: DFG engine (`tools/dfg/`) and fusion miner (`tools/fusion/`) are temporarily shelved. The original DFG-based fusion discovery approach was tested but found less effective than cross-platform vector ISA comparison. These tools will be reactivated and adapted after the current analysis phase completes.
 
 ## Active Technologies
 - Bash 4.0+ (available on all modern Linux x86_64) + Git 2.30+, standard Unix utilities (ls, cat, grep, df, date)
-- C++17 (yolo_runner.cpp), Docker (RISC-V native build), Python 3 (analyze_bbv.py, DFG engine), Git submodules (QEMU, ONNX Runtime source)
-- Python `rich` (progress bars), `uv` (dependency management for tools/dfg/)
+- C++17 (yolo_runner.cpp), Docker (RISC-V native build), Python 3 (analyze_bbv.py), Git submodules (QEMU, ONNX Runtime source)
+- Python `rich` (progress bars), `uv` (dependency management)
 
 ## Key Commands
 
@@ -95,17 +85,6 @@ cd tools && python3 -m pytest test_analyze_bbv.py -v
 ./setup.sh --force 2,3     # re-build QEMU and Docker image
 ./setup.sh --force-all      # re-run everything from scratch
 
-# Generate DFG from hotspot BBs (end-to-end)
-./tools/profile_to_dfg.sh --bbv output/yolo.bbv.0.bb --elf output/yolo_inference --sysroot output/sysroot --top 50 --output-dir output/dfg
-
-# Generate DFG directly from .disas file
-python -m tools.dfg --disas output/yolo.bbv.disas --isa I,F,M --top 20
-
-# Run DFG engine tests
-cd tools && python -m pytest dfg/tests/ -v
-
-# Build llvm-tblgen for ISA descriptor generation (one-time setup)
-./tools/dfg/setup_tblgen.sh
 ```
 
 ## Architecture Decisions (ADRs)
@@ -131,18 +110,8 @@ RVFuse/
 ├── tools/
 │   ├── analyze_bbv.py     # BBV hotspot analysis
 │   ├── profile_to_dfg.sh  # End-to-end profiling-to-DFG pipeline
-│   ├── dfg/               # DFG generation engine (~3400 lines)
-│   │   ├── __main__.py    # CLI entry point
-│   │   ├── parser.py      # .disas text file parser
-│   │   ├── instruction.py # Instruction modeling and register flow
-│   │   ├── dfg.py         # DFG construction (RAW dependencies)
-│   │   ├── output.py      # DOT/JSON/PNG output
-│   │   ├── agent.py       # Agent dispatcher (check/generate)
-│   │   ├── filter.py      # Hotspot-based BB filtering
-│   │   ├── gen_isadesc.py # llvm-tblgen ISA descriptor generator
-│   │   ├── isadesc/       # ISA extension descriptors (I, F, M)
-│   │   └── tests/         # Unit tests (~1300 lines)
-│   ├── fusion/            # Fusion pattern discovery (Phase 2)
+│   ├── dfg/               # DFG generation engine (SHELVED)
+│   ├── fusion/            # Fusion pattern discovery (SHELVED)
 │   ├── docker-llvm/       # Docker LLVM cross-compilation toolchain
 │   ├── bbv/               # QEMU BBV plugin
 │   └── local-llvm/        # LLVM 22 local toolchain
@@ -170,12 +139,17 @@ RVFuse/
 ## Code Style
 
 - C++: camelCase functions/variables, PascalCase for ONNX Runtime API types, single-responsibility functions under 50 lines
-- Python: snake_case, type hints on public functions, stdlib-only (no external deps for analyze_bbv.py); `rich` and `graphviz` allowed for dfg engine
+- Python: snake_case, type hints on public functions, stdlib-only (no external deps for analyze_bbv.py); `rich` and `graphviz` allowed for tools
 - Shell: `set -euo pipefail`, `SCRIPT_DIR` pattern for paths, no unquoted variables
 
 ## Development Workflow
 
 This project uses the Superpowers workflow for feature development. Design and implementation plans are written to `docs/plans/`.
+
+## Skill Organization
+
+- **Project-authored skills** (e.g., `rvv-gap-analysis`, `rvv-op`, `rvv512-optimization-pipeline`) live in `skills/` with a symlink in `.claude/skills/` pointing to `../../skills/<name>`
+- **Third-party installed skills** live directly in `.claude/skills/`
 
 ## Ground Rules Summary
 
