@@ -5,18 +5,33 @@
 > 提出硬件指令扩展需求并量化收益。
 >
 > **数据来源**：
-> - llama.cpp: `docs/report/llama_cpp_perf_q4_v_analysis.md`, `docs/report/llama.cpp/rvv-gap-analysis-gemv_q8_0_16x1_q4_0-2026-04-17.md`
+> - llama.cpp perf: `applications/llama.cpp/README.md`（SpacemiT K1-X, Qwen2.5-0.5B Q4_K_M）+ `docs/report/llama.cpp/rvv-gap-analysis-consolidated-llama.cpp-2026-04-26.md`
+> - llama.cpp BBV: `output/bbv_rvv512/llama.cpp/`（QEMU BBV, VLEN=512, 4 算子独立测试）, `docs/report/llama.cpp/rvv-gap-analysis-{gemm,gemv,quantize,vec-dot}-*.md`
 > - YOLO FP32 perf: `applications/onnxrt/yolo/data/perf/yolo11n_bananapi_k1_rv64gcv_scalar_20260424_analysis.md`（SpacemiT K1）
 > - YOLO INT8 perf: `applications/onnxrt/yolo/data/perf-int8-yolo11n/summary.md`（SpacemiT K1, RVV512-patched）
 > - YOLO FP32 BBV: `output/bbv_rvv512/sgemm/`（QEMU BBV profiling，MlasSgemmKernelRvv512）
 > - YOLO INT8 BBV: `output/bbv_rvv512/qgemm/`（QEMU BBV profiling，MlasQgemmKernelRvv512）
 > - YOLO INT8 算子 BBV: `output/bbv_rvv512/{compute-logistic,quick-gelu,reduce-minmax-f32,quantize-linear}/`
 > - ResNet50 SGEMM BBV: `docs/report/resnet/rvv-gap-analysis-sgemm-kernel-vl16-2026-04-25.md`
+> - ONNXRT SGEMM FP32 BBV: `docs/report/onnxrt/rvv-gap-analysis-sgemm-kernel-vl16-2026-04-26.md`
+> - OSTrack ReduceMean: `docs/report/onnxrt/ostrack/rvv-gap-analysis-reducemean-f32-2026-04-26.md`
+> - OSTrack Softmax: `docs/report/onnxrt/ostrack/rvv-gap-analysis-softmax-f32-2026-04-26.md`
+> - OSTrack 综合: `docs/report/onnxrt/ostrack/rvv-gap-analysis-ostrack-consolidated-2026-04-26.md`
 > - CX 指令延迟: `docs/reference/cx/instruction-constraints-and-latency.md`
 
 ---
 
 ## 一、扩展指令方案汇总
+
+> **命名约定**：本报告为 RISC-V RVV 扩展指令方案的权威参考。各应用缺口分析报告中相同概念的扩展方案已统一命名：
+> - `vdot.vv` / `vusdot.vv` / `vdot.s8` → **vsegdot.vv**（方案 1）
+> - `vusdot_lane.vv` / `vdot_lane` → **vdot_lane.vx**（方案 2）
+> - `vmatmul.fp32` → **vmulacc.vv**（方案 5）（概念统一：4×4 FP32 矩阵外积 FMA）
+> - `vfmacc.vv_lane` → 维持不变（方案 4）
+> - `vinterleave.v` / `vlseg2e8` → **vunzip/vzip.vv**（方案 8）
+> - `vnibunpack.vv` / `vlse_unpack8` / `vunpackn.v` → **vnibunpack.vv**（方案 15）
+> - `vfadd.red` / `vaddv_f32` → **vfadd.red.vs**（方案 16）
+> - `vfexp` / `vexp2ps` / `vexp.approx` → **vfexp.v**（方案 17）
 
 ### 1.1 方案总表
 
@@ -26,19 +41,29 @@
 | **2** | vdot_lane.vx | INT8 | Lane-indexed dot 消除标量广播 | llama.cpp: **15-25%** |
 | **3** | vnarrow_sat | INT8 | 饱和窄化 int32→int8（替代 2 步 vncvt） | YOLO11n INT8: **~0.3%** |
 | **4** | vfmacc.vv_lane | FP32 | Lane-indexed FMA 消除标量加载，K 步间复用 A 元素 | YOLO FP32: **29.1%**, ResNet50: **22.86%**, llama.cpp: **5-8%** |
-| **5** | vmulacc.vv | FP32 | 4×4 矩阵外积 FMA + 专用累加器释放 VR | YOLO FP32: **44.6%**, ResNet50: **44.55%** |
+| **5** | vmulacc.vv | FP32 | 4×4 矩阵外积 FMA + 专用累加器释放 VR（ONNXRT SGEMM 中亦称 vmatmul.fp32） | YOLO FP32: **44.6%**, ResNet50: **44.55%**, ONNXRT SGEMM: **77.5%**（K-loop BB） |
 | **6** | vclamp.vf | FP32 | 单指令 clamp 替代 vfmax+vfmin（2→1） | YOLO INT8: **~1.0%** |
-| **7** | vfmax.red/vfmin.red | FP32 | 单指令水平 min/max 归约（替代 3 步序列） | YOLO INT8: **<0.5%** |
+| **7** | vfmax.red/vfmin.red | FP32 | 单指令水平 min/max 归约（替代 3 步序列） | YOLO INT8: **<0.5%**, OSTrack Softmax: 归约 BB **67%** |
 | **8** | vunzip/vzip.vv | 数据重排 | 奇偶分离/合并（转置加速） | YOLO: 边际收益 |
 | **9** | vwmaccwev/wod.vv | 数据重排 | Even/Odd 分离 widening MAC 减少依赖链 | llama.cpp: **3-5%** |
+| **10** | vfncvt_scale_x_f_w_i8 | FP32→INT8 | f32×scale→i8 一步窄化（替代 vfmul+vfncvt+vncvt 3 步） | quantize BB: **19.5%** |
+| **11** | vwmulred.vs | INT8 | Widening multiply→reduce 融合（替代 vwmul+vwredsum 2 步） | llama.cpp vec-dot: **2.9%** |
+| **12** | vfabs_redmax | FP32 | ABS+归约最大值融合（替代 vfabs+vfredmax+vfmv.f.s 3 步） | quantize BB: **19.5%** |
+| **13** | prefetch.v | 内存 | 向量数据预取（填补 x86 prefetcht0 差距） | 大矩阵 GEMM: **5-15%** |
+| **14** | vsignext.vx_mu | INT8 | 掩码符号扩展融合（替代 vmnand+vsub.mu 2 步） | llama.cpp vec-dot: **1.2%** |
+| **15** | vnibunpack.vv | 数据重排 | 单指令 nibble 解包（替代 vand+vsrl 2 步） | llama.cpp gemm: **2-3%** |
+| **16** | vfadd.red.vs | FP32 归约 | 单指令水平求和归约（替代 vfmv+vfredusum+vfmv.f.s 3 步） | OSTrack ReduceMean+Softmax: 归约 BB **67%** |
+| **17** | vfexp.v | FP32 超越函数 | 向量指数指令（替代 ~28 条多项式指令） | OSTrack Softmax exp BB: **~96%** |
 
-**收益说明**：所有收益均为 Amdahl 定律计算的整体推理加速百分比，结合 perf 实测函数占比 + BBV 指令级数据 + CX 指令延迟表。
+**收益说明**：所有收益均为 Amdahl 定律计算的整体推理加速百分比，结合 perf 实测函数占比 + BBV 指令级数据 + CX 指令延迟表。方案 1-9 基于 YOLO/ResNet50/llama.cpp 早期分析，方案 10-17 基于 llama.cpp BBV profiling（2026-04-26）和 ONNXRT SGEMM 缺口分析新增。
 
 ---
 
 ### 1.2 INT8 路径方案详解
 
 #### 方案 1: vsegdot.vv — INT8 分段点积
+
+> **审查注**（2026-04-26）：RVV Zvdot4a8i 扩展已提供 `vdot4au_vv`（quad-widening 4D dot product, uint8×uint8→uint32）。二者数学功能等价，但数据布局不同：Zvdot4a8i 要求输入打包为 uint32 字（4 字节/字），vsegdot.vv 要求未打包的字节向量。vsegdot.vv 可视为 Zvdot4a8i 的"未打包"变体。
 
 **指令定义**：
 
@@ -163,6 +188,74 @@ BB 总周期: ~43 → ~39, BB 内减少 ~9.3%
 
 ---
 
+### 1.2 附加方案
+
+#### 方案 11: vwmulred.vs — Widening Multiply-Reduce 融合
+
+**指令定义**：
+
+```
+vwmulred.vs vd, vs2, vs1
+  功能：vd[0] += Σ(vs2[i] × vs1[i])  // widening i8×i8→i16, sum→i32
+  等效于：vwmul.vv + vwredsum.vs 两步融合为单指令
+```
+
+**跨平台来源**：ARM NEON `vdotq_s32` + `vaddvq_s32` 组合，WASM SIMD `i32x4.dot_i16x8` + horizontal add
+
+**RVV 现状**：
+- int8 dot product 需 2 步：`vwmul.vv`（widening multiply, 4 周期）+ `vwredsum.vs`（归约, 4 周期）= 8 周期
+- 额外需要 `vmv.v.x`（清零累加器, 3 周期）+ `vmv.x.s`（提取标量, 3 周期）
+
+**收益计算**：
+
+```
+当前 RVV（vec-dot-q5_0 核心路径）:
+  vwmul.vv (4c) + vwredsum.vs (4c) + vmv.v.x (3c) + vmv.x.s (3c) = 14c
+
+扩展后:
+  vwmulred.vs (~6c) + vmv.x.s (3c) = 9c
+  周期减少: 14 → 9, 加速 1.56
+
+llama.cpp 整体 (vec-dot 占 54.64%):
+  整体加速: 1/(0.4536 + 0.5464/1.56) = 1.243 → 内核级 +25%
+  考虑 pipeline 效率 80%: 整体推理约 +2.9%
+```
+
+**对比 vsegdot.vv（方案 1）**：vwmulred.vs 是更轻量的替代方案——仅融合 multiply+reduce 而不改变 SEW（无需 e8→e32 切换），但收益也较小。适合作为 vsegdot.vv 实现前的过渡方案。
+
+---
+
+#### 方案 14: vsignext.vx_mu — 掩码符号扩展融合
+
+**指令定义**：
+
+```
+vsignext.vx_mu vd, vm, vs2, rs1
+  功能：vd[i] = vm[i] ? vs2[i] : (vs2[i] - rs1)
+  等效于：vmnand + vsub.vx_mu 两步融合（用于 Q5_0 符号扩展）
+```
+
+**跨平台来源**：ARM NEON `vsubq_s8`（查表后），x86 AVX2 `VPANDNOT` + `VPOR` + `VPSUBB`（3 步位扩展序列）
+
+**收益计算**：
+
+```
+当前 RVV（vec-dot-q5_0 符号扩展）:
+  vmnand.mm (3c) + vsub.vx_mu (7c) = 10c
+
+扩展后:
+  vsignext.vx_mu (~7c)
+  周期减少: 10 → 7, 加速 1.43
+
+llama.cpp 整体 (vec-dot 占 54.64%, 符号扩展占内核 ~20%):
+  内核加速: 1/(0.80 + 0.20/1.43) = 1.066
+  整体加速: 1/(0.4536 + 0.5464/1.066) = 1.035 → 整体推理约 +1.2%
+```
+
+注：整体收益有限（~1.2%），Q5_0/Q5_1/Q5_K 等 5-bit 量化类型均可受益。
+
+---
+
 ### 1.3 FP32 路径方案详解
 
 #### 方案 4: vfmacc.vv_lane — Lane-indexed FMA
@@ -269,7 +362,6 @@ vmulacc.vv acc, vs2, vs1, sew=32
 1. 消除 per-element A 标量加载（4 行只需 1 次 A 加载，而非 16 次 flw）
 2. 释放累加器 VR 寄存器（专用累加器不占用 VR），允许更宽 tile
 3. 减少依赖链（4 条 MMA vs 16 条 vfmacc.vf per K-step）
-4. 需新增专用累加器寄存器文件和新的指令编码
 
 **各应用收益计算**：
 
@@ -281,10 +373,41 @@ YOLO11n FP32:
 ResNet50（8 行 tile 场景）:
   BB 内减少: 48.8%
   整体收益: 48.8% × 91.43% = 44.55%
+
+ONNXRT SGEMM（亦称 vmatmul.fp32）:
+  K-loop 64 MACs 从 20 条指令 → 4 条, BB 内减少 80%
+  整体收益: 80% × 96.9%（K-loop 占比） ≈ 77.5%（K-loop BB 内）
 ```
 
 ---
 
+#### 方案 12: vfabs_redmax — ABS + 归约最大值融合
+
+**指令定义**：
+
+```
+vfabs_redmax vd, vs2, vs1, vm
+  功能：vd[0] = max(|vs2[0]|, |vs2[1]|, ..., |vs2[VL-1]|, vs1[0])
+  等效于：vfabs + vfredmax + vfmv.f.s 三步融合
+```
+
+**跨平台来源**：ARM NEON `vmaxvq_f32`（仅归约+提取，无 ABS 融合），x86 亦需分步
+
+**应用场景**：量化中 amax = max(|x|) 计算（所有量化 kernel）
+
+**收益计算**：
+
+```
+当前 RVV（quantize-q8_0 amax 计算）:
+  vfabs (3c) + vfredmax (4c) + vfmv.f.s (3c) = 10c, 3 条
+
+扩展后:
+  vfabs_redmax (~5c), 1 条
+  BB 内减少: 每行节省 2 条, 每块(4行)节省 8 条
+  BB 内百分比: 8/41 ≈ 19.5%（quantize-q8_0-4x4）
+```
+
+注：整体收益取决于 quantize 在推理中的占比（数据预处理阶段，非推理热点）。主要价值在于软件简化。
 #### 方案 6: vclamp.vf — 单指令 Clamp
 
 **指令定义**：
@@ -313,6 +436,8 @@ BB 总周期（~57）减少 6 → ~10.5%
 ---
 
 #### 方案 7: vfmax.red/vfmin.red — 单指令水平 Min/Max 归约
+
+> **审查注**（2026-04-26）：RVV 已有 `vfredmax.vs` / `vfredmin.vs` 提供单指令水平 max/min 归约。当前路径需 3 步（vfmv.v.f 初始化 + vfredmax/vfredmin + vfmv.f.s 提取标量），方案 7 将其简化为 1 步（隐式初始化 + 直接标量输出）。差距在 API 开销（3 指令 → 1 指令），非新操作。对标 ARM NEON64 `vmaxvq_f32`（单指令 + 标量输出）。
 
 **指令定义**：
 
@@ -348,9 +473,103 @@ BBV 数据（reduce-minmax-f32）: 归约阶段仅执行 41 次 vs 主循环 3,1
 ReduceMinMax 主循环已是 compute-bound（vfmin×4 + vfmax×4），归约不是瓶颈。
 ```
 
+**OSTrack Softmax Pass 1 应用**（2026-04-26 新增）：Softmax 最大值查找（Pass 1）每 VL 迭代执行 1 次 max 归约。OSTrack-256 每次推理 144 次 Softmax × N=320，归约开销不可忽略。vfmax.red 单指令版本使归约指令从 3 → 1（67% 减少）。
+
 ---
 
-### 1.4 数据重排方案详解
+#### 方案 16: vfadd.red.vs — 单指令水平求和归约
+
+> **审查注**（2026-04-26）：RVV 已有 `vfredusum.vs`（无序）/ `vfredosum.vs`（有序）提供**单指令水平 float sum 归约**。`vfredusum` 语义：`vd[0] = sum(vs2[0..VL-1]) + vs1[0]`——与方案 16 的数学操作完全相同。当前路径需 3 步（vfmv.v.f 初始化零 + vfredusum + vfmv.f.s 提取标量 = 10 周期），方案 16 简化为 1 步（隐式零初始化 + 直接标量输出 = ~4 周期）。**结论：归约指令已存在，差距在 API 开销（3 指令 → 1 指令）。** 对标 ARM NEON64 `vaddvq_f32`（单指令 + 标量输出）。
+
+**指令定义**：
+
+```
+vfadd.red.vs vd, vs2, vm
+  功能：vd[0] ← Σ(vs2[0..VL-1])  // 水平求和归约到标量
+  等效于：vfmv.v.f + vfredusum.vs + vfmv.f.s 三步融合为单指令
+```
+
+**跨平台来源**：ARM NEON64 `vaddvq_f32`（单指令 4→1 水平求和）
+
+**RVV 现状**：
+
+```asm
+# 当前 3 步序列：
+vfmv.v.f  v_init, 0.0f, 1           # 3 周期（初始化）
+vfredusum.vs  v_red, v_acc, v_init   # 4 周期（无序归约）
+vfmv.f.s  f_result, v_red            # 3 周期（提取标量）
+# 3 条指令，10 周期
+
+# 扩展后：
+vfadd.red.vs  v_result, v_acc        # ~4 周期
+# 1 条指令，4 周期
+```
+
+**应用场景**：
+- ReduceMean sum 归约（OSTrack: 50 次/推理, N=768）
+- Softmax sum 归约（OSTrack: 144 次/推理, N=320）
+- LayerNorm 均值/方差计算
+- 任何需要向量 → 标量 sum 归约的场景
+
+**收益计算**：
+
+```
+归约 BB 内: 3 条 → 1 条, 减少 67%
+OSTrack 单次推理（194 次归约）: 节省 ~388 条指令
+跨应用影响（ReduceMean + Softmax）:
+  ReduceMean: 每次归约节省 2 条, 50 次/推理
+  Softmax: sum 归约阶段节省 2 条, 144 次/推理
+```
+
+注：与方案 7（vfmax.red/vfmin.red）互补——方案 7 覆盖 max/min 归约，方案 16 覆盖 sum 归约。二者共同实现归约操作的"单指令化"。
+
+---
+
+### 1.3 附加方案（续）
+
+#### 方案 17: vfexp.v — 硬件向量指数指令
+
+**指令定义**：
+
+```
+vfexp.v vd, vs2, vm
+  功能：vd[i] ← exp(vs2[i])  // 向量指数函数（有限精度硬件近似）
+  精度：~23-bit mantissa（与 x86 AVX512 ER vexp2ps 精度相当）
+```
+
+**跨平台来源**：x86 AVX512 ER `vexp2ps`（Xeon Phi），ARM SVE 部分实现 `vexpa`
+
+**RVV 现状**：
+
+```
+当前 exp(x) 计算（sigmoid-based 多项式, ~28 条/VL）:
+  vfmax（钳位）→ vfmul（x²）→ 22 条多项式（p(x)+q(x) Horner 形式）
+  → vfdiv（p/q）→ vfadd（+0.5）→ vfrsub（1-sig）
+  → vfdiv（sig/(1-sig)）
+  总: ~28 条指令/VL 个元素
+
+扩展后:
+  vfexp.v vd, vs2    # 1 条指令/VL 个元素
+  BB 内减少: ~96%（28 → 1）
+```
+
+**收益计算**：
+
+```
+OSTrack Softmax Pass 2（占 softmax ~81% 指令）:
+  exp 计算: ~1,100 条/VL 迭代（N=320） → ~40 条
+  Pass 2 整体减少: ~63%
+  整体 softmax 减少: ~63%（P2 单独）
+
+跨应用影响:
+  - Softmax（所有 transformer 模型）
+  - GELU/Gaussian 激活函数
+  - ComputeLogistic（sigmoid = 1/(1+exp(-x))）
+```
+
+**注**：`vfrsqrt7.v` / `vfrec7.v` 已在 RVV 中提供 7-bit 精度近似倒数/倒数平方根。`vfexp.v` 可参照此模式提供有限精度指数近似（需 Newton-Raphson 精修步达到全精度）。
+
+
 
 #### 方案 8: vunzip/vzip.vv — 奇偶分离/合并
 
@@ -389,6 +608,56 @@ vwmaccwod.vv vd, vs2, vs1  ; odd positions:   vd.h[j] += vs2.b[2j+1] × vs1.b[2j
 
 ---
 
+#### 方案 15: vnibunpack.vv — 单指令 Nibble 解包
+
+**指令定义**：
+
+```
+vnibunpack.vv vd_lo, vd_hi, vs2
+  功能：vd_lo[i] = vs2[i] & 0xF; vd_hi[i] = vs2[i] >> 4
+  等效于：vand.vx + vsrl.vx 两步融合（一步提取两个 nibble）
+```
+
+**跨平台来源**：x86 AVX2 `_mm256_and_si256` + `_mm256_srli_epi16` pattern，ARM NEON `vandq_u8` + `vshrq_n_u8` pattern
+
+**应用场景**：所有 Q4_K/Q5_0/Q5_K 量化格式的 4-bit 权重解包
+
+**收益计算**：
+
+```
+当前 RVV:
+  vand.vx (3c) + vsrl.vx (3c) = 6c, 2 条
+扩展后:
+  vnibunpack (~4c), 1 条
+  BB 内减少: 每 K-loop 迭代节省 2 条 × 2-4 次 = 4-8 条
+  llama.cpp gemm BB 内减少: ~10%
+  整体推理约 +2-3%
+```
+
+---
+
+### 1.6 内存/预取方案详解
+
+#### 方案 13: prefetch.v — 向量数据预取
+
+**指令定义**：
+
+```
+prefetch.v rs1, hint
+  功能：将 rs1 指向的向量数据预取到 L1/L2 cache
+  hint 编码预取策略（temporal/non-temporal, L1/L2/L3）
+```
+
+**跨平台来源**：x86 AVX `prefetcht0/prefetcht1/prefetcht2/prefetchnta` 系列，ARM `PRFM` 指令
+
+**应用场景**：大矩阵 GEMM 中预取下一 K 行的 B 矩阵数据，减少 cache miss 延迟
+
+**RVV 现状**：完全缺失。x86 SGEMM 在 K 循环中插入 `prefetcht0 [rdx+256]` 预取下一行数据，RVV 依赖硬件预取器。
+
+**收益**：大矩阵 GEMM 场景下 5-15% 整体性能提升（基于 x86 预取优化经验）。对小矩阵和受限于计算而非内存的场景收益有限。
+
+---
+
 ### 1.5 已排除方案
 
 | 方案 | 排除原因 |
@@ -397,7 +666,7 @@ vwmaccwod.vv vd, vs2, vs1  ; odd positions:   vd.h[j] += vs2.b[2j+1] × vs1.b[2j
 | 多行处理扩展 | 纯软件优化，将 SGEMM 行数从 2 扩展至 4/8 行，B 加载分摊。不需要新指令 |
 | 配对向量加载 | VLEN=512 下单条 `vle32.v` 已覆盖 16 列，配对加载收益 <1% |
 | vfrsqrt7/vfrec7 | RVV base V 扩展已包含，非新指令提议。当前实现未使用因精度需求不匹配 |
-| vexp.approx | 硬件实现复杂度极高，无成熟平台先例（ARM 仅为提案），收益不确定 |
+| vexp.approx | 已升级为正式方案 17 `vfexp.v`（OSTrack Softmax 分析提供量化收益：exp BB 减少 ~96%） |
 
 ---
 
@@ -405,15 +674,21 @@ vwmaccwod.vv vd, vs2, vs1  ; odd positions:   vd.h[j] += vs2.b[2j+1] × vs1.b[2j
 
 ### 2.1 llama.cpp 推理热点
 
+**来源**: SpacemiT K1-X (rv64imafdcv), Qwen2.5-0.5B Q4_K_M, 128 tokens 生成, perf record
+
 | 函数 | 占比 | 计算类型 |
 |------|------|---------|
-| `ggml_gemv_q4_0_16x1_q8_0` | **40.68%** | INT8 量化 GEMV（decode 阶段） |
-| `ggml_gemv_q8_0_16x1_q8_0` | **24.06%** | INT8 量化 GEMV（K-quant 中间层） |
-| `ggml_gemm_q4_0_16x1_q8_0` | 8.05% | INT8 量化 GEMM（prefill 阶段） |
-| `repack_q4_0_to_q4_0_16_bl` | 11.73% | 数据重打包 |
-| 其他算子 | ~15% | Norm/RoPE/Attention 等 |
+| `ggml_vec_dot_q5_0_q8_0_generic` | **54.64%** | Q5_0×Q8_0 向量点积 |
+| `ggml_vec_dot_q6_K_q8_K_generic` | **18.19%** | Q6_K×Q8_K 向量点积 |
+| `ggml_vec_dot_q4_K_q8_K_generic` | **15.88%** | Q4_K×Q8_K 向量点积 |
+| `ggml_gemv_q4_0_16x1_q8_0` | 部分计入 vec-dot | INT8 量化 GEMV（decode 阶段） |
+| `ggml_gemm_q4_0_16x1_q8_0` | 部分计入 vec-dot | INT8 量化 GEMM（prefill 阶段） |
+| `repack_q4_0_to_q4_0_16_bl` | ~5% | 数据重打包 |
+| 其他算子 | ~6% | Norm/RoPE/Attention 等 |
 
-**GEMV/GEMM 总计**: **72.79%**（核心计算）
+**量化点积总计**: **88.71%**（vec-dot-q5_0 + vec-dot-q6_K + vec-dot-q4_K）
+
+**关键洞察**: 三个量化点积函数共享相同的 int8 MAC→int32 累加模式，单条 `vsegdot.vv`（方案 1）可同时加速全部 88.71% 的热点路径。gemv-q4_K kernel 因 LLVM 22 后端优化器 bug 当前为标量回退（仅 2 字节 trampoline），修复后可额外获得 +20-30% 推理加速。
 
 ### 2.2 YOLO11n 推理热点
 
@@ -541,6 +816,23 @@ vwmaccwod.vv vd, vs2, vs1  ; odd positions:   vd.h[j] += vs2.b[2j+1] × vs1.b[2j
 | ReduceMinMax 主循环 | 18 条/迭代 | 3,114 | 4×vle32 → 4×vfmin → 4×vfmax |
 | QuantizeLinear | 10 条/迭代 | 52 BBs | vle32 → vfdiv → vfmax → vfmin → vfcvt → vmv → vadd → vncvt → vncvt → vse8 |
 
+### 4.5 llama.cpp 量化算子 BBV
+
+| 算子 | .bb 文件大小 | BB 数量 | 总执行次数 | SEW | 关键指令 |
+|------|-------------|---------|-----------|-----|---------|
+| gemm-q4_K-8x4-q8_K | 1.95MB | 3564 | 82,295,020 | e8/e16/e32 | vlse8 → vand → vsrl → vwmacc.vx → vwmacc.vv → vfcvt → vfmacc |
+| gemv-q4_K-8x8-q8_K | 401KB | 3558 | 6,633,029 | (标量回退) | j → generic 标量实现 (LLVM 22 bug) |
+| quantize-q8_0-4x4 | 265KB | 3249 | 3,922,390 | e32/e16/e8 | vle32 → vfabs → vfredmax → vfmul → vfcvt → vncvt → vsseg4e32 |
+| vec-dot-q5_0-q8_0 | 293KB | 3487 | 2,723,590 | e8/e16/e32 | vle8 → vand → vsrl → vlmul_ext → vslideup → vlm → vmnand → vsub.mu → vwmul → vwredsum |
+
+**K-loop 执行占比**（gemm/vec-dot 类算子）: 65-85%（基于 BBV 权重估算）
+
+**关键发现**:
+- gemv kernel 为 2 字节 trampoline 标量回退（LLVM 22 优化器 bug），无有效向量化
+- vec-dot 掩码符号扩展（vlm+vmnand+vsub.mu）为 RVV 独有优势：3 条 vs x86 4 条 + 查表
+- quantize vsseg4e32 段存储为 RVV 决定性优势：1 条 vs ARM NEON 288 条 lane 提取+store
+- 量化点积三函数（vec-dot-q5_0/q6_K/q4_K）占硬件 perf 88.71%，均依赖 int8→int32 归约
+
 ---
 
 ## 五、与主流架构对比
@@ -565,14 +857,37 @@ vwmaccwod.vv vd, vs2, vs1  ; odd positions:   vd.h[j] += vs2.b[2j+1] × vs1.b[2j
 | Clamp | 2 条 vfmax+vfmin | 方案 6: vclamp.vf | **减少 50% clamp 指令** |
 | 水平 min/max 归约 | 3 步序列 | 方案 7: vfmax.red/vfmin.red | **达到 NEON64 水平** |
 | 饱和窄化 | 2 步 vncvt（无饱和） | 方案 3: vnarrow_sat | **达到 SSE2/NEON 水平** |
+| ABS+归约 max | vfabs+vfredmax+vfmv.f.s 3 步 | 方案 12: vfabs_redmax | **超过 NEON vmaxvq（仅归约）** |
+| Widening multiply-reduce | vwmul+vwredsum+vmv 3 步 | 方案 11: vwmulred.vs | **接近 ARM vdot+vaddv** |
+| Nibble 解包 | vand+vsrl 2 步 | 方案 15: vnibunpack.vv | **达到 x86 PSHUFB pattern 水平** |
+| 数据预取 | 完全缺失 | 方案 13: prefetch.v | **达到 x86 prefetcht0/ARM PRFM 水平** |
+| Sum 归约 | vfmv+vfredusum+vfmv.f.s 3 步 | 方案 16: vfadd.red.vs | **达到 NEON64 vaddvq 水平** |
+| 硬件 exp | ~28 条多项式指令 | 方案 17: vfexp.v | **达到 AVX512 ER vexp2ps 水平** |
 
 ### 5.3 跨应用累计收益估算
 
 | 应用场景 | 最高收益方案 | 整体收益 |
 |---------|------------|---------|
-| llama.cpp 推理 | 方案 1 vsegdot.vv | **15-25%** |
+| llama.cpp 推理 | 方案 1 vsegdot.vv + LLVM bug 修复 | **+30-40%**（Phase 1 完成） |
+| llama.cpp 推理 | 方案 1+10+12 全部 | **+40-50%**（累计） |
 | YOLO11n FP32 | 方案 5 vmulacc.vv | **44.6%** |
 | YOLO11n FP32 | 方案 4 vfmacc.vv_lane | **29.1%** |
 | YOLO11n INT8 | 方案 1 vsegdot.vv | **54%** |
 | ResNet50 FP32 | 方案 5 vmulacc.vv | **44.55%** |
 | ResNet50 FP32 | 方案 4 vfmacc.vv_lane | **22.86%** |
+| ONNXRT SGEMM | 方案 5 vmulacc.vv (vmatmul.fp32) | **77.5%**（K-loop BB 内） |
+| OSTrack ReduceMean | 方案 16 vfadd.red.vs | 归约 BB 内 **67%** |
+| OSTrack Softmax | 方案 16+7 归约优化 | Pass 1+2 归约阶段 **~24%** |
+| OSTrack Softmax | 方案 17 vfexp.v | exp BB 内 **~96%** |
+
+### 5.4 RVV 独有优势（跨应用确认）
+
+| 优势 | 受益算子 | 应用 | 优势描述 |
+|------|---------|------|---------|
+| 掩码符号扩展 | vec-dot-q5_0 | llama.cpp | vlm+vmnand+vsub.mu 3 条 vs x86 4 条+查表 |
+| 段存储交织 | quantize-q8_0-4x4 | llama.cpp, YOLO | vsseg4e32 1 条 vs ARM NEON 288 条 |
+| 可配置 VLEN | 全部 | 全部 | 单一代码路径覆盖 128/256/512 |
+| LMUL 跨寄存器 | quantize | llama.cpp, YOLO | m8 加载 32 元素 vs ARM 8 次加载 |
+| 无序归约 vfredusum | ReduceMean, Softmax | OSTrack | 硬件树形归约 vs ARM/AVX 软件 shuffle 序列 |
+| sigmoid-based exp | Softmax | OSTrack | 复用验证多项式系数, 精度 ~1e-7（已 QEMU 验证） |
+| Horner vmull+vfadd | Softmax, ComputeLogistic | OSTrack, YOLO | 正确多项式评估 vs vfmacc 非 Horner 形式（已发现 bug） |

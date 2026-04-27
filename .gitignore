@@ -47,6 +47,7 @@ setup-report.txt
 # Pre-cloned vendor sources for cross-compilation
 applications/yolo/ort/vendor/
 applications/llama.cpp/vendor/
+applications/onnxrt/ort/vendor/
 
 # Model files (large GGUF models)
 applications/llama.cpp/models/*.gguf
@@ -81,4 +82,11 @@ applications/yolo/runner/build-*/
 # NOTE: tools/dfg/riscv_instrs.json is committed — it's the reproducible input for gen_isadesc.py
 .claude/worktrees/
 applications/onnxrt/resnet/vendor/
+
+# ONNX RT RVV patches compiled test binaries
+applications/onnxrt/rvv-patches/*/test
+applications/onnxrt/rvv-patches/*/test_vl512
+
+# ORT vendor directory
+applications/onnxrt/ort/vendor/
 third_party/llvm-install
