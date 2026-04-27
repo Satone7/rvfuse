@@ -90,3 +90,11 @@ applications/onnxrt/rvv-patches/*/test_vl512
 # ORT vendor directory
 applications/onnxrt/ort/vendor/
 third_party/llvm-install
+
+# ONNX model files (large, regenerated from export scripts)
+*.onnx
+*.onnx.data
+
+# Cloned reference repos
+applications/onnxrt/superpoint/reference/
+applications/onnxrt/superglue/reference/

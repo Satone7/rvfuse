@@ -688,7 +688,7 @@ Your task: Execute the full rvv512-optimization-pipeline for onnxrt/ViT-Base/32.
 
 APPLICATION: Vision Transformer Base with 32x32 patches for ImageNet classification.
 TARGET DIRECTORY: applications/onnxrt/vit-base-32/
-ONNX MODEL: output/models/vit_base_patch32_224.onnx (pre-exported by Lead)
+ONNX MODEL: output/models/vit_base_patch32_384.onnx (pre-exported by Lead; google/vit-base-patch32-224 does not exist, using 384x384 variant)
 REFERENCE RUNNER: applications/onnxrt/yolo/runner/yolo_runner.cpp (ONNX Runtime API pattern)
 REFERENCE BUILD: applications/onnxrt/ort/build.sh (cross-compile script)
 REFERENCE RVV PATCHES: applications/onnxrt/rvv-patches/sgemm-kernel-vl16/ (directly applicable)
