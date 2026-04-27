@@ -14,7 +14,9 @@
 
 ## 1. Objective
 
-Run the `rvv512-optimization-pipeline` (Phase 0–5) for **4 new applications** in parallel. Each application is a separate ONNX-based model running on ONNX Runtime, assigned to an isolated Worker operating in a git worktree. Three workers use **sonnet** (established patterns, skill-guided); the `superglue` worker uses **opus** (novel cross-attention operator and complex Sinkhorn implementation).
+Run the `rvv512-optimization-pipeline` (Phase 0–5) for **4 new applications** **serially** (one at a time). Each application is a separate ONNX-based model running on ONNX Runtime, assigned to an isolated Worker operating in a git worktree. Three workers use **sonnet** (established patterns, skill-guided); the `superglue` worker uses **opus** (novel cross-attention operator and complex Sinkhorn implementation).
+
+**Execution model**: Due to limited device performance, teammates execute **serially**, not in parallel. The Lead spawns one teammate at a time, waits for it to complete all phases, dispatches an **opus verification subagent** to check the work quality, and only proceeds to the next application after the current one passes verification. If verification fails, the teammate is instructed to fix issues and re-submit — this loop repeats until verification passes.
 
 This batch covers two complementary domains:
 - **Image classification** (ViT-Base/16, ViT-Base/32): Transformer-based architecture with attention dominance
@@ -30,8 +32,8 @@ The `rvfuse-analysis-b2` team uses the **team model**: teammates are spawned wit
 
 | Model | Creation | Membership | Communication | Purpose |
 |-------|----------|------------|---------------|---------|
-| **Team Agent (teammate)** | `Agent(team_name="...", name="...")` | Belongs to team, appears in team config | `SendMessage(to="name")` | Long-running parallel worker |
-| **Standalone Agent (subagent)** | `Agent()` or `Agent(subagent_type="...")` | No team membership | Result returned to caller | Fire-and-forget research/code task |
+| **Team Agent (teammate)** | `Agent(team_name="...", name="...")` | Belongs to team, appears in team config | `SendMessage(to="name")` | Long-running serial worker |
+| **Standalone Agent (subagent)** | `Agent()` or `Agent(subagent_type="...")` | No team membership | Result returned to caller | Fire-and-forget research/check task |
 
 **DO NOT use standalone subagents as teammates.** A subagent without `team_name` is invisible to the team, can't receive `SendMessage`, and can't coordinate via the shared TaskList. Teammates are spawned ONLY with `Agent(team_name="rvfuse-analysis-b2", name="<name>", ...)`.
 
@@ -54,7 +56,7 @@ Agent(
     prompt="""..."""
 )
 
-# Step 3: Create tasks AFTER spawning (tasks go into the shared team task list)
+# Step 3: Create task AFTER spawning (task goes into the shared team task list)
 TaskCreate(subject="ViT-Base/16: Full Pipeline (Phase 0-5)", ...)
 ```
 
@@ -73,10 +75,13 @@ Agent(description="do the task")                       # This is a subagent, not
 
 | Role | Name | Count | Responsibility |
 |------|------|-------|---------------|
-| **Lead** | (current session) | 1 | `TeamCreate`, spawn teammates via `Agent(team_name="rvfuse-analysis-b2", name=...)`, monitor via `SendMessage`, worktree merge, cross-app synthesis report |
-| **Teammate** | per-application name | 4 | Execute full pipeline (Phase 0–5) for one application in an isolated worktree. Spawned as `Agent(team_name="rvfuse-analysis-b2", name="<app>")` — NEVER as a standalone subagent. |
+| **Lead** | (current session) | 1 | `TeamCreate`, spawn teammates **serially** via `Agent(team_name="rvfuse-analysis-b2", name=...)`, dispatch opus verification subagent after each teammate completes, manage rework loops, shutdown teammate after PASS, then spawn next teammate. Merge worktrees, cross-app synthesis report. Cancel Guardian cron as the final action. |
+| **Teammate** | per-application name | 1 active at a time (4 total) | Execute full pipeline (Phase 0–5) for one application in an isolated worktree. Spawned as `Agent(team_name="rvfuse-analysis-b2", name="<app>")` — NEVER as a standalone subagent. |
+| **Guardian** | `guardian` | 1 (persistent) | Monitor ALL team members (including Lead) via tmux on a cron loop. Intervene when idle/stuck to keep the team progressing. Spawned as `Agent(team_name="rvfuse-analysis-b2", name="guardian", ...)`. See §2.6. |
 
 **Important**: `TaskCreate` does NOT create workers. Tasks are work-tracking items in the shared task list; they describe what needs to be done, not who does it. Teammates are the actual workers, spawned via `Agent` with `team_name`.
+
+**Serial constraint**: Only ONE app teammate is active at any time. The Lead spawns app teammate N+1 only after teammate N has passed verification and been shut down. The Guardian runs persistently alongside all teammates.
 
 ### 2.3 Model Selection
 
@@ -84,45 +89,157 @@ Model selection is differentiated by task difficulty. **Sonnet** handles the thr
 
 | Teammate | Model | Rationale |
 |----------|-------|-----------|
-| `vit-base-16` | **sonnet** | Standard ViT architecture, SGEMM patch already exists, runner follows YOLO reference — skill-guided execution suffices |
-| `vit-base-32` | **sonnet** | Heavy reuse from vit-base-16, primarily shape comparison (50 vs 197 tokens) — lowest complexity |
 | `superpoint` | **sonnet** | CNN patterns well-established, NMS is a deterministic algorithm, Conv2d analysis methodology mature |
 | `superglue` | **opus** | Novel cross-attention (first in project), Sinkhorn optimal transport implementation, complex ONNX export with dynamic shapes — requires deep architectural reasoning |
+| `vit-base-16` | **sonnet** | Standard ViT architecture, SGEMM patch already exists, runner follows YOLO reference — skill-guided execution suffices |
+| `vit-base-32` | **sonnet** | Heavy reuse from vit-base-16, primarily shape comparison (50 vs 197 tokens) — lowest complexity |
 
-### 2.4 Lead Responsibilities
+**Verification subagent model**: All verification checks use **opus**. Verification requires deep architectural reasoning to judge whether a teammate's output meets quality standards — this is not a mechanical checklist task. See §2.4.3.
 
-The Lead (current Claude session) is NOT idle while teammates work. It actively monitors, verifies, and drives progress.
+### 2.4 Lead Responsibilities — Serial Execution with Quality Gates
 
-#### 2.4.1 Cron-Based Monitoring
+The Lead (current Claude session) executes a strict **serial workflow**: spawn → wait → verify → rework (if needed) → shutdown → next.
 
-Lead creates a recurring cron job via `CronCreate` to periodically check teammate status:
+#### 2.4.1 Serial Execution Loop (Core Workflow)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    SERIAL EXECUTION LOOP                   │
+│                                                          │
+│  For each application in [superpoint, superglue,         │
+│                           vit-base-16, vit-base-32]:       │
+│                                                          │
+│  1. SPAWN: Agent(team_name, name, isolation="worktree")  │
+│     └─ Teammate runs Phase 0→5 autonomously              │
+│                                                          │
+│  2. WAIT: Teammate reports completion via SendMessage    │
+│                                                          │
+│  3. VERIFY: Lead dispatches opus subagent to check       │
+│     ┌─ PASS ───────────────────────────────────┐        │
+│     │  4a. SendMessage shutdown_request         │        │
+│     │  5a. Wait for teammate to exit            │        │
+│     │  6a. TaskUpdate(status="completed")       │        │
+│     │  7a. Merge worktree (--no-ff)             │        │
+│     │  8a. Move to NEXT application             │        │
+│     └───────────────────────────────────────────┘        │
+│     ┌─ FAIL ───────────────────────────────────┐        │
+│     │  4b. SendMessage with specific fix list   │        │
+│     │  5b. Teammate fixes issues                │        │
+│     │  6b. Go to step 2 (WAIT for re-submit)   │        │
+│     └───────────────────────────────────────────┘        │
+│                                                          │
+│                                                          │
+│  Guardian runs alongside via cron (5-min tmux checks)     │
+│  After ALL 4 apps PASS: Phase D + Phase E + cancel       │
+│  Guardian cron (LAST action)                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### 2.4.2 Teammate Lifecycle
+
+1. **Spawn**: Lead creates teammate via `Agent(team_name="rvfuse-analysis-b2", name="<name>", isolation="worktree", ...)`. The `team_name` parameter is what distinguishes a teammate from a standalone subagent.
+2. **Claim**: Teammate reads `TaskList`, claims task via `TaskUpdate(owner="<its-name>")`
+3. **Execute**: Teammate runs all pipeline phases (0→5) autonomously in sequence. Guardian monitors progress via tmux.
+4. **Report**: Teammate sends completion message to Lead via `SendMessage(to="Lead")` after finishing Phase 5
+5. **Verify**: Lead dispatches an **opus verification subagent** (standalone, no `team_name`) to check all deliverables
+6. **Rework loop**: If verification FAILS, Lead sends fix instructions via `SendMessage(to="<teammate-name>")`, teammate fixes and re-reports → go to step 5
+7. **Shutdown**: After PASS, Lead sends `shutdown_request` via `SendMessage`
+8. **Merge**: Lead merges worktree back to master (`--no-ff`)
+9. **Next**: Lead spawns the next teammate (go to step 1)
+10. **Final Cleanup**: After all 4 teammates complete and shut down: run Phase E (synthesis) → `TeamDelete` → **cancel Guardian cron last**
+
+#### 2.4.3 Stage-Gate Verification (Opus Subagent)
+
+When a teammate reports full pipeline completion (Phase 0–5 done), Lead dispatches a **standalone opus verification subagent** — this is a standalone `Agent` WITHOUT `team_name`, because it's a fire-and-forget quality check, not a team member:
 
 ```python
-CronCreate(
-    cron="*/5 * * * *",           # every 5 minutes
-    prompt="Check the status of all rvfuse-analysis-b2 teammates. "
-           "For each teammate: read ~/.claude/teams/rvfuse-analysis-b2/config.json "
-           "to get member info, then check TaskList for task progress. "
-           "If any teammate is idle or blocked, use tmux to inspect its terminal "
-           "and provide appropriate input to unblock or advance the task.",
-    recurring=True,
-    durable=False                  # session-only, dies when Lead exits
+# NOTE: no team_name, no name — this is a standalone subagent, NOT a teammate
+# Using opus model for deep architectural reasoning during verification
+Agent(
+    description="Verify <teammate-name> Phase 0-5 deliverables",
+    subagent_type="general-purpose",
+    model="opus",
+    mode="default",
+    prompt="""
+    Verify ALL deliverables for <teammate-name> in worktree <path>.
+
+    CHECKLIST:
+
+    Phase 0 — Setup:
+    - [ ] ONNX model exists and is valid (check file size > 0, verify with python onnx.checker if possible)
+    - [ ] C++ runner compiles and links successfully
+    - [ ] ONNX Runtime cross-compiled for rv64gcv
+    - [ ] QEMU smoke test: runner produces valid output (correct classification/keypoints/matches)
+    - [ ] Sysroot extracted and functional
+
+    Phase 2 — RVV512 Vectorization:
+    - [ ] RVV patches exist for target operators (check file existence + non-empty)
+    - [ ] Patches applied to ONNX Runtime build
+    - [ ] Correctness verified: QEMU output matches vanilla (non-RVV) build output
+
+    Phase 3 — BBV Profiling:
+    - [ ] Each target operator has a non-empty .bb file (check: file size > 100 bytes)
+    - [ ] Each target operator has a .disas file with valid RISC-V instructions
+    - [ ] Function-scoped profiling used (not whole-program), verified by checking .bb file has function-specific data
+
+    Phase 4 — Gap Analysis:
+    - [ ] Each target operator has a gap analysis .md report
+    - [ ] Each report includes cross-platform comparison (RVV vs x86/ARM/etc.)
+    - [ ] Each report includes BBV-weighted benefit figures (整体收益)
+    - [ ] Each report has a corresponding .pdf (via md2pdf)
+
+    Phase 5 — Consolidated Report:
+    - [ ] Consolidated .md report exists and merges all per-operator findings
+    - [ ] Priority table with BBV-weighted scores is present
+    - [ ] Consolidated .pdf exists (via md2pdf)
+    - [ ] Report is self-consistent (no contradictions between per-operator and consolidated data)
+
+    OVERALL:
+    - [ ] No empty or placeholder files (check for files with only "TODO" or "TBD")
+    - [ ] File paths match the expected directory structure
+    - [ ] No obvious quality issues (e.g., BBV data with < 10 basic blocks, gap analysis without actual instruction comparison)
+
+    Report: PASS/FAIL with detailed issue list for each failed item.
+    If FAIL: provide SPECIFIC, actionable fix instructions for the teammate.
+    """
 )
 ```
 
-#### 2.4.2 Tmux Monitoring Protocol
+**Why opus for verification?** Verification requires:
+- Deep understanding of RISC-V vector ISA semantics to judge whether gap analysis findings are technically sound
+- Cross-referencing across multiple output files (BBV data → gap analysis → consolidated report) for consistency
+- Judging whether "empty BBV output" is a methodology error or a genuine result
+- Identifying subtle quality issues like incomplete instruction coverage in disassembly analysis
 
-Lead monitors each teammate's terminal via tmux panes:
+These are architectural reasoning tasks that require opus-level capability. Sonnet is insufficient for reliable quality judgment.
 
-1. **Detect idle state**: Teammate prompt showing `❯` with no spinner means idle/blocked
-2. **Diagnose**: Read the teammate's last output to understand why it stopped
-3. **Intervene**: Send appropriate text input to the teammate's tmux pane:
+**Why not a teammate for verification?** Verification is a one-shot, stateless check that returns a result and exits immediately. It doesn't need team membership, shared task list, or `SendMessage`. Using a standalone `Agent` (no `team_name`) for verification keeps the team roster clean and avoids spawning long-lived agents for short tasks.
+
+#### 2.4.4 Rework Protocol
+
+If verification returns FAIL:
+
+1. Lead reads the verification subagent's detailed issue list
+2. Lead sends `SendMessage(to="<teammate-name>")` with:
+   - Clear statement: "Verification FAILED. Fix the following issues:"
+   - Numbered, specific, actionable fix items (copied from verification output)
+   - Instruction: "After fixing all issues, re-report completion via SendMessage."
+3. Teammate fixes issues and sends new completion message
+4. Lead dispatches a NEW verification subagent (fresh instance, same checklist)
+5. Repeat until PASS
+
+**Rework iteration limit**: If a teammate fails verification 3 times, Lead escalates — manually intervenes to fix the most critical issues, then re-verifies.
+
+#### 2.4.5 Tmux Monitoring (Lightweight)
+
+Since only one teammate runs at a time, continuous cron monitoring is unnecessary. Instead, Lead checks the teammate's tmux pane **on demand**:
+
+1. **During WAIT**: If teammate hasn't reported completion within expected time (see §11 timeline), check tmux to see if it's stuck
+2. **Intervention**: If teammate is idle/blocked (prompt showing `❯` with no spinner), diagnose and provide input:
    - **Waiting for confirmation** → Send `y` or the appropriate response
    - **Encountered an error** → Send debug/fix instructions
-   - **Completed a phase** → Send instructions to proceed to next phase
    - **Stuck in a loop** → Send `Ctrl-C` then redirect
-
-4. **Log**: Record interventions in `docs/plans/tmux-automation-log-b2.md`:
+3. **Log**: Record interventions in `docs/plans/tmux-automation-log-b2.md`:
    ```markdown
    ### YYYY-MM-DD HH:MM - <teammate-name> <status>
    - **当前阶段**: ...
@@ -132,42 +249,6 @@ Lead monitors each teammate's terminal via tmux panes:
    - **操作结果**: ...
    ```
 
-#### 2.4.3 Stage-Gate Verification
-
-When a teammate reports phase completion (via `SendMessage` or `TaskUpdate`), Lead dispatches a **lightweight verification subagent** — this is a standalone `Agent` WITHOUT `team_name`, because it's a fire-and-forget check, not a team member:
-
-```python
-# NOTE: no team_name, no name — this is a standalone subagent, NOT a teammate
-Agent(
-    description="Verify vit-base-16 Phase 3 results",
-    subagent_type="general-purpose",
-    mode="default",
-    prompt="""
-    Verify the Phase 3 results for <teammate-name> in worktree <path>.
-    ...checklist...
-    Report: PASS/FAIL with details.
-    """
-)
-```
-
-**Why not a teammate for verification?** Verification is a one-shot, stateless check that returns a result and exits immediately. It doesn't need team membership, shared task list, or `SendMessage`. Using a standalone `Agent` (no `team_name`) for verification keeps the team roster clean and avoids spawning long-lived agents for short tasks.
-
-Based on verification result:
-- **PASS** → Send `SendMessage` to teammate: "Phase N verified. Proceed to Phase N+1." or start shutdown
-- **FAIL** → Send `SendMessage` to teammate with specific issues to fix, e.g. "Phase 3 verification failed: operator X has empty BBV output. Re-run BBV with corrected function offset."
-
-#### 2.4.4 Teammate Lifecycle
-
-1. **Spawn**: Lead creates teammate via `Agent(team_name="rvfuse-analysis-b2", name="<name>", isolation="worktree", ...)`. The `team_name` parameter is what distinguishes a teammate from a standalone subagent.
-2. **Claim**: Teammate reads `TaskList`, claims task via `TaskUpdate(owner="<its-name>")`
-3. **Execute**: Teammate runs pipeline phases, updates task status
-4. **Monitor**: Lead's cron job checks teammate status every 5 minutes via tmux
-5. **Verify**: On each phase completion, Lead dispatches a standalone verification subagent (no `team_name`)
-6. **Advance**: Lead sends next-phase instructions or fix requests via `SendMessage(to="<teammate-name>")`
-7. **Shutdown**: After final phase passes verification, Lead sends `shutdown_request` via `SendMessage`
-8. **Merge**: Lead merges worktree back to master (`--no-ff`)
-9. **Cleanup**: `TeamDelete` after all teammates shut down
-
 ### 2.5 Worker Types
 
 All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new applications with no existing data, requiring complete setup from ONNX export through to consolidated report.
@@ -176,23 +257,97 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 |------|---------|--------|------------|
 | **Full Pipeline** | New application, no existing data | Phase 0 → 5 | All 4 apps |
 
+### 2.6 Guardian Teammate — Long-Run Progress Monitor
+
+The Guardian is a **persistent teammate** that monitors all team members (including the Lead) via tmux on a cron loop. Its sole purpose is to keep the team making continuous progress during long, unsupervised runs where the Lead or teammates may become stuck or idle without triggering normal wake-up mechanisms.
+
+**Model**: **sonnet** — monitoring is procedural and pattern-matching; deep architectural reasoning is not required.
+
+**Lifecycle**:
+- **Spawn**: By Lead AFTER `TeamCreate`, BEFORE the first application teammate (see §6 Phase B)
+- **Run**: Persistent cron loop firing every 5 minutes, for the entire duration of the batch
+- **Cancel**: By Lead as the **ABSOLUTE LAST action** — after all teammates shut down, all worktrees merged, `TeamDelete` done, and synthesis report generated
+
+#### 2.6.1 Cron Loop
+
+Guardian creates a recurring cron job via `CronCreate`:
+
+```python
+CronCreate(
+    cron="*/5 * * * *",           # every 5 minutes
+    prompt="Check the status of ALL rvfuse-analysis-b2 team members via tmux. "
+           "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for member list. "
+           "For each member (including Lead): check tmux pane state. "
+           "Determine if any intervention is needed per the intervention protocol "
+           "in docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6.2. "
+           "Log all interventions to docs/plans/guardian-log-b2.md.",
+    recurring=True,
+    durable=False                  # session-only, dies when Lead exits
+)
+```
+
+#### 2.6.2 Intervention Protocol
+
+On each cron tick, Guardian assesses the state of ALL team members and intervenes as needed:
+
+**State Assessment**:
+1. List all tmux panes. Identify which belong to team members (Lead + app teammates + self).
+2. For each pane, capture the last ~10 lines of output to determine its state.
+3. Classify each member's state: `active` (spinner visible), `idle` (❯ prompt, no spinner), `blocked` (error message), `awaiting_user` (permission prompt / question / confirmation dialog).
+
+**Intervention Rules** (check in order, execute the FIRST matching rule):
+
+| # | Condition | Action |
+|---|-----------|--------|
+| 1 | Lead shows **awaiting_user** (permission prompt, question with options, confirmation dialog) | Guardian sends the appropriate response to Lead's tmux pane: for yes/no confirmations → `y`; for multiple-choice → select the default/recommended option; for permission prompts → approve. Log: "Auto-approved Lead prompt: <description>." |
+| 2 | Lead is **idle** AND all app teammates are **idle** | Guardian inputs a wake-up prompt to Lead's tmux pane: `All team members are idle. Check TaskList progress. If the current app teammate should have completed, send SendMessage to check its status. If verification is pending, dispatch the opus verification subagent. If ready to spawn the next teammate, do so.` Log: "Woke Lead from idle — all members idle." |
+| 3 | Current app teammate is **idle** (❯ prompt, no spinner) but Lead is **active** | Teammate may have finished a phase but not reported. Guardian inputs to teammate's tmux: `Report your current phase status to Lead via SendMessage. If you have completed a phase and are waiting for instructions, state clearly what you need next.` Log: "Nudged <teammate-name> to report status." |
+| 4 | Any member shows **blocked** (error in last output) | Guardian reads the error, determines if it can be resolved by sending a simple fix command. If fixable: send the fix command. If not: notify Lead's tmux pane with the error details. Log: "Unblocked <name> with <action>." or "Notified Lead of <name> error: <summary>." |
+| 5 | All 4 app tasks show `status="completed"` in TaskList AND Lead is idle | Guardian inputs to Lead's tmux pane: `All 4 tasks show completed in TaskList. If all teammates are shut down and worktrees merged, proceed to Phase D (cleanup) and Phase E (synthesis report). Remember: cancel my (Guardian) cron as the LAST action.` Log: "Notified Lead: all tasks complete." |
+| 6 | All app tasks complete, worktrees merged, synthesis done — only remaining action is Guardian cancellation | Guardian inputs to Lead's tmux pane: `All work appears complete. The only remaining action is to cancel my cron: CronDelete(id="<my-cron-id>"). After that, the batch is done.` Log: "Final reminder: cancel Guardian cron." |
+| 7 | Everything is progressing normally (at least one member is `active`) | No intervention. Log: "Tick: all normal — <active-member-name> is active." |
+
+**Logging**: Every cron tick, Guardian appends to `docs/plans/guardian-log-b2.md`:
+```markdown
+### YYYY-MM-DD HH:MM — Guardian Tick #<N>
+- **Lead**: <state>
+- **<teammate-1>**: <state>
+- **<teammate-2>**: <state>
+- ...
+- **Decision**: <rule-#: description>
+- **Action taken**: <what was sent to which pane, or "none">
+```
+
+#### 2.6.3 Guardian Constraints
+
+- **Read-only by default**: Guardian only intervenes when members are idle/stuck. It does NOT modify code, change task assignments, or make architectural decisions.
+- **Never skip verification**: Guardian must NOT approve verification on behalf of Lead. Only the Lead dispatches the opus verification subagent.
+- **Never spawn/shutdown teammates**: Only the Lead manages teammate lifecycles. Guardian only nudges.
+- **Never merge worktrees**: Only the Lead runs `git merge --no-ff`.
+- **Cancellation is Lead's last action**: Guardian's cron is the final thing cancelled, after everything else is done. This ensures no orphaned, unmonitored state.
+
+#### 2.6.4 Guardian Spawn
+
+The Guardian is spawned by the Lead as the first teammate, immediately after `TeamCreate`. The full spawn code with prompt is in §6 Phase B Step B1b. See that section for the exact `Agent(...)` call.
+
 ## 3. Application Tasks
 
-| # | Teammate Name | Application | Model | Type | Phases | Priority |
-|---|---------------|-------------|-------|------|--------|----------|
-| 1 | `vit-base-16` | onnxrt/ViT-Base/16 | sonnet | Full Pipeline | 0–5 | High |
-| 2 | `vit-base-32` | onnxrt/ViT-Base/32 | sonnet | Full Pipeline | 0–5 | Medium-High |
-| 3 | `superpoint` | onnxrt/SuperPoint | sonnet | Full Pipeline | 0–5 | High |
-| 4 | `superglue` | onnxrt/SuperGlue | opus | Full Pipeline | 0–5 | Medium-High |
+| # | Teammate Name | Application | Model | Type | Phases | Priority | Execution Order |
+|---|---------------|-------------|-------|------|--------|----------|-----------------|
+| 1 | `superpoint` | onnxrt/SuperPoint | sonnet | Full Pipeline | 0–5 | High | **1st** |
+| 2 | `superglue` | onnxrt/SuperGlue | opus | Full Pipeline | 0–5 | Medium-High | **2nd** |
+| 3 | `vit-base-16` | onnxrt/ViT-Base/16 | sonnet | Full Pipeline | 0–5 | High | **3rd** |
+| 4 | `vit-base-32` | onnxrt/ViT-Base/32 | sonnet | Full Pipeline | 0–5 | Medium-High | **4th** |
 
-**Priority rationale**:
-- `vit-base-16` and `superpoint` are HIGH: they are the primary representatives of their respective architecture families (Transformer and CNN), and other apps (vit-base-32, superglue) depend on their insights.
-- `vit-base-32` is MEDIUM-HIGH: same architecture as vit-base-16, primarily provides shape-sensitivity data.
-- `superglue` is MEDIUM-HIGH: depends on SuperPoint for real input data (though synthetic data can be used for BBV), and has the most complex ONNX export.
+**Execution order rationale**:
+- `superpoint` runs FIRST: small model (~5 MB), fast ONNX Runtime build, establishes CNN operator patterns (Conv2d, ReLU, Softmax). Its SuperPoint outputs can optionally feed into SuperGlue for real-data testing.
+- `superglue` runs SECOND: most complex (opus), depends on SuperPoint conceptually (feature matching pipeline) and can reference its code on master. Self-attention analysis will later be referenced by ViT apps.
+- `vit-base-16` runs THIRD: large model (~350 MB), Transformer architecture. Refers to superglue's self-attention analysis on master. Establishes SGEMM/MatMul patterns that vit-base-32 reuses.
+- `vit-base-32` runs LAST: heavy reuse from vit-base-16 (identical architecture, different shapes). Quickest execution since all patterns are established.
 
 ### 3.1 Task Details
 
-#### 3.1.1 onnxrt/ViT-Base/16 — Full Pipeline Worker
+#### 3.1.3 onnxrt/ViT-Base/16 — Full Pipeline Worker
 
 **Application**: Vision Transformer (ViT) Base with 16×16 patches, image classification on ImageNet-1K.
 
@@ -253,9 +408,10 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 - ONNX Runtime build: `applications/onnxrt/ort/build.sh` — cross-compile script
 - SGEMM RVV patch: `applications/onnxrt/rvv-patches/sgemm-kernel-vl16/` — directly applicable to ViT MatMul operators
 - GELU RVV patch: `applications/onnxrt/rvv-patches/quick-gelu/` — applicable to ViT GELU (note: ViT uses standard GELU, not QuickGELU; may need adaptation)
+- SuperGlue self-attention analysis: `docs/report/superglue/` (already merged to master) — self-attention RVV patterns are directly reusable for ViT attention
 - OSTrack ViT analysis: if Batch 1 `onnxrt-ostrack` has completed, its ViT-Base attention operator analysis is directly reusable
 
-#### 3.1.2 onnxrt/ViT-Base/32 — Full Pipeline Worker
+#### 3.1.4 onnxrt/ViT-Base/32 — Full Pipeline Worker
 
 **Application**: Vision Transformer (ViT) Base with 32×32 patches. Same architecture as ViT-Base/16 but with larger patch size, resulting in fewer tokens and different MatMul shapes.
 
@@ -281,10 +437,10 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 
 **Reuse from vit-base-16**:
 - Runner code: identical structure, different model file path and input size handling
-- ONNX Runtime build: identical (share after Phase 0 if running serially)
+- ONNX Runtime build: identical (can reference already-merged vit-base-16 build)
 - Gap analysis methodology: directly applicable, focus on shape-difference impact
 
-#### 3.1.3 onnxrt/SuperPoint — Full Pipeline Worker
+#### 3.1.1 onnxrt/SuperPoint — Full Pipeline Worker
 
 **Application**: SuperPoint — CNN-based interest point detection and descriptor extraction (Magic Leap, CVPR 2018).
 
@@ -358,7 +514,7 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 - Element-wise operator RVV patches (ReLU, GELU) — can adapt for ReLU
 - Softmax and reduction patterns from existing RVV patch collection
 
-#### 3.1.4 onnxrt/SuperGlue — Full Pipeline Worker
+#### 3.1.2 onnxrt/SuperGlue — Full Pipeline Worker
 
 **Application**: SuperGlue — Graph Neural Network for feature matching with optimal transport (Magic Leap, CVPR 2020).
 
@@ -449,17 +605,18 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 - **SuperPoint dependency**: For real end-to-end testing, SuperGlue needs SuperPoint outputs. However, for BBV profiling, synthetic random keypoints + descriptors are sufficient — operator performance is independent of input semantics. The C++ runner should support both modes.
 
 **Existing references**:
-- ViT-Base/16 self-attention analysis (from teammate `vit-base-16`) — directly applicable to SuperGlue self-attention layers
+- SuperPoint code (from teammate `superpoint`, already merged) — available on master for reference
+- Self-attention has NO existing analysis in the project at this point (ViT-Base/16 runs later) — SuperGlue is the FIRST to analyze attention operators
 - Cross-attention has NO existing analysis in the project — this is a novel operator family
 - Sinkhorn has NO existing analysis — novel operator, though element-wise heavy and memory-bound
 
 **Relationship to SuperPoint**:
 - SuperGlue and SuperPoint form a feature matching pipeline: Image → SuperPoint → (keypoints, descriptors) → SuperGlue → matches
-- For Phase 0–5 analysis, they can run independently:
+- For Phase 0–5 analysis, they run independently (serial, SuperPoint runs first):
   - SuperPoint analyzes CNN operators → reports in `docs/report/superpoint/`
   - SuperGlue analyzes GNN + attention + Sinkhorn operators → reports in `docs/report/superglue/`
   - Cross-referenced in the consolidated report
-- The Lead's cross-app synthesis (Phase D) will combine both to describe the complete matching pipeline
+- The Lead's cross-app synthesis (Phase E) will combine both to describe the complete matching pipeline
 
 ## 4. Worktree Isolation
 
@@ -481,7 +638,7 @@ These are read-only and symlinked from each worktree to the main repository:
 | Resource | Path | Reason |
 |----------|------|--------|
 | Sysroot | `output/cross-ort/sysroot/` | Each worktree builds its own via Docker extraction |
-| onnxrt source | `applications/onnxrt/<app>/vendor/` | Must clone independently to avoid parallel conflicts |
+| onnxrt source | `applications/onnxrt/<app>/vendor/` | Independent clone per application |
 | Build output | `output/cross-<app>/` | Independent per application |
 | ONNX models | `applications/onnxrt/<app>/model/` | Per-application model files |
 | RVV patches | `applications/onnxrt/rvv-patches/` | Shared across onnxrt apps within same worktree; worktree-isolated from others |
@@ -490,9 +647,7 @@ These are read-only and symlinked from each worktree to the main repository:
 
 ### 4.3 ONNX Runtime Sharing Strategy
 
-Each worktree builds its own ONNX Runtime from source in `vendor/`. This ensures no parallel build conflicts. However, within a worktree, all onnxrt applications (e.g., if we later add a second app to the same worktree) share the same build.
-
-**Build time optimization**: The ONNX Runtime build (~20-40 min on modern hardware) is cached per worktree. Since each worktree builds independently, the 4 builds can run in parallel (CPU-bound, not I/O-bound).
+Since execution is serial (one worktree active at a time), worktree isolation is simpler. Each worktree builds its own ONNX Runtime from source in `vendor/`. The previous worktree is already merged back to master, so each new worktree starts from the updated master (including all previous app code).
 
 ### 4.4 Worktree Init Script
 
@@ -524,61 +679,149 @@ mkdir -p "applications/onnxrt/${APP_NAME}/runner"
 # The build.sh script handles this, or do it here
 ```
 
-## 5. Parallel Scheduling Constraints
+## 5. Serial Execution Constraints
 
-| Resource | Parallelism | Notes |
-|----------|------------|-------|
-| QEMU BBV | **Parallel** | Each process is independent |
+Since only one teammate runs at a time on limited hardware, resource contention is minimal:
+
+| Resource | Execution | Notes |
+|----------|----------|-------|
+| QEMU BBV | **Serial** | Only one BBV process at a time |
 | LLVM toolchain | **N/A** | Symlinked, no rebuild needed |
-| ONNX Runtime build | **Parallel** | Independent `vendor/` per worktree; CPU-bound, scales with cores |
-| ONNX model export | **Serial (Python)** | Requires PyTorch + transformers; can be done in main repo before worktree isolation, or each worktree installs its own Python deps |
-| Sysroot build | **Parallel** | Independent Docker extraction per worktree |
-| Dev board (perf) | **Serial** | Single SSH; Lead serializes Phase 1 access |
-| HuggingFace download | **Parallel** | Independent model downloads |
-| Report output | **Parallel** | Paths isolated by app name |
+| ONNX Runtime build | **Serial** | One build at a time; each worktree has independent `vendor/` |
+| ONNX model export | **Pre-exported** | Lead pre-exports all 4 models before spawning any teammate (see Phase A) |
+| Sysroot build | **Serial** | One Docker extraction at a time |
+| Dev board (perf) | **Serial** | Single SSH; Phase 1 skipped for initial run |
+| HuggingFace download | **Pre-downloaded** | Lead downloads all models in Phase A |
+| Report output | **Serial** | One report generation at a time |
+| Git merge | **Serial** | Each worktree merged before next teammate spawns |
 
-**Key constraint**: ONNX model export requires PyTorch + transformers Python packages. Two strategies:
-1. **Pre-export in main repo**: Lead exports all 4 ONNX models before spawning teammates, stores them in `output/models/`, and each teammate copies from there. Simplest and avoids Python dependency issues in worktrees.
-2. **Export in worktree**: Each worktree installs Python deps independently and exports. More isolated but duplicates work.
-
-**Recommendation**: Strategy 1 (pre-export). The Python export step is a one-time operation that doesn't benefit from worktree isolation.
+**Key constraint**: ONNX model export requires PyTorch + transformers Python packages. Strategy:
+- **Pre-export in main repo**: Lead exports all 4 ONNX models before spawning the first teammate, stores them in `output/models/`, and each teammate copies from there. Simplest and avoids Python dependency issues in worktrees.
 
 ## 6. Execution Plan
 
-### Phase A: Pre-Export ONNX Models (Lead, Sequential)
+### Phase A: Pre-Export ONNX Models (Lead, One-Time)
 
-Before spawning teammates, the Lead pre-exports all 4 ONNX models to avoid Python dependency duplication:
+Before spawning any teammate, the Lead pre-exports all 4 ONNX models to avoid Python dependency duplication:
 
 ```bash
 # In main repo:
-# 1. ViT-Base/16
-python3 applications/onnxrt/vit-base-16/export_model.py
-# 2. ViT-Base/32
-python3 applications/onnxrt/vit-base-32/export_model.py
-# 3. SuperPoint
+# 1. SuperPoint
 python3 applications/onnxrt/superpoint/export_model.py
-# 4. SuperGlue (GNN part only)
+# 2. SuperGlue (GNN part only)
 python3 applications/onnxrt/superglue/export_model.py
+# 3. ViT-Base/16
+python3 applications/onnxrt/vit-base-16/export_model.py
+# 4. ViT-Base/32
+python3 applications/onnxrt/vit-base-32/export_model.py
 
 # Store in shared location
 mkdir -p output/models/
-cp applications/onnxrt/vit-base-16/model/*.onnx output/models/
-cp applications/onnxrt/vit-base-32/model/*.onnx output/models/
 cp applications/onnxrt/superpoint/model/*.onnx output/models/
 cp applications/onnxrt/superglue/model/*.onnx output/models/
+cp applications/onnxrt/vit-base-16/model/*.onnx output/models/
+cp applications/onnxrt/vit-base-32/model/*.onnx output/models/
 ```
 
-### Phase B: Spawn Teammates (Team Model)
+### Phase B: Serial Teammate Execution (Lead + Teammates)
 
-**Step order matters.** Create the team first, then spawn all 4 teammates as team members (with `team_name`), then create tasks in the shared task list:
+**CRITICAL**: Only ONE teammate is active at any time. The Lead follows the strict serial loop defined in §2.4.1.
+
+#### Step B1: Create the Team and Spawn Guardian (Lead, Once)
 
 ```python
-# Step B1: Create the team (Lead only, once)
+# B1a: Create the team
 TeamCreate(team_name="rvfuse-analysis-b2")
 
-# Step B2: Spawn ALL 4 teammates simultaneously as TEAM MEMBERS
-# Each has team_name, name, isolation="worktree", run_in_background=True, model="sonnet" (except superglue: "opus")
+# B1b: Spawn Guardian FIRST — before any app teammate
+# The Guardian monitors all members (including Lead) on a 5-min cron loop
+# See §2.6 for full Guardian specification
+Agent(
+    team_name="rvfuse-analysis-b2",
+    name="guardian",
+    subagent_type="general-purpose",
+    description="Guardian — Long-run progress monitor",
+    model="sonnet",
+    mode="auto",
+    run_in_background=True,
+    prompt="""You are the Guardian of the rvfuse-analysis-b2 team.
 
+Your role: Monitor ALL team members (including the Lead) via tmux on a 5-minute cron loop. Intervene when members are idle, stuck, or blocked to keep the team progressing.
+
+CRITICAL RULES:
+1. You are a MONITOR, not a worker. Do NOT modify code, change tasks, spawn/shutdown teammates, merge worktrees, or run verification checks.
+2. Your interventions are limited to: sending text input to tmux panes, logging actions, and notifying the Lead.
+3. Read docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6 for your full intervention protocol.
+4. Never approve verification or make quality judgments — only the Lead + opus verification subagent do that.
+
+SETUP (do this ONCE on first run):
+1. Create the cron job:
+   CronCreate(
+       cron="*/5 * * * *",
+       prompt="Check all rvfuse-analysis-b2 team members via tmux per §2.6.2 intervention protocol. "
+              "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for current member list. "
+              "Log to docs/plans/guardian-log-b2.md.",
+       recurring=True,
+       durable=False
+   )
+2. Create the log file: docs/plans/guardian-log-b2.md with header:
+   # Guardian Intervention Log — Batch 2
+   
+   Team: rvfuse-analysis-b2
+   Started: <current timestamp>
+3. Send confirmation to Lead: "Guardian online. Cron loop active. Monitoring all tmux panes."
+
+ON EACH CRON TICK:
+1. Read ~/.claude/teams/rvfuse-analysis-b2/config.json to get current member list
+2. List all tmux panes and match them to team members
+3. For each member, capture last ~10 lines of tmux output to determine state
+4. Apply the intervention protocol rules (1-7) in order from §2.6.2
+5. Execute the FIRST matching rule
+6. Append to docs/plans/guardian-log-b2.md
+
+STATE CLASSIFICATION:
+- active: spinner visible or ongoing output
+- idle: prompt visible, no spinner, no recent output change
+- blocked: error message, stack trace, or build failure in last output
+- awaiting_user: permission prompt, question mark (?), [y/n], confirmation dialog
+
+IMPORTANT:
+- You run persistently for the ENTIRE batch duration (potentially 8-11 hours)
+- Do NOT stop your cron loop unless the Lead explicitly cancels it via CronDelete
+- If you detect the Lead is gone (session ended, no tmux pane), log it and continue monitoring remaining members
+- Your log is the audit trail — be thorough and timestamp every action
+"""
+)
+```
+
+**Guardian is now online.** It monitors all tmux panes independently. The Lead proceeds to spawn app teammates — the Guardian runs in parallel with everything.
+
+#### Step B2: Execute Applications Serially
+
+For each application in order (superpoint → superglue → vit-base-16 → vit-base-32), follow the **Serial Execution Loop** (§2.4.1). Detailed teammate prompts are in §6.1–§6.4 below. The Guardian runs alongside all app teammates.
+
+**Application execution order and model assignment:**
+
+| Order | Teammate | Model | Expected Duration |
+|-------|----------|-------|-------------------|
+| 1st | `superpoint` | sonnet | ~105-155 min |
+| 2nd | `superglue` | opus | ~145-205 min |
+| 3rd | `vit-base-16` | sonnet | ~110-165 min |
+| 4th | `vit-base-32` | sonnet | ~70-100 min |
+
+**After EACH teammate completes and passes verification:**
+1. Send `shutdown_request` to the teammate via `SendMessage`
+2. Wait for teammate to exit cleanly
+3. Mark task as completed via `TaskUpdate(status="completed")`
+4. Merge worktree to master with `--no-ff`:
+   ```bash
+   git merge --no-ff <worktree-branch>
+   ```
+5. Proceed to next application (go to B2 with next teammate)
+
+### 6.3 Teammate Prompt: vit-base-16 (3rd, sonnet)
+
+```python
 Agent(
     team_name="rvfuse-analysis-b2",
     name="vit-base-16",
@@ -601,6 +844,8 @@ REFERENCE RVV PATCHES: applications/onnxrt/rvv-patches/sgemm-kernel-vl16/ (SGEMM
 MODEL: sonnet
 MODE: auto (execute without asking for permission)
 
+IMPORTANT: You are the THIRD active teammate. SuperPoint and SuperGlue have completed and their code is merged to master. Reference their self-attention and CNN operator analyses in docs/report/.
+
 PHASE 0 — SETUP (cross-compile-app skill):
 1. Symlink toolchain from main repo (QEMU, LLVM, BBV plugin) — see worktree init script in plan §4.4
 2. Copy pre-exported ONNX model from main repo: output/models/vit_base_patch16_224.onnx
@@ -616,21 +861,21 @@ PHASE 0 — SETUP (cross-compile-app skill):
    - Flags: rv64gcv, zvl512b
 6. Build sysroot via Docker extraction
 7. QEMU smoke test: verify runner produces valid top-5 output
-8. Report phase completion via SendMessage(to="Lead")
+8. Report phase completion in your status updates
 
 PHASE 1 — PERF PROFILING (perf-profiling skill):
 Skip — dev board access is serialized by Lead. Use QEMU-only BBV profiling.
-(Lead will coordinate if hardware perf data is needed later.)
 
 PHASE 2 — RVV512 VECTORIZATION (rvv-op skill):
 For operators estimated >1% compute time:
 1. SGEMM (MatMul): Already has RVV patch at rvv-patches/sgemm-kernel-vl16/ — verify applicability to ViT MatMul shapes (K=768,2304,3072; N=197)
 2. QuickGELU: Patch exists at rvv-patches/quick-gelu/ — note: ViT uses standard GELU, not QuickGELU. Create adapted RVV patch for standard GELU if needed.
-3. Softmax: Review if existing reduction patterns apply; create RVV patch if hot enough
-4. LayerNorm: Review reduction + broadcast patterns; create RVV patch
-5. Apply all RVV patches to the ONNX Runtime build
-6. Verify correctness: QEMU test with same image, compare output to vanilla
-7. Report each operator's RVV implementation status
+3. Softmax: Reference superglue's Softmax analysis in docs/report/superglue/; review if existing reduction patterns apply
+4. LayerNorm: Reference superglue's LayerNorm analysis in docs/report/superglue/; review reduction + broadcast patterns
+5. Self-Attention: Reference superglue's self-attention RVV patterns in docs/report/superglue/
+6. Apply all RVV patches to the ONNX Runtime build
+7. Verify correctness: QEMU test with same image, compare output to vanilla
+8. Report each operator's RVV implementation status
 
 PHASE 3 — BBV PROFILING (qemu-bbv-usage skill):
 CRITICAL: This MUST complete before Phase 4.
@@ -651,28 +896,34 @@ For each operator with BBV data:
 1. Run cross-platform comparison: RVV vs x86 AVX/AVX2, ARM NEON/SVE, etc.
 2. Use BBV data to compute weighted benefit scores
 3. Identify missing RVV instructions and quantify impact
-4. Generate per-operator gap analysis reports (.md)
-5. Generate per-operator PDF reports (md2pdf skill)
+4. Cross-reference superglue's self-attention gap analysis in docs/report/superglue/
+5. Generate per-operator gap analysis reports (.md)
+6. Generate per-operator PDF reports (md2pdf skill)
 
 PHASE 5 — CONSOLIDATED REPORT:
 1. Merge all per-operator reports into a single consolidated document
 2. Include priority table with BBV-weighted benefit scores
-3. Compare with ViT-Base/32 findings (if vit-base-32 has completed)
-4. Generate consolidated PDF via md2pdf skill
-5. Output: docs/report/vit-base-16/vit-base-16-consolidated-*.md + .pdf
+3. Include cross-reference to superglue's self-attention findings for Transformer attention comparison
+4. Output: docs/report/vit-base-16/vit-base-16-consolidated-*.md + .pdf
 
 AFTER ALL PHASES COMPLETE:
-- Send completion message to Lead via SendMessage
-- Wait for Lead's verification and shutdown_request
+- Send completion message to Lead via SendMessage: "vit-base-16: All phases (0-5) complete. Ready for verification."
+- Wait for Lead's verification result
+- If Lead requests fixes, fix the specific issues and re-report completion
+- If Lead sends shutdown_request, exit cleanly
 
 IMPORTANT NOTES:
 - Always invoke skills when entering each phase (cross-compile-app, rvv-op, qemu-bbv-usage, rvv-gap-analysis, md2pdf)
 - Read CLAUDE.md and the plan at docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md for full context
 - Use TaskUpdate to mark progress as you complete each phase
-- Do NOT wait for other teammates — work independently
+- SuperPoint and SuperGlue analyses are on master — reference them freely for CNN and attention patterns
 """
 )
+```
 
+### 6.4 Teammate Prompt: vit-base-32 (4th, sonnet)
+
+```python
 Agent(
     team_name="rvfuse-analysis-b2",
     name="vit-base-32",
@@ -688,13 +939,15 @@ Your task: Execute the full rvv512-optimization-pipeline for onnxrt/ViT-Base/32.
 
 APPLICATION: Vision Transformer Base with 32x32 patches for ImageNet classification.
 TARGET DIRECTORY: applications/onnxrt/vit-base-32/
-ONNX MODEL: output/models/vit_base_patch32_384.onnx (pre-exported by Lead; google/vit-base-patch32-224 does not exist, using 384x384 variant)
+ONNX MODEL: output/models/vit_base_patch32_224.onnx (pre-exported by Lead)
 REFERENCE RUNNER: applications/onnxrt/yolo/runner/yolo_runner.cpp (ONNX Runtime API pattern)
 REFERENCE BUILD: applications/onnxrt/ort/build.sh (cross-compile script)
 REFERENCE RVV PATCHES: applications/onnxrt/rvv-patches/sgemm-kernel-vl16/ (directly applicable)
-CRITICAL REFERENCE: ViT-Base/16 teammate (vit-base-16) — same architecture, different shapes (50 vs 197 tokens)
+CRITICAL REFERENCE: applications/onnxrt/vit-base-16/ (already merged to master — same architecture, different shapes: 50 vs 197 tokens)
 MODEL: sonnet
 MODE: auto (execute without asking for permission)
+
+IMPORTANT: You are the FOURTH and final active teammate. SuperPoint, SuperGlue, and ViT-Base/16 have all completed — their code and reports are on master.
 
 KEY DIFFERENCE FROM ViT-Base/16:
 - Patch size 32x32 → 7x7=49 patches + CLS = 50 tokens (vs 197 for patch16)
@@ -705,12 +958,12 @@ KEY DIFFERENCE FROM ViT-Base/16:
 PHASE 0 — SETUP:
 Same as vit-base-16, but:
 - Model: google/vit-base-patch32-224
-- Runner: identical C++ code, different model file
-- IMPORTANT: Reuse as much as possible from vit-base-16 runner code
+- Runner: reuse vit-base-16 runner code as base, change model file path
 - The runner is almost identical — only the model file path and ONNX input name differ
+- Reference applications/onnxrt/vit-base-16/ for runner code (already on master)
 
 PHASE 1 — PERF PROFILING:
-Skip (same as vit-base-16 — dev board serialized by Lead)
+Skip (dev board serialized by Lead)
 
 PHASE 2 — RVV512 VECTORIZATION:
 1. SGEMM: Apply existing patch from rvv-patches/sgemm-kernel-vl16/
@@ -724,7 +977,7 @@ PHASE 2 — RVV512 VECTORIZATION:
 PHASE 3 — BBV PROFILING:
 Same operators as vit-base-16, but pay special attention to:
 - Sequence-length-dependent operators (attention MatMul)
-- Compare BBV instruction distributions with vit-base-16 results
+- Compare BBV instruction distributions with vit-base-16 results (in docs/report/vit-base-16/)
 - Document shape sensitivity for each operator
 
 PHASE 4 — GAP ANALYSIS:
@@ -739,15 +992,21 @@ PHASE 5 — CONSOLIDATED REPORT:
 3. Include a dedicated section on "Shape Sensitivity" — how VL efficiency varies with SeqLen
 
 AFTER ALL PHASES:
-- Send completion message to Lead via SendMessage
-- Wait for shutdown_request
+- Send completion message to Lead via SendMessage: "vit-base-32: All phases (0-5) complete. Ready for verification."
+- Wait for Lead's verification result
+- If Lead requests fixes, fix the specific issues and re-report completion
+- If Lead sends shutdown_request, exit cleanly
 
 IMPORTANT:
-- The vit-base-16 teammate is running in parallel — do NOT wait for it, but DO reference its runner code if available
+- vit-base-16 code is already on master — reference it freely
 - The shape comparison section in Phase 4-5 is the unique contribution of this worker
 """
 )
+```
 
+### 6.1 Teammate Prompt: superpoint (1st, sonnet)
+
+```python
 Agent(
     team_name="rvfuse-analysis-b2",
     name="superpoint",
@@ -769,6 +1028,8 @@ REFERENCE RUNNER: applications/onnxrt/yolo/runner/yolo_runner.cpp (ONNX Runtime 
 REFERENCE BUILD: applications/onnxrt/ort/build.sh (cross-compile script)
 MODEL: sonnet
 MODE: auto (execute without asking for permission)
+
+IMPORTANT: You are the FIRST active teammate. No previous teammates have run — your work will establish patterns for subsequent teammates.
 
 ARCHITECTURE SUMMARY:
 - Shared VGG-style encoder: 8× Conv2d(3×3) + 3× MaxPool2d → (B,128,H/8,W/8)
@@ -796,7 +1057,7 @@ PHASE 0 — SETUP (cross-compile-app skill):
 5. Clone ONNX Runtime source into applications/onnxrt/superpoint/vendor/
 6. Cross-compile ONNX Runtime + runner (same build pattern as YOLO)
 7. QEMU smoke test: verify keypoint count > 0, descriptors have valid L2 norm (~1.0)
-8. Report phase completion via SendMessage(to="Lead")
+8. Report phase completion in status updates
 
 PHASE 1 — PERF PROFILING:
 Skip — dev board serialized by Lead.
@@ -837,15 +1098,21 @@ PHASE 5 — CONSOLIDATED REPORT:
 3. Output: docs/report/superpoint/superpoint-consolidated-*.md + .pdf
 
 AFTER ALL PHASES:
-- Send completion message to Lead via SendMessage
-- Wait for shutdown_request
+- Send completion message to Lead via SendMessage: "superpoint: All phases (0-5) complete. Ready for verification."
+- Wait for Lead's verification result
+- If Lead requests fixes, fix the specific issues and re-report completion
+- If Lead sends shutdown_request, exit cleanly
 
 IMPORTANT:
 - SuperPoint is the CNN representative in this batch. Focus on Conv2d operators as they complement the attention-heavy ViT analysis.
 - NMS postprocessing is in C++ runner, not ONNX — include in BBV profiling if it's hot, but it likely won't be.
 """
 )
+```
 
+### 6.2 Teammate Prompt: superglue (2nd, opus)
+
+```python
 Agent(
     team_name="rvfuse-analysis-b2",
     name="superglue",
@@ -868,6 +1135,8 @@ REFERENCE BUILD: applications/onnxrt/ort/build.sh (cross-compile script)
 MODEL: opus
 MODE: auto (execute without asking for permission)
 
+IMPORTANT: You are the SECOND active teammate. SuperPoint has completed and its code is merged to master — reference it for CNN patterns and runner structure. No ViT analysis exists yet.
+
 ARCHITECTURE SUMMARY:
 - Keypoint Encoder: Linear(3→256) per keypoint (x, y, score)
 - 9× GNN Layers (alternating self-attention and cross-attention):
@@ -882,6 +1151,7 @@ KEY RESEARCH VALUE:
 - Cross-Attention is a NOVEL operator in this project — not present in YOLO, llama.cpp, or ViT self-attention
 - Sinkhorn optimal transport is a unique algorithmic pattern (iterative normalization)
 - GNN message passing pattern with alternating self/cross attention
+- Self-attention analysis here will be the FIRST in Batch 2 — ViT apps will reference your results later
 
 PHASE 0 — SETUP (cross-compile-app skill):
 1. Symlink toolchain from main repo (QEMU, LLVM, BBV plugin)
@@ -928,7 +1198,7 @@ Priority-ordered operators:
 PHASE 3 — BBV PROFILING (qemu-bbv-usage skill):
 Target operators (priority order):
 1. SGEMM kernel (QKV projections, MLP layers)
-2. Self-Attention MatMul (QK^T, V projection) — reference from vit-base-16 if available
+2. Self-Attention MatMul (QK^T, V projection) — this is the FIRST self-attention BBV in Batch 2, will be referenced by ViT apps later
 3. Cross-Attention MatMul (QK^T with different N per image) — NOVEL
 4. Softmax (attention weights)
 5. LayerNorm (27 instances)
@@ -936,6 +1206,7 @@ Target operators (priority order):
 7. Sinkhorn normalization loop (C++ runner, may be in separate binary)
 
 CRITICAL: Cross-Attention BBV profiling is the highest-value contribution. Ensure the ONNX model's cross-attention operations are correctly identified and profiled.
+Self-attention BBV data here sets the baseline for ViT-Base/16 comparisons later.
 
 PHASE 4 — GAP ANALYSIS (rvv-gap-analysis skill):
 Standard analysis per operator, PLUS:
@@ -945,7 +1216,7 @@ Standard analysis per operator, PLUS:
   - Document instructions that would help with variable-length K/V access
 - Sinkhorn: Compare iterative normalization across platforms
   - Primarily memory-bound; document the RVV memory access pattern efficiency
-- Reference vit-base-16 self-attention results for comparison
+- Self-Attention: This is the baseline analysis for Batch 2 — ViT apps will cross-reference it
 
 PHASE 5 — CONSOLIDATED REPORT:
 1. Merge per-operator reports
@@ -954,27 +1225,27 @@ PHASE 5 — CONSOLIDATED REPORT:
 4. Output: docs/report/superglue/superglue-consolidated-*.md + .pdf
 
 AFTER ALL PHASES:
-- Send completion message to Lead via SendMessage
-- Wait for shutdown_request
+- Send completion message to Lead via SendMessage: "superglue: All phases (0-5) complete. Ready for verification."
+- Wait for Lead's verification result
+- If Lead requests fixes, fix the specific issues and re-report completion
+- If Lead sends shutdown_request, exit cleanly
 
 IMPORTANT NOTES:
 - Cross-Attention is your unique contribution — invest extra analysis effort here
 - Sinkhorn is in C++ runner, not ONNX — BBV profiling is on the runner binary, not the ONNX model
 - Use synthetic data for BBV profiling; it's valid because operator performance is independent of input semantics
-- The SuperPoint teammate (superpoint) is running independently — do NOT wait for it. Your synthetic data mode eliminates the SuperPoint dependency for BBV profiling.
-- Reference the vit-base-16 teammate's self-attention results if available, but do NOT wait for it
+- SuperPoint code is on master — reference its runner pattern and CNN operator analysis
+- Your self-attention analysis will be the Batch 2 baseline — document it thoroughly for ViT apps to reference
 """
 )
+```
 
-# Step B3: Create tasks in the shared task list
-TaskCreate(
-    subject="ViT-Base/16: Full Pipeline (Phase 0-5)",
-    description="onnxrt/ViT-Base/16: ONNX export + C++ runner + ORT build + BBV profiling + gap analysis + consolidated report. 12 Transformer layers, MatMul-dominant."
-)
-TaskCreate(
-    subject="ViT-Base/32: Full Pipeline (Phase 0-5)",
-    description="onnxrt/ViT-Base/32: Same architecture as ViT-Base/16 but patch_size=32 (50 tokens vs 197). Shape sensitivity analysis is key contribution."
-)
+### Phase C: Task Creation
+
+After spawning each teammate, create its corresponding task in the shared task list:
+
+```python
+# Create all 4 tasks upfront (tasks track work, teammates execute it)
 TaskCreate(
     subject="SuperPoint: Full Pipeline (Phase 0-5)",
     description="onnxrt/SuperPoint: VGG-style CNN for interest point detection + descriptor extraction. Conv2d-dominant (~70% compute). Magic Leap CVPR 2018."
@@ -983,36 +1254,27 @@ TaskCreate(
     subject="SuperGlue: Full Pipeline (Phase 0-5)",
     description="onnxrt/SuperGlue: GNN feature matching with Cross-Attention + Sinkhorn optimal transport. Cross-Attention is a NOVEL operator family for this project. Magic Leap CVPR 2020."
 )
+TaskCreate(
+    subject="ViT-Base/16: Full Pipeline (Phase 0-5)",
+    description="onnxrt/ViT-Base/16: ONNX export + C++ runner + ORT build + BBV profiling + gap analysis + consolidated report. 12 Transformer layers, MatMul-dominant."
+)
+TaskCreate(
+    subject="ViT-Base/32: Full Pipeline (Phase 0-5)",
+    description="onnxrt/ViT-Base/32: Same architecture as ViT-Base/16 but patch_size=32 (50 tokens vs 197). Shape sensitivity analysis is key contribution."
+)
 ```
-
-### Phase C: Ongoing Monitoring & Verification (Lead)
-
-After spawning, Lead's cron job runs every 5 minutes:
-1. Check `TaskList` for teammate progress
-2. Check tmux panes for idle/blocked teammates
-3. Intervene as needed (see §2.4.2)
-4. Log interventions in `docs/plans/tmux-automation-log-b2.md`
-
-When a teammate completes a phase:
-1. Lead dispatches verification subagent (see §2.4.3)
-2. If PASS: Send advance instruction via `SendMessage`
-3. If FAIL: Send fix instructions via `SendMessage`
-4. Repeat until all phases complete
 
 ### Phase D: Merge, Synthesis & Cleanup
 
-After all teammates complete and pass final verification:
+After ALL 4 teammates have passed verification, been shut down, and their worktrees merged:
 
-1. Send `shutdown_request` to each teammate via `SendMessage`
-2. Merge each worktree to master with `--no-ff`:
-   ```bash
-   git merge --no-ff <worktree-branch-for-vit-base-16>
-   git merge --no-ff <worktree-branch-for-vit-base-32>
-   git merge --no-ff <worktree-branch-for-superpoint>
-   git merge --no-ff <worktree-branch-for-superglue>
-   ```
-3. Delete cron monitoring job via `CronDelete`
-4. `TeamDelete` to clean up team resources
+1. All worktrees already merged during the serial loop (step B2.4)
+2. Generate cross-app synthesis report (Phase E)
+3. `TeamDelete` to clean up team resources
+4. **LAST ACTION — Cancel Guardian cron**: `CronDelete(id="<guardian-cron-id>")`
+   - This MUST be the final action. The Guardian is the last thing stopped.
+   - After this, the batch is fully complete. No processes remain.
+   - Rationale: Guardian cancellation is irreversible in-session (no re-spawn without Lead). If cancelled early and the Lead gets stuck, no one can wake the Lead.
 
 ### Phase E: Cross-Application Synthesis Report (Lead)
 
@@ -1085,8 +1347,16 @@ Per teammate:
 - [ ] Phase 4: All target operators have gap analysis reports (MD + PDF)
 - [ ] Phase 4: Reports contain BBV-weighted overall benefit figures (整体收益)
 - [ ] Phase 5: Consolidated report merges findings with priority table
+- [ ] Opus verification subagent returns PASS for all checklist items
 - [ ] Worktree merges cleanly to master (no conflicts)
 - [ ] Teammate responds to `shutdown_request` and exits cleanly
+
+Guardian:
+- [ ] Guardian spawned after TeamCreate, before first app teammate
+- [ ] Guardian cron loop active (verified by checking guardian-log-b2.md has periodic entries)
+- [ ] Guardian log exists at `docs/plans/guardian-log-b2.md` with timestamped entries
+- [ ] Guardian intervenes appropriately when team members are idle/stuck
+- [ ] Guardian cron cancelled by Lead as the LAST action (after TeamDelete + synthesis)
 
 Cross-batch:
 - [ ] Cross-application synthesis report generated (Lead, Phase E)
@@ -1102,22 +1372,36 @@ Cross-batch:
 | Conv2d Im2Col not hot in SuperPoint | Low | Medium | Even if Conv2d is well-optimized by ORT's existing paths, the BBV profiling still provides valuable instruction-level data for gap analysis. The analysis focus shifts from "what to optimize" to "why is it already optimized." |
 | ViT-Base/32 too similar to ViT-Base/16 | Medium | Low | The shape difference (50 vs 197 tokens) provides genuine research value even if operators are identical. The shape sensitivity analysis is the product, not the per-operator findings. |
 | ONNX Runtime build failures | Low | High | The build.sh pattern is battle-tested (YOLO, ResNet). ViT uses standard ONNX ops — no custom ops needed. SuperPoint and SuperGlue also use standard ops. |
-| Worktree merge conflicts | Low | Medium | Each app writes to isolated paths (applications/onnxrt/<app>/, docs/report/<app>/). No shared files. The only conflict surface is rvv-patches/ if multiple apps modify the same patch — but each app's patches are independent. |
+| Worktree merge conflicts | Low | Medium | Each app writes to isolated paths (applications/onnxrt/<app>/, docs/report/<app>/). No shared files. The only conflict surface is rvv-patches/ if multiple apps modify the same patch — but each app's patches are independent. Serial execution further reduces this risk since each worktree is merged before the next is created. |
+| Teammate fails verification repeatedly | Medium | Medium | Rework limit of 3 iterations. If teammate cannot pass after 3 attempts, Lead manually intervenes to fix critical issues, then re-verifies. Serial execution means this blocks progress, but ensures quality. |
+| Serial execution takes too long | Medium | Medium | Serial wall-clock time is ~7-10 hours total (sum of all 4 apps). Acceptable trade-off for device performance constraints and quality assurance. If needed, vit-base-32 can be deprioritized (lowest unique value). |
+| Guardian malfunctions (false idle detection, over-intervention) | Low | Medium | Guardian intervention rules are priority-ordered with explicit conditions. False positives (e.g., intervening when Lead is actively thinking) are minimized by checking for the idle prompt pattern (❯ with no spinner). Guardian log provides audit trail — Lead can review and override any incorrect intervention. If Guardian becomes disruptive, Lead can temporarily pause its cron and resume later. |
+| Guardian cron expires (7-day recurring limit) | Low | Low | Batch runs ~8-11 hours, well within the 7-day auto-expiry. Not a concern for this batch. |
+| Lead or Guardian session terminated (power loss, crash) | Low | High | Guardian cron is `durable=False` (session-only). If Lead's session dies, Guardian dies with it. Worktrees persist on disk. Recovery: re-create team, re-spawn Guardian, resume from last completed app. Guardian log provides last-known state. |
 
-## 11. Timeline Estimate
+## 11. Timeline Estimate (Serial Execution)
 
-| Phase | vit-base-16 | vit-base-32 | superpoint | superglue |
-|-------|-------------|-------------|------------|-----------|
-| 0 (Setup) | 30-45 min | 15-20 min (reuse) | 30-45 min | 45-60 min (complex) |
+| Phase | superpoint (1st) | superglue (2nd) | vit-base-16 (3rd) | vit-base-32 (4th) |
+|-------|-----------------|-----------------|-------------------|-------------------|
+| 0 (Setup) | 30-45 min | 45-60 min (complex) | 30-45 min | 15-20 min (reuse) |
 | 1 (Perf) | Skip* | Skip* | Skip* | Skip* |
-| 2 (RVV) | 20-30 min | 10-15 min | 20-30 min | 30-45 min |
-| 3 (BBV) | 20-30 min | 15-20 min | 20-30 min | 25-35 min |
-| 4 (Gap) | 30-45 min | 20-30 min | 25-35 min | 35-50 min |
+| 2 (RVV) | 20-30 min | 30-45 min | 20-30 min | 10-15 min |
+| 3 (BBV) | 20-30 min | 25-35 min | 20-30 min | 15-20 min |
+| 4 (Gap) | 25-35 min | 35-50 min | 30-45 min | 20-30 min |
 | 5 (Report) | 10-15 min | 10-15 min | 10-15 min | 10-15 min |
-| **Total** | **~110-165 min** | **~70-100 min** | **~105-155 min** | **~145-205 min** |
+| **Per-app Total** | **~105-155 min** | **~145-205 min** | **~110-165 min** | **~70-100 min** |
+
+| Overhead | Estimate |
+|----------|----------|
+| Verification (opus subagent per app) | ~5-10 min each |
+| Rework buffer (1 round per app avg) | ~15-30 min each |
+| Worktree merge + next spawn | ~5 min each |
+| **Total wall-clock (serial)** | **~7-10 hours** |
+| Cross-app synthesis (Lead, Phase E) | ~30-45 min |
+| **Grand Total** | **~8-11 hours** |
 
 *Phase 1 skipped for initial run; can be added later with Lead serialization.
 
-**Parallel execution**: All 4 run simultaneously → wall-clock time ≈ max(superglue) ≈ 2-3.5 hours.
+**Guardian overhead**: Negligible. The Guardian runs a lightweight cron check every 5 minutes (tmux state inspection + log append). It does not consume significant CPU or memory, and the cron fires are sub-second operations. No adjustment to the timeline estimates is needed.
 
-**Cross-app synthesis (Lead)**: Additional 30-45 min after all teammates complete.
+**Comparison with parallel execution**: Parallel would be ~2-3.5 hours wall-clock but requires 4× the device resources. Serial execution trades wall-clock time for device performance compatibility and built-in quality gates.
