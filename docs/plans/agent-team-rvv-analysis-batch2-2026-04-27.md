@@ -279,32 +279,47 @@ CronCreate(
            "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for member list. "
            "For each member (including Lead): check tmux pane state. "
            "Determine if any intervention is needed per the intervention protocol "
-           "in docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6.2. "
+           "in docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6.3. "
            "Log all interventions to docs/plans/guardian-log-b2.md.",
     recurring=True,
     durable=False                  # session-only, dies when Lead exits
 )
 ```
 
-#### 2.6.2 Intervention Protocol
+#### 2.6.2 Fundamental Rules (ALWAYS APPLY)
 
-On each cron tick, Guardian assesses the state of ALL team members and intervenes as needed:
+These two rules override everything else. They are enforced BEFORE the intervention rule table is consulted:
+
+**Rule A — Leader-Only Interaction**: The Guardian interacts ONLY with the Lead. It MUST NOT send messages, input text, or interact with any other teammate's tmux pane. All information from other teammates flows through the Lead. The Guardian observes teammates' states (read-only via tmux) but never acts on them directly.
+
+**Rule B — Idle-Only Intervention**: The Guardian interacts with the Lead ONLY when the Lead is `idle`. If the Lead is `active` (spinner, ongoing output), the Guardian records any pending items to a deferred list and does NOT intervene. On the next cron tick, Guardian re-checks: (a) is the pending item still relevant? AND (b) is the Lead now `idle`? Only when both conditions are met does Guardian intervene. Stale pending items (already resolved by the Lead independently) are dropped.
+
+**Deferred pending items format** (appended to guardian-log-b2.md each tick):
+```markdown
+### YYYY-MM-DD HH:MM — Deferred (Lead active)
+- <item-1>: <description>
+- <item-2>: <description>
+```
+
+#### 2.6.3 Intervention Protocol
+
+On each cron tick, Guardian assesses the state of ALL team members via tmux (read-only), then decides whether to interact with the Lead:
 
 **State Assessment**:
 1. List all tmux panes. Identify which belong to team members (Lead + app teammates + self).
 2. For each pane, capture the last ~10 lines of output to determine its state.
 3. Classify each member's state: `active` (spinner visible), `idle` (❯ prompt, no spinner), `blocked` (error message), `awaiting_user` (permission prompt / question / confirmation dialog).
 
-**Intervention Rules** (check in order, execute the FIRST matching rule):
+**Intervention Rules** (check in order, execute the FIRST matching rule. Rules A and B from §2.6.2 always apply first):
 
 | # | Condition | Action |
 |---|-----------|--------|
-| 1 | Lead shows **awaiting_user** (permission prompt, question with options, confirmation dialog) | Guardian sends the appropriate response to Lead's tmux pane: for yes/no confirmations → `y`; for multiple-choice → select the default/recommended option; for permission prompts → approve. Log: "Auto-approved Lead prompt: <description>." |
-| 2 | Lead is **idle** AND all app teammates are **idle** | Guardian inputs a wake-up prompt to Lead's tmux pane: `All team members are idle. Check TaskList progress. If the current app teammate should have completed, send SendMessage to check its status. If verification is pending, dispatch the opus verification subagent. If ready to spawn the next teammate, do so.` Log: "Woke Lead from idle — all members idle." |
-| 3 | Current app teammate is **idle** (❯ prompt, no spinner) but Lead is **active** | Teammate may have finished a phase but not reported. Guardian inputs to teammate's tmux: `Report your current phase status to Lead via SendMessage. If you have completed a phase and are waiting for instructions, state clearly what you need next.` Log: "Nudged <teammate-name> to report status." |
-| 4 | Any member shows **blocked** (error in last output) | Guardian reads the error, determines if it can be resolved by sending a simple fix command. If fixable: send the fix command. If not: notify Lead's tmux pane with the error details. Log: "Unblocked <name> with <action>." or "Notified Lead of <name> error: <summary>." |
-| 5 | All 4 app tasks show `status="completed"` in TaskList AND Lead is idle | Guardian inputs to Lead's tmux pane: `All 4 tasks show completed in TaskList. If all teammates are shut down and worktrees merged, proceed to Phase D (cleanup) and Phase E (synthesis report). Remember: cancel my (Guardian) cron as the LAST action.` Log: "Notified Lead: all tasks complete." |
-| 6 | All app tasks complete, worktrees merged, synthesis done — only remaining action is Guardian cancellation | Guardian inputs to Lead's tmux pane: `All work appears complete. The only remaining action is to cancel my cron: CronDelete(id="<my-cron-id>"). After that, the batch is done.` Log: "Final reminder: cancel Guardian cron." |
+| 1 | Lead shows **awaiting_user** (permission prompt, question with options, confirmation dialog) | Guardian sends the appropriate response to **Lead's tmux pane**: for yes/no confirmations → `y`; for multiple-choice → select the default/recommended option; for permission prompts → approve. **Note**: Rules A/B don't block this — awaiting_user is a distinct state from `active`, and the Lead can't make progress without user input. Log: "Auto-approved Lead prompt: <description>." |
+| 2 | Lead is **idle** AND all app teammates are **idle** | Guardian inputs a wake-up prompt to **Lead's tmux pane**: `All team members are idle. Check TaskList progress. If the current app teammate should have completed, send SendMessage to check its status. If verification is pending, dispatch the opus verification subagent. If ready to spawn the next teammate, do so.` Log: "Woke Lead from idle — all members idle." |
+| 3 | Lead is **idle** AND any teammate is **blocked** (error in last output) | Guardian inputs to **Lead's tmux pane**: `Teammate <name> appears blocked. Last output shows: <error summary>. Please check and resolve.` Guardian does NOT attempt to fix the error itself. Log: "Notified Lead: <teammate-name> blocked." |
+| 4 | All 4 app tasks show `status="completed"` in TaskList AND Lead is idle | Guardian inputs to **Lead's tmux pane**: `All 4 tasks show completed in TaskList. If all teammates are shut down and worktrees merged, proceed to Phase D (cleanup) and Phase E (synthesis report). Remember: cancel my (Guardian) cron as the LAST action.` Log: "Notified Lead: all tasks complete." |
+| 5 | All app tasks complete, worktrees merged, synthesis done — only remaining action is Guardian cancellation | Guardian inputs to **Lead's tmux pane**: `All work appears complete. The only remaining action is to cancel my cron: CronDelete(id="<my-cron-id>"). After that, the batch is done.` Log: "Final reminder: cancel Guardian cron." |
+| 6 | Lead is **active** AND there are items to report (teammate blocked, tasks completed, etc.) | Guardian adds the item to the **deferred pending list** (appended to guardian-log-b2.md). Does NOT interrupt the Lead. Re-check on next cron tick. Log: "Deferred <N> item(s) — Lead active." |
 | 7 | Everything is progressing normally (at least one member is `active`) | No intervention. Log: "Tick: all normal — <active-member-name> is active." |
 
 **Logging**: Every cron tick, Guardian appends to `docs/plans/guardian-log-b2.md`:
@@ -314,19 +329,22 @@ On each cron tick, Guardian assesses the state of ALL team members and intervene
 - **<teammate-1>**: <state>
 - **<teammate-2>**: <state>
 - ...
+- **Pending from previous ticks**: <list or "none">
 - **Decision**: <rule-#: description>
-- **Action taken**: <what was sent to which pane, or "none">
+- **Action taken**: <what was sent to Lead's pane, or "deferred", or "none">
 ```
 
-#### 2.6.3 Guardian Constraints
+#### 2.6.4 Guardian Constraints
 
-- **Read-only by default**: Guardian only intervenes when members are idle/stuck. It does NOT modify code, change task assignments, or make architectural decisions.
+- **Leader-only interaction** (§2.6.2 Rule A): Guardian communicates exclusively with the Lead. Never with app teammates.
+- **Idle-only intervention** (§2.6.2 Rule B): Guardian interrupts the Lead only when the Lead is `idle`. Active Lead = deferred pending list.
+- **Read-only observer of teammates**: Guardian watches teammate tmux panes but never types into them. All teammate issues are reported to the Lead for resolution.
 - **Never skip verification**: Guardian must NOT approve verification on behalf of Lead. Only the Lead dispatches the opus verification subagent.
-- **Never spawn/shutdown teammates**: Only the Lead manages teammate lifecycles. Guardian only nudges.
+- **Never spawn/shutdown teammates**: Only the Lead manages teammate lifecycles.
 - **Never merge worktrees**: Only the Lead runs `git merge --no-ff`.
 - **Cancellation is Lead's last action**: Guardian's cron is the final thing cancelled, after everything else is done. This ensures no orphaned, unmonitored state.
 
-#### 2.6.4 Guardian Spawn
+#### 2.6.5 Guardian Spawn
 
 The Guardian is spawned by the Lead as the first teammate, immediately after `TeamCreate`. The full spawn code with prompt is in §6 Phase B Step B1b. See that section for the exact `Agent(...)` call.
 
@@ -746,19 +764,31 @@ Agent(
     run_in_background=True,
     prompt="""You are the Guardian of the rvfuse-analysis-b2 team.
 
-Your role: Monitor ALL team members (including the Lead) via tmux on a 5-minute cron loop. Intervene when members are idle, stuck, or blocked to keep the team progressing.
+Your role: Monitor ALL team members (including the Lead) via tmux on a 5-minute cron loop. Keep the team progressing during long, unsupervised runs.
 
-CRITICAL RULES:
-1. You are a MONITOR, not a worker. Do NOT modify code, change tasks, spawn/shutdown teammates, merge worktrees, or run verification checks.
-2. Your interventions are limited to: sending text input to tmux panes, logging actions, and notifying the Lead.
-3. Read docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6 for your full intervention protocol.
-4. Never approve verification or make quality judgments — only the Lead + opus verification subagent do that.
+FUNDAMENTAL RULES (override everything — see plan §2.6.2):
+
+Rule A — Leader-Only Interaction:
+You interact ONLY with the Lead. NEVER send messages or input to any other teammate's tmux pane.
+You observe teammates' tmux panes (read-only) but never act on them directly.
+All information from teammates flows through the Lead.
+
+Rule B — Idle-Only Intervention:
+You interact with the Lead ONLY when the Lead is idle (❯ prompt, no spinner).
+If the Lead is active (spinner, ongoing output), record pending items to a DEFERRED LIST.
+On the next cron tick, re-check: is the item still relevant? Is Lead now idle?
+Only intervene when BOTH conditions are met. Drop stale items that Lead already resolved.
+
+CRITICAL CONSTRAINTS (see plan §2.6.4):
+- You are a MONITOR, not a worker. Do NOT modify code, change tasks, spawn/shutdown teammates, merge worktrees, or run verification checks.
+- Never approve verification or make quality judgments — only the Lead + opus verification subagent do that.
+- Read docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6 for full protocol.
 
 SETUP (do this ONCE on first run):
 1. Create the cron job:
    CronCreate(
        cron="*/5 * * * *",
-       prompt="Check all rvfuse-analysis-b2 team members via tmux per §2.6.2 intervention protocol. "
+       prompt="Check all rvfuse-analysis-b2 team members via tmux per §2.6.3 intervention protocol. "
               "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for current member list. "
               "Log to docs/plans/guardian-log-b2.md.",
        recurring=True,
@@ -769,21 +799,42 @@ SETUP (do this ONCE on first run):
    
    Team: rvfuse-analysis-b2
    Started: <current timestamp>
-3. Send confirmation to Lead: "Guardian online. Cron loop active. Monitoring all tmux panes."
+3. Send confirmation to Lead via SendMessage: "Guardian online. Cron loop active. Monitoring all tmux panes."
 
 ON EACH CRON TICK:
 1. Read ~/.claude/teams/rvfuse-analysis-b2/config.json to get current member list
 2. List all tmux panes and match them to team members
 3. For each member, capture last ~10 lines of tmux output to determine state
-4. Apply the intervention protocol rules (1-7) in order from §2.6.2
-5. Execute the FIRST matching rule
-6. Append to docs/plans/guardian-log-b2.md
+4. Check the DEFERRED PENDING LIST from previous ticks — drop any that are no longer relevant
+5. Apply Fundamental Rules A and B FIRST
+6. Apply the intervention protocol rules (1-7) in order from §2.6.3
+7. Execute the FIRST matching rule
+8. Append to docs/plans/guardian-log-b2.md
 
 STATE CLASSIFICATION:
 - active: spinner visible or ongoing output
 - idle: prompt visible, no spinner, no recent output change
 - blocked: error message, stack trace, or build failure in last output
 - awaiting_user: permission prompt, question mark (?), [y/n], confirmation dialog
+
+INTERVENTION RULES summary (see §2.6.3 for full details):
+1. Lead awaiting_user → auto-approve (this bypasses idle-only rule since Lead is stuck without input)
+2. Lead idle + all teammates idle → wake up Lead
+3. Lead idle + any teammate blocked → notify Lead (do NOT fix it yourself)
+4. All 4 tasks completed + Lead idle → remind Lead to proceed to Phase D/E
+5. All done except Guardian cancellation → final reminder to cancel your cron
+6. Lead active + items to report → DEFER (record to pending list, re-check next tick)
+7. Everything normal → no action, log status
+
+DEFERRED PENDING LIST:
+When Lead is active but you have items to report, append to the log:
+### YYYY-MM-DD HH:MM — Deferred (Lead active)
+- <item>: <description>
+
+On EACH subsequent tick, re-check each deferred item:
+- If resolved → drop it
+- If still relevant AND Lead is idle → intervene (execute the matching rule)
+- If still relevant AND Lead is still active → keep deferred
 
 IMPORTANT:
 - You run persistently for the ENTIRE batch duration (potentially 8-11 hours)
