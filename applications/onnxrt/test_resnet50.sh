@@ -67,35 +67,72 @@ run_qemu_test() {
     info "QEMU test completed."
 }
 
-# --- Banana Pi perf profiling ---
+# --- Banana Pi perf profiling (chroot mode via sshpass) ---
 run_perf_profile() {
     info "Running perf profiling on Banana Pi..."
 
-    # Check if host is provided
     if [ -z "${RVFUSE_HOST:-}" ]; then
         error "RVFUSE_HOST environment variable not set. Example: RVFUSE_HOST=192.168.1.22"
     fi
 
-    # Password from environment or default
-    RVFUSE_PASSWORD="${RVFUSE_PASSWORD:-bianbu}"
+    local HOST="${RVFUSE_HOST}"
+    local PASS="${RVFUSE_PASSWORD:-bianbu}"
+    local REMOTE="/root/resnet50-perf"
+    local MODEL="resnet50"
+    local MODEL_FILE="${MODEL_DIR}/${MODEL}.onnx"
+    local PERF_OUT="${PROJECT_ROOT}/output/perf/${MODEL}"
+    local SSH_CMD="sshpass -p '${PASS}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${HOST}"
+    local SCP_CMD="sshpass -p '${PASS}' scp -o StrictHostKeyChecking=no"
 
-    # Run perf profiling script
-    python3 "${PROJECT_ROOT}/tools/perf_scalar_profile.py" \
-        --host "${RVFUSE_HOST}" \
-        --user root \
-        --password "${RVFUSE_PASSWORD}" \
-        --remote-dir "/root/resnet50-perf" \
-        --runner "${OUTPUT_DIR}/generic_ort_runner" \
-        --rootfs "${OUTPUT_DIR}/rootfs.tar.gz" \
-        --models resnet50 \
-        --outdir "${PROJECT_ROOT}/output/perf/resnet50" \
-        --iterations "${ITERATIONS}" \
-        --freq 999
+    # 1. Check board
+    info "Checking remote board..."
+    ${SSH_CMD} 'uname -m && perf --version && df -h / | tail -1'
+    ${SSH_CMD} 'echo 0 > /proc/sys/kernel/perf_event_paranoid'
 
-    info "Perf profiling completed. Results in: ${PROJECT_ROOT}/output/perf/resnet50"
+    # 2. Upload rootfs + model
+    info "Uploading rootfs and model..."
+    ${SSH_CMD} "mkdir -p ${REMOTE}"
+    ${SCP_CMD} "${OUTPUT_DIR}/rootfs.tar.gz" root@${HOST}:${REMOTE}/
+    ${SSH_CMD} "cd ${REMOTE} && tar xzf rootfs.tar.gz"
+    ${SCP_CMD} "${MODEL_FILE}" root@${HOST}:${REMOTE}/rootfs/
+
+    # 3. Setup chroot mounts
+    info "Setting up chroot mounts..."
+    ${SSH_CMD} "mkdir -p ${REMOTE}/rootfs/{proc,dev,sys,tmp}"
+    ${SSH_CMD} "mount -t proc proc ${REMOTE}/rootfs/proc"
+    ${SSH_CMD} "mount -t sysfs sysfs ${REMOTE}/rootfs/sys"
+    ${SSH_CMD} "mount --bind /dev ${REMOTE}/rootfs/dev"
+
+    # 4. Run perf (stat + record + report + annotate)
+    info "Running perf stat..."
+    local RUN_CMD="chroot ${REMOTE}/rootfs /generic_ort_runner /${MODEL}.onnx ${ITERATIONS}"
+    ${SSH_CMD} "perf stat -d -o /tmp/perf_stat.txt -- ${RUN_CMD}"
+
+    info "Running perf record (cpu-clock, ${ITERATIONS} iterations)..."
+    ${SSH_CMD} "perf record -e cpu-clock -g -F 999 -o /tmp/perf.data -- ${RUN_CMD}"
+
+    info "Generating perf report..."
+    ${SSH_CMD} "perf report --stdio -n --percent-limit 0.5 --symfs ${REMOTE}/rootfs -i /tmp/perf.data > /tmp/perf_report.txt"
+
+    info "Generating perf annotate..."
+    ${SSH_CMD} "perf annotate --stdio --symfs ${REMOTE}/rootfs -i /tmp/perf.data > /tmp/perf_annotate.txt"
+
+    # 5. Download results
+    info "Downloading results..."
+    mkdir -p "${PERF_OUT}"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_stat.txt "${PERF_OUT}/"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_report.txt "${PERF_OUT}/"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_annotate.txt "${PERF_OUT}/"
+
+    # 6. Cleanup
+    info "Cleaning up remote..."
+    ${SSH_CMD} "rm -f /tmp/perf_stat.txt /tmp/perf_report.txt /tmp/perf_annotate.txt /tmp/perf.data"
+    ${SSH_CMD} "umount ${REMOTE}/rootfs/proc; umount ${REMOTE}/rootfs/sys; umount ${REMOTE}/rootfs/dev"
+
+    info "Perf profiling completed. Results in: ${PERF_OUT}"
 }
 
-# --- Direct lib mode (simpler setup) ---
+# --- Direct lib mode (simpler setup, no chroot) ---
 run_lib_mode() {
     info "Running perf profiling with direct lib upload..."
 
@@ -103,21 +140,52 @@ run_lib_mode() {
         error "RVFUSE_HOST environment variable not set."
     fi
 
-    RVFUSE_PASSWORD="${RVFUSE_PASSWORD:-bianbu}"
+    local HOST="${RVFUSE_HOST}"
+    local PASS="${RVFUSE_PASSWORD:-bianbu}"
+    local REMOTE="/root/resnet50-lib"
+    local MODEL="resnet50"
+    local MODEL_FILE="${MODEL_DIR}/${MODEL}.onnx"
+    local PERF_OUT="${PROJECT_ROOT}/output/perf/${MODEL}-lib"
+    local SSH_CMD="sshpass -p '${PASS}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${HOST}"
+    local SCP_CMD="sshpass -p '${PASS}' scp -o StrictHostKeyChecking=no"
 
-    python3 "${PROJECT_ROOT}/tools/perf_scalar_profile.py" \
-        --host "${RVFUSE_HOST}" \
-        --user root \
-        --password "${RVFUSE_PASSWORD}" \
-        --remote-dir "/root/resnet50-lib" \
-        --runner "${OUTPUT_DIR}/generic_ort_runner" \
-        --libs "${OUTPUT_DIR}/lib" \
-        --models resnet50 \
-        --outdir "${PROJECT_ROOT}/output/perf/resnet50-lib" \
-        --iterations "${ITERATIONS}" \
-        --freq 999
+    # 1. Check board
+    info "Checking remote board..."
+    ${SSH_CMD} 'uname -m && perf --version'
+    ${SSH_CMD} 'echo 0 > /proc/sys/kernel/perf_event_paranoid'
 
-    info "Lib mode profiling completed."
+    # 2. Upload runner + libs + model
+    info "Uploading runner, libs, and model..."
+    ${SSH_CMD} "mkdir -p ${REMOTE}/lib"
+    ${SCP_CMD} "${OUTPUT_DIR}/generic_ort_runner" root@${HOST}:${REMOTE}/
+    ${SCP_CMD} "${OUTPUT_DIR}"/lib/*.so* root@${HOST}:${REMOTE}/lib/
+    ${SCP_CMD} "${MODEL_FILE}" root@${HOST}:${REMOTE}/
+
+    # 3. Run perf
+    local RUN_CMD="LD_LIBRARY_PATH=${REMOTE}/lib ${REMOTE}/generic_ort_runner ${REMOTE}/${MODEL}.onnx ${ITERATIONS}"
+
+    info "Running perf stat..."
+    ${SSH_CMD} "perf stat -d -o /tmp/perf_stat.txt -- ${RUN_CMD}"
+
+    info "Running perf record..."
+    ${SSH_CMD} "perf record -e cpu-clock -g -F 999 -o /tmp/perf.data -- ${RUN_CMD}"
+
+    info "Generating perf report..."
+    ${SSH_CMD} "perf report --stdio -n --percent-limit 0.5 -i /tmp/perf.data > /tmp/perf_report.txt"
+
+    info "Generating perf annotate..."
+    ${SSH_CMD} "perf annotate --stdio -i /tmp/perf.data > /tmp/perf_annotate.txt"
+
+    # 4. Download results
+    mkdir -p "${PERF_OUT}"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_stat.txt "${PERF_OUT}/"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_report.txt "${PERF_OUT}/"
+    ${SCP_CMD} root@${HOST}:/tmp/perf_annotate.txt "${PERF_OUT}/"
+
+    # 5. Cleanup
+    ${SSH_CMD} "rm -f /tmp/perf_stat.txt /tmp/perf_report.txt /tmp/perf_annotate.txt /tmp/perf.data"
+
+    info "Lib mode profiling completed. Results in: ${PERF_OUT}"
 }
 
 # --- Main ---
