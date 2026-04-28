@@ -232,7 +232,7 @@ If verification returns FAIL:
 
 #### 2.4.5 Tmux Monitoring (Lightweight)
 
-Since only one teammate runs at a time, continuous cron monitoring is unnecessary. Instead, Lead checks the teammate's tmux pane **on demand**:
+The Guardian provides continuous cron monitoring (see §2.6). In addition, the Lead checks the teammate's tmux pane **on demand** for direct intervention:
 
 1. **During WAIT**: If teammate hasn't reported completion within expected time (see §11 timeline), check tmux to see if it's stuck
 2. **Intervention**: If teammate is idle/blocked (prompt showing `❯` with no spinner), diagnose and provide input:
@@ -259,94 +259,11 @@ All 4 workers in this batch are **Full Pipeline** (Phase 0–5): new application
 
 ### 2.6 Guardian Teammate — Long-Run Progress Monitor
 
-The Guardian is a **persistent teammate** that monitors all team members (including the Lead) via tmux on a cron loop. Its sole purpose is to keep the team making continuous progress during long, unsupervised runs where the Lead or teammates may become stuck or idle without triggering normal wake-up mechanisms.
+The Guardian is a **persistent, lightweight teammate** (haiku model) that monitors all team members via tmux on a 5-minute cron loop. It intervenes only when the Lead is idle and the team is stuck, keeping the batch progressing during long unsupervised runs.
 
-**Model**: **sonnet** — monitoring is procedural and pattern-matching; deep architectural reasoning is not required.
+**The Guardian specification is defined in the `guardian` skill** (`skills/guardian/SKILL.md`). This includes the full intervention protocol, logging rules, fundamental rules (Leader-Only, Idle-Only), continuity notes mechanism, and spawn instructions.
 
-**Lifecycle**:
-- **Spawn**: By Lead AFTER `TeamCreate`, BEFORE the first application teammate (see §6 Phase B)
-- **Run**: Persistent cron loop firing every 5 minutes, for the entire duration of the batch
-- **Cancel**: By Lead as the **ABSOLUTE LAST action** — after all teammates shut down, all worktrees merged, `TeamDelete` done, and synthesis report generated
-
-#### 2.6.1 Cron Loop
-
-Guardian creates a recurring cron job via `CronCreate`:
-
-```python
-CronCreate(
-    cron="*/5 * * * *",           # every 5 minutes
-    prompt="Check the status of ALL rvfuse-analysis-b2 team members via tmux. "
-           "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for member list. "
-           "For each member (including Lead): check tmux pane state. "
-           "Determine if any intervention is needed per the intervention protocol "
-           "in docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6.3. "
-           "Log all interventions to docs/plans/guardian-log-b2.md.",
-    recurring=True,
-    durable=False                  # session-only, dies when Lead exits
-)
-```
-
-#### 2.6.2 Fundamental Rules (ALWAYS APPLY)
-
-These two rules override everything else. They are enforced BEFORE the intervention rule table is consulted:
-
-**Rule A — Leader-Only Interaction**: The Guardian interacts ONLY with the Lead. It MUST NOT send messages, input text, or interact with any other teammate's tmux pane. All information from other teammates flows through the Lead. The Guardian observes teammates' states (read-only via tmux) but never acts on them directly.
-
-**Rule B — Idle-Only Intervention**: The Guardian interacts with the Lead ONLY when the Lead is `idle`. If the Lead is `active` (spinner, ongoing output), the Guardian records any pending items to a deferred list and does NOT intervene. On the next cron tick, Guardian re-checks: (a) is the pending item still relevant? AND (b) is the Lead now `idle`? Only when both conditions are met does Guardian intervene. Stale pending items (already resolved by the Lead independently) are dropped.
-
-**Deferred pending items format** (appended to guardian-log-b2.md each tick):
-```markdown
-### YYYY-MM-DD HH:MM — Deferred (Lead active)
-- <item-1>: <description>
-- <item-2>: <description>
-```
-
-#### 2.6.3 Intervention Protocol
-
-On each cron tick, Guardian assesses the state of ALL team members via tmux (read-only), then decides whether to interact with the Lead:
-
-**State Assessment**:
-1. List all tmux panes. Identify which belong to team members (Lead + app teammates + self).
-2. For each pane, capture the last ~10 lines of output to determine its state.
-3. Classify each member's state: `active` (spinner visible), `idle` (❯ prompt, no spinner), `blocked` (error message), `awaiting_user` (permission prompt / question / confirmation dialog).
-
-**Intervention Rules** (check in order, execute the FIRST matching rule. Rules A and B from §2.6.2 always apply first):
-
-| # | Condition | Action |
-|---|-----------|--------|
-| 1 | Lead shows **awaiting_user** (permission prompt, question with options, confirmation dialog) | Guardian sends the appropriate response to **Lead's tmux pane**: for yes/no confirmations → `y`; for multiple-choice → select the default/recommended option; for permission prompts → approve. **Note**: Rules A/B don't block this — awaiting_user is a distinct state from `active`, and the Lead can't make progress without user input. Log: "Auto-approved Lead prompt: <description>." |
-| 2 | Lead is **idle** AND all app teammates are **idle** | Guardian inputs a wake-up prompt to **Lead's tmux pane**: `All team members are idle. Check TaskList progress. If the current app teammate should have completed, send SendMessage to check its status. If verification is pending, dispatch the opus verification subagent. If ready to spawn the next teammate, do so.` Log: "Woke Lead from idle — all members idle." |
-| 3 | Lead is **idle** AND any teammate is **blocked** (error in last output) | Guardian inputs to **Lead's tmux pane**: `Teammate <name> appears blocked. Last output shows: <error summary>. Please check and resolve.` Guardian does NOT attempt to fix the error itself. Log: "Notified Lead: <teammate-name> blocked." |
-| 4 | All 4 app tasks show `status="completed"` in TaskList AND Lead is idle | Guardian inputs to **Lead's tmux pane**: `All 4 tasks show completed in TaskList. If all teammates are shut down and worktrees merged, proceed to Phase D (cleanup) and Phase E (synthesis report). Remember: cancel my (Guardian) cron as the LAST action.` Log: "Notified Lead: all tasks complete." |
-| 5 | All app tasks complete, worktrees merged, synthesis done — only remaining action is Guardian cancellation | Guardian inputs to **Lead's tmux pane**: `All work appears complete. The only remaining action is to cancel my cron: CronDelete(id="<my-cron-id>"). After that, the batch is done.` Log: "Final reminder: cancel Guardian cron." |
-| 6 | Lead is **active** AND there are items to report (teammate blocked, tasks completed, etc.) | Guardian adds the item to the **deferred pending list** (appended to guardian-log-b2.md). Does NOT interrupt the Lead. Re-check on next cron tick. Log: "Deferred <N> item(s) — Lead active." |
-| 7 | Everything is progressing normally (at least one member is `active`) | No intervention. Log: "Tick: all normal — <active-member-name> is active." |
-
-**Logging**: Every cron tick, Guardian appends to `docs/plans/guardian-log-b2.md`:
-```markdown
-### YYYY-MM-DD HH:MM — Guardian Tick #<N>
-- **Lead**: <state>
-- **<teammate-1>**: <state>
-- **<teammate-2>**: <state>
-- ...
-- **Pending from previous ticks**: <list or "none">
-- **Decision**: <rule-#: description>
-- **Action taken**: <what was sent to Lead's pane, or "deferred", or "none">
-```
-
-#### 2.6.4 Guardian Constraints
-
-- **Leader-only interaction** (§2.6.2 Rule A): Guardian communicates exclusively with the Lead. Never with app teammates.
-- **Idle-only intervention** (§2.6.2 Rule B): Guardian interrupts the Lead only when the Lead is `idle`. Active Lead = deferred pending list.
-- **Read-only observer of teammates**: Guardian watches teammate tmux panes but never types into them. All teammate issues are reported to the Lead for resolution.
-- **Never skip verification**: Guardian must NOT approve verification on behalf of Lead. Only the Lead dispatches the opus verification subagent.
-- **Never spawn/shutdown teammates**: Only the Lead manages teammate lifecycles.
-- **Never merge worktrees**: Only the Lead runs `git merge --no-ff`.
-- **Cancellation is Lead's last action**: Guardian's cron is the final thing cancelled, after everything else is done. This ensures no orphaned, unmonitored state.
-
-#### 2.6.5 Guardian Spawn
-
-The Guardian is spawned by the Lead as the first teammate, immediately after `TeamCreate`. The full spawn code with prompt is in §6 Phase B Step B1b. See that section for the exact `Agent(...)` call.
+Refer to `skills/guardian/SKILL.md` for the complete Guardian behavior specification. The spawn invocation for this batch is in §6 Step B1b below, using the skill-derived prompt with batch-specific parameters (team name, task count, log path, plan path).
 
 ## 3. Application Tasks
 
@@ -449,7 +366,7 @@ The Guardian is spawned by the Lead as the first teammate, immediately after `Te
 
 **Research value**: The shape difference (197 vs 50 tokens) directly tests vectorization tail handling efficiency. Operators that are efficient at one shape may degrade at the other. This provides quantitative data for RVV extension proposals targeting dynamic shape handling (e.g., tail-agnostic instructions).
 
-**Phase 0 — Setup**: Same process as ViT-Base/16, different HuggingFace model (`google/vit-base-patch32-224`).
+**Phase 0 — Setup**: Same process as ViT-Base/16, different HuggingFace model (`google/vit-base-patch32-384`). Note: `google/vit-base-patch32-224` does not exist on HuggingFace; the closest available model is `google/vit-base-patch32-384` (384×384 input, 12×12=144 patches + CLS = 145 tokens).
 
 **Target directory**: `applications/onnxrt/vit-base-32/`
 
@@ -660,7 +577,7 @@ These are read-only and symlinked from each worktree to the main repository:
 | Build output | `output/cross-<app>/` | Independent per application |
 | ONNX models | `applications/onnxrt/<app>/model/` | Per-application model files |
 | RVV patches | `applications/onnxrt/rvv-patches/` | Shared across onnxrt apps within same worktree; worktree-isolated from others |
-| BBV profiling data | `output/bbv_rvv512/` | Work-specific |
+| BBV profiling data | `output/bbv_<app>/` | Per-application (e.g., `output/bbv_superpoint/`, `output/bbv_superglue/`) |
 | Reports | `docs/report/<app>/` | Per-application analysis |
 
 ### 4.3 ONNX Runtime Sharing Strategy
@@ -708,13 +625,87 @@ Since only one teammate runs at a time on limited hardware, resource contention 
 | ONNX Runtime build | **Serial** | One build at a time; each worktree has independent `vendor/` |
 | ONNX model export | **Pre-exported** | Lead pre-exports all 4 models before spawning any teammate (see Phase A) |
 | Sysroot build | **Serial** | One Docker extraction at a time |
-| Dev board (perf) | **Serial** | Single SSH; Phase 1 skipped for initial run |
+| Dev board (perf) | **Serial** | Single SSH managed by Lead; no contention in serial execution; pre/post checks per §5.1 |
 | HuggingFace download | **Pre-downloaded** | Lead downloads all models in Phase A |
 | Report output | **Serial** | One report generation at a time |
 | Git merge | **Serial** | Each worktree merged before next teammate spawns |
 
 **Key constraint**: ONNX model export requires PyTorch + transformers Python packages. Strategy:
 - **Pre-export in main repo**: Lead exports all 4 ONNX models before spawning the first teammate, stores them in `output/models/`, and each teammate copies from there. Simplest and avoids Python dependency issues in worktrees.
+
+### 5.1 RISC-V Dev Board Perf Profiling Protocol
+
+Since execution is serial (one teammate active at a time), there is NO resource contention for the RISC-V dev board (Banana Pi). **Perf profiling on real hardware is the foundation of hotspot analysis — Phase 1 MUST NOT be skipped.** The serialized Lead manages dev board access, and each teammate includes Phase 1 in its pipeline.
+
+**Dev Board Connection**:
+- **Host**: `192.168.100.221` (Banana Pi K1, SpacemiT K1 SoC, Bianbu OS)
+- **User**: `root`
+- **SSH Port**: `22` (standard, NOT 2222)
+- **Password**: `bianbu`
+- **SSH**: `ssh root@192.168.100.221`
+- **RVV capability**: `zvl256b` (VLEN=256) — binaries for native perf MUST be compiled with `-march=rv64gcv_zvl256b`
+- **QEMU (for BBV profiling)**: `zvl512b` (VLEN=512) — binaries for BBV MUST be compiled with `-march=rv64gcv_zvl512b` and run with `qemu-riscv64 -cpu rv64,v=true,vlen=512`
+
+**Build Target Split**:
+| Use Case | VLEN | Compiler Flag | Runtime |
+|----------|------|---------------|---------|
+| Phase 1 (Perf on dev board) | 256 | `-march=rv64gcv_zvl256b` | Native on Banana Pi K1 |
+| Phase 3 (BBV profiling) | 512 | `-march=rv64gcv_zvl512b` | QEMU with `-cpu rv64,v=true,vlen=512` |
+| Phase 2 (RVV patches) | 512 | `-march=rv64gcv_zvl512b` | QEMU (VLEN=512) |
+
+Phase 2 and Phase 4-5 analysis targets zvl512b, since the gap analysis and extension proposals are aimed at wider vector lengths. The dev board zvl256b perf data provides real-hardware validation but the reference for RVV optimization is zvl512b.
+
+#### 5.1.1 Pre-Perf Board Check (Teammate, Before Each Perf Session)
+
+Before uploading any binaries or running perf, the teammate MUST check the dev board state:
+
+```bash
+# 1. Check disk space (ensure >2GB available for binaries + models + perf data)
+ssh root@192.168.100.221 "df -h /"
+
+# 2. Check CPU load (should be near idle before starting)
+ssh root@192.168.100.221 "uptime && top -bn1 | head -5"
+
+# 3. Check for zombie perf processes
+ssh root@192.168.100.221 "ps aux | grep -E 'perf|ort_runner|superpoint|superglue|vit' | grep -v grep"
+
+# 4. Kill any leftover perf/data collection processes from previous runs
+ssh root@192.168.100.221 "pkill -9 perf 2>/dev/null; pkill -9 ort_runner 2>/dev/null; pkill -9 superpoint 2>/dev/null; pkill -9 superglue 2>/dev/null; pkill -9 vit 2>/dev/null; echo 'Cleaned'"
+
+# 5. If zombie processes cannot be killed → REBOOT
+#    ssh root@192.168.100.221 "reboot"
+#    Then wait 3-5 minutes before attempting reconnection:
+#    sleep 180  # minimum 3 minutes
+#    while ! ssh -o ConnectTimeout=5 root@192.168.100.221 "echo 'Board ready'"; do
+#        echo "Waiting for board to come back..."
+#        sleep 30
+#    done
+```
+
+#### 5.1.2 Perf Execution (Teammate)
+
+Use the `perf-profiling` skill to:
+1. Upload cross-compiled binary, shared libraries, sysroot, and ONNX model to the dev board via `scp`/`paramiko`
+2. Run `perf stat` for overall instruction-level metrics
+3. Run `perf record` + `perf annotate` for hot function identification
+4. Pull perf data back to the development machine
+
+#### 5.1.3 Post-Perf Cleanup (Teammate, After Perf Completes)
+
+```bash
+# 1. Remove uploaded binaries, models, and libraries from the dev board
+ssh root@192.168.100.221 "rm -rf /tmp/perf_workdir/"
+
+# 2. Kill any perf/data collection processes still running
+ssh root@192.168.100.221 "pkill -9 perf 2>/dev/null; pkill -9 ort_runner 2>/dev/null; echo 'Cleaned'"
+
+# 3. Verify no leftover processes
+ssh root@192.168.100.221 "ps aux | grep -E 'perf|ort_runner' | grep -v grep || echo 'No leftover processes'"
+```
+
+#### 5.1.4 Timeline Adjustment
+
+Phase 1 adds **15-25 min** per application (board check + upload + perf run + cleanup), included in the updated timeline (§11).
 
 ## 6. Execution Plan
 
@@ -735,10 +726,10 @@ python3 applications/onnxrt/vit-base-32/export_model.py
 
 # Store in shared location
 mkdir -p output/models/
-cp applications/onnxrt/superpoint/model/*.onnx output/models/
-cp applications/onnxrt/superglue/model/*.onnx output/models/
-cp applications/onnxrt/vit-base-16/model/*.onnx output/models/
-cp applications/onnxrt/vit-base-32/model/*.onnx output/models/
+cp applications/onnxrt/superpoint/model/*.onnx* output/models/
+cp applications/onnxrt/superglue/model/*.onnx* output/models/
+cp applications/onnxrt/vit-base-16/model/*.onnx* output/models/
+cp applications/onnxrt/vit-base-32/model/*.onnx* output/models/
 ```
 
 ### Phase B: Serial Teammate Execution (Lead + Teammates)
@@ -752,98 +743,18 @@ cp applications/onnxrt/vit-base-32/model/*.onnx output/models/
 TeamCreate(team_name="rvfuse-analysis-b2")
 
 # B1b: Spawn Guardian FIRST — before any app teammate
-# The Guardian monitors all members (including Lead) on a 5-min cron loop
-# See §2.6 for full Guardian specification
-Agent(
-    team_name="rvfuse-analysis-b2",
-    name="guardian",
-    subagent_type="general-purpose",
-    description="Guardian — Long-run progress monitor",
-    model="sonnet",
-    mode="auto",
-    run_in_background=True,
-    prompt="""You are the Guardian of the rvfuse-analysis-b2 team.
-
-Your role: Monitor ALL team members (including the Lead) via tmux on a 5-minute cron loop. Keep the team progressing during long, unsupervised runs.
-
-FUNDAMENTAL RULES (override everything — see plan §2.6.2):
-
-Rule A — Leader-Only Interaction:
-You interact ONLY with the Lead. NEVER send messages or input to any other teammate's tmux pane.
-You observe teammates' tmux panes (read-only) but never act on them directly.
-All information from teammates flows through the Lead.
-
-Rule B — Idle-Only Intervention:
-You interact with the Lead ONLY when the Lead is idle (❯ prompt, no spinner).
-If the Lead is active (spinner, ongoing output), record pending items to a DEFERRED LIST.
-On the next cron tick, re-check: is the item still relevant? Is Lead now idle?
-Only intervene when BOTH conditions are met. Drop stale items that Lead already resolved.
-
-CRITICAL CONSTRAINTS (see plan §2.6.4):
-- You are a MONITOR, not a worker. Do NOT modify code, change tasks, spawn/shutdown teammates, merge worktrees, or run verification checks.
-- Never approve verification or make quality judgments — only the Lead + opus verification subagent do that.
-- Read docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md §2.6 for full protocol.
-
-SETUP (do this ONCE on first run):
-1. Create the cron job:
-   CronCreate(
-       cron="*/5 * * * *",
-       prompt="Check all rvfuse-analysis-b2 team members via tmux per §2.6.3 intervention protocol. "
-              "Read ~/.claude/teams/rvfuse-analysis-b2/config.json for current member list. "
-              "Log to docs/plans/guardian-log-b2.md.",
-       recurring=True,
-       durable=False
-   )
-2. Create the log file: docs/plans/guardian-log-b2.md with header:
-   # Guardian Intervention Log — Batch 2
-   
-   Team: rvfuse-analysis-b2
-   Started: <current timestamp>
-3. Send confirmation to Lead via SendMessage: "Guardian online. Cron loop active. Monitoring all tmux panes."
-
-ON EACH CRON TICK:
-1. Read ~/.claude/teams/rvfuse-analysis-b2/config.json to get current member list
-2. List all tmux panes and match them to team members
-3. For each member, capture last ~10 lines of tmux output to determine state
-4. Check the DEFERRED PENDING LIST from previous ticks — drop any that are no longer relevant
-5. Apply Fundamental Rules A and B FIRST
-6. Apply the intervention protocol rules (1-7) in order from §2.6.3
-7. Execute the FIRST matching rule
-8. Append to docs/plans/guardian-log-b2.md
-
-STATE CLASSIFICATION:
-- active: spinner visible or ongoing output
-- idle: prompt visible, no spinner, no recent output change
-- blocked: error message, stack trace, or build failure in last output
-- awaiting_user: permission prompt, question mark (?), [y/n], confirmation dialog
-
-INTERVENTION RULES summary (see §2.6.3 for full details):
-1. Lead awaiting_user → auto-approve (this bypasses idle-only rule since Lead is stuck without input)
-2. Lead idle + all teammates idle → wake up Lead
-3. Lead idle + any teammate blocked → notify Lead (do NOT fix it yourself)
-4. All 4 tasks completed + Lead idle → remind Lead to proceed to Phase D/E
-5. All done except Guardian cancellation → final reminder to cancel your cron
-6. Lead active + items to report → DEFER (record to pending list, re-check next tick)
-7. Everything normal → no action, log status
-
-DEFERRED PENDING LIST:
-When Lead is active but you have items to report, append to the log:
-### YYYY-MM-DD HH:MM — Deferred (Lead active)
-- <item>: <description>
-
-On EACH subsequent tick, re-check each deferred item:
-- If resolved → drop it
-- If still relevant AND Lead is idle → intervene (execute the matching rule)
-- If still relevant AND Lead is still active → keep deferred
-
-IMPORTANT:
-- You run persistently for the ENTIRE batch duration (potentially 8-11 hours)
-- Do NOT stop your cron loop unless the Lead explicitly cancels it via CronDelete
-- If you detect the Lead is gone (session ended, no tmux pane), log it and continue monitoring remaining members
-- Your log is the audit trail — be thorough and timestamp every action
-"""
-)
+# Uses the guardian skill (skills/guardian/SKILL.md) for the full behavior specification.
+# Batch-specific parameters:
+#   team_name       = "rvfuse-analysis-b2"
+#   log_file        = "docs/plans/guardian-log-b2.md"
+#   notes_file      = "/tmp/guardian-rvfuse-analysis-b2-notes.txt"
+#   plan_file       = "docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md"
+#   task_count      = 4
+#   expected_end    = "all 4 app tasks completed, all worktrees merged, synthesis report done"
+Skill(skill="guardian", args="team_name=rvfuse-analysis-b2 log_file=docs/plans/guardian-log-b2.md plan_file=docs/plans/agent-team-rvv-analysis-batch2-2026-04-27.md task_count=4")
 ```
+
+The `guardian` skill handles: CronCreate setup, log file initialization, the full intervention protocol (Rules 1–7), continuity notes, and the SendMessage confirmation to the Lead.
 
 **Guardian is now online.** It monitors all tmux panes independently. The Lead proceeds to spawn app teammates — the Guardian runs in parallel with everything.
 
@@ -855,10 +766,10 @@ For each application in order (superpoint → superglue → vit-base-16 → vit-
 
 | Order | Teammate | Model | Expected Duration |
 |-------|----------|-------|-------------------|
-| 1st | `superpoint` | sonnet | ~105-155 min |
-| 2nd | `superglue` | opus | ~145-205 min |
-| 3rd | `vit-base-16` | sonnet | ~110-165 min |
-| 4th | `vit-base-32` | sonnet | ~70-100 min |
+| 1st | `superpoint` | sonnet | ~120-180 min |
+| 2nd | `superglue` | opus | ~165-230 min |
+| 3rd | `vit-base-16` | sonnet | ~130-190 min |
+| 4th | `vit-base-32` | sonnet | ~85-125 min |
 
 **After EACH teammate completes and passes verification:**
 1. Send `shutdown_request` to the teammate via `SendMessage`
@@ -915,7 +826,12 @@ PHASE 0 — SETUP (cross-compile-app skill):
 8. Report phase completion in your status updates
 
 PHASE 1 — PERF PROFILING (perf-profiling skill):
-Skip — dev board access is serialized by Lead. Use QEMU-only BBV profiling.
+Since execution is serial, dev board access is no longer contended. Perf on real hardware IS the foundation of hotspot analysis.
+1. Follow the **dev board perf protocol** in §5.1: pre-check disk/CPU/zombie processes, clean up before starting
+2. Upload binary + libs + sysroot + model to the Banana Pi dev board
+3. Run `perf stat` + `perf record` + `perf annotate` for hot function identification
+4. Pull perf data back to the worktree
+5. Post-perf cleanup per §5.1.3: remove uploaded resources, kill any lingering perf processes
 
 PHASE 2 — RVV512 VECTORIZATION (rvv-op skill):
 For operators estimated >1% compute time:
@@ -990,7 +906,7 @@ Your task: Execute the full rvv512-optimization-pipeline for onnxrt/ViT-Base/32.
 
 APPLICATION: Vision Transformer Base with 32x32 patches for ImageNet classification.
 TARGET DIRECTORY: applications/onnxrt/vit-base-32/
-ONNX MODEL: output/models/vit_base_patch32_224.onnx (pre-exported by Lead)
+ONNX MODEL: output/models/vit_base_patch32_384.onnx (pre-exported by Lead; google/vit-base-patch32-224 does not exist)
 REFERENCE RUNNER: applications/onnxrt/yolo/runner/yolo_runner.cpp (ONNX Runtime API pattern)
 REFERENCE BUILD: applications/onnxrt/ort/build.sh (cross-compile script)
 REFERENCE RVV PATCHES: applications/onnxrt/rvv-patches/sgemm-kernel-vl16/ (directly applicable)
@@ -1008,13 +924,18 @@ KEY DIFFERENCE FROM ViT-Base/16:
 
 PHASE 0 — SETUP:
 Same as vit-base-16, but:
-- Model: google/vit-base-patch32-224
-- Runner: reuse vit-base-16 runner code as base, change model file path
-- The runner is almost identical — only the model file path and ONNX input name differ
+- Model: google/vit-base-patch32-384 (224 variant does not exist; 384x384 input, 145 tokens)
+- Runner: reuse vit-base-16 runner code as base, change model file path and resize target (384×384)
+- The runner is almost identical — only the model file path, input size (224→384), and token count differ
 - Reference applications/onnxrt/vit-base-16/ for runner code (already on master)
 
-PHASE 1 — PERF PROFILING:
-Skip (dev board serialized by Lead)
+PHASE 1 — PERF PROFILING (perf-profiling skill):
+Since execution is serial, dev board access is no longer contended. Perf on real hardware IS the foundation of hotspot analysis.
+1. Follow the **dev board perf protocol** in §5.1: pre-check disk/CPU/zombie processes, clean up before starting
+2. Upload binary + libs + sysroot + model to the Banana Pi dev board
+3. Run `perf stat` + `perf record` + `perf annotate` for hot function identification
+4. Pull perf data back to the worktree
+5. Post-perf cleanup per §5.1.3: remove uploaded resources, kill any lingering perf processes
 
 PHASE 2 — RVV512 VECTORIZATION:
 1. SGEMM: Apply existing patch from rvv-patches/sgemm-kernel-vl16/
@@ -1110,8 +1031,13 @@ PHASE 0 — SETUP (cross-compile-app skill):
 7. QEMU smoke test: verify keypoint count > 0, descriptors have valid L2 norm (~1.0)
 8. Report phase completion in status updates
 
-PHASE 1 — PERF PROFILING:
-Skip — dev board serialized by Lead.
+PHASE 1 — PERF PROFILING (perf-profiling skill):
+Since execution is serial, dev board access is no longer contended. Perf on real hardware IS the foundation of hotspot analysis.
+1. Follow the **dev board perf protocol** in §5.1: pre-check disk/CPU/zombie processes, clean up before starting
+2. Upload binary + libs + sysroot + model to the Banana Pi dev board
+3. Run `perf stat` + `perf record` + `perf annotate` for hot function identification
+4. Pull perf data back to the worktree
+5. Post-perf cleanup per §5.1.3: remove uploaded resources, kill any lingering perf processes
 
 PHASE 2 — RVV512 VECTORIZATION (rvv-op skill):
 Focus on the dominant CNN operators:
@@ -1226,8 +1152,13 @@ PHASE 0 — SETUP (cross-compile-app skill):
 6. Cross-compile ONNX Runtime + runner (same build pattern as YOLO)
 7. QEMU smoke test with synthetic data: verify match count > 0, confidence in [0,1]
 
-PHASE 1 — PERF PROFILING:
-Skip — dev board serialized by Lead.
+PHASE 1 — PERF PROFILING (perf-profiling skill):
+Since execution is serial, dev board access is no longer contended. Perf on real hardware IS the foundation of hotspot analysis.
+1. Follow the **dev board perf protocol** in §5.1: pre-check disk/CPU/zombie processes, clean up before starting
+2. Upload binary + libs + sysroot + model to the Banana Pi dev board
+3. Run `perf stat` + `perf record` + `perf annotate` for hot function identification
+4. Pull perf data back to the worktree
+5. Post-perf cleanup per §5.1.3: remove uploaded resources, kill any lingering perf processes
 
 PHASE 2 — RVV512 VECTORIZATION (rvv-op skill):
 Priority-ordered operators:
@@ -1333,14 +1264,13 @@ Generate a synthesis report combining all 4 apps + cross-referencing Batch 1 fin
 
 ```
 docs/report/
-├── vit-base-16/          # Teammate output
+├── onnxrt/                         # SuperPoint + SuperGlue reports
+│   ├── rvv-gap-analysis-superpoint-*.md
+│   └── superglue/                  # Per-operator + consolidated
+├── vit-base-16/                    # Teammate output
 │   └── vit-base-16-consolidated-*.md
-├── vit-base-32/          # Teammate output
+├── vit-base-32/                    # Teammate output
 │   └── vit-base-32-consolidated-*.md
-├── superpoint/           # Teammate output
-│   └── superpoint-consolidated-*.md
-├── superglue/            # Teammate output
-│   └── superglue-consolidated-*.md
 └── rvv-extension-comprehensive-analysis-*.md  # Cross-app synthesis (Lead)
 ```
 
@@ -1357,7 +1287,7 @@ docs/report/
 | Phase | Skill | Purpose |
 |-------|-------|---------|
 | 0 | `cross-compile-app` | App setup, ONNX Runtime cross-compile, sysroot, runner build |
-| 1 | `perf-profiling` | Dev board perf profiling (if hardware available) |
+| 1 | `perf-profiling` | Dev board perf profiling (required — foundation of hotspot analysis; pre/post checks per §5.1) |
 | 2 | `rvv-op` | RVV512 operator implementation (SGEMM, Conv2d, Softmax, etc.) |
 | 3 | `qemu-bbv-usage` | Function-scoped BBV profiling via QEMU |
 | 4 | `rvv-gap-analysis` | Cross-platform comparison + BBV-weighted benefits |
@@ -1403,9 +1333,10 @@ Per teammate:
 - [ ] Teammate responds to `shutdown_request` and exits cleanly
 
 Guardian:
-- [ ] Guardian spawned after TeamCreate, before first app teammate
-- [ ] Guardian cron loop active (verified by checking guardian-log-b2.md has periodic entries)
-- [ ] Guardian log exists at `docs/plans/guardian-log-b2.md` with timestamped entries
+- [ ] Guardian spawned after TeamCreate, before first app teammate (via guardian SKILL)
+- [ ] Guardian cron loop active (verified by `CronList` showing active job)
+- [ ] Guardian notes file exists at `/tmp/guardian-rvfuse-analysis-b2-notes.txt`
+- [ ] Guardian log at `docs/plans/guardian-log-b2.md` records interventions when executed (Rules 1-5); empty or sparse log is expected — normal ticks are not logged
 - [ ] Guardian intervenes appropriately when team members are idle/stuck
 - [ ] Guardian cron cancelled by Lead as the LAST action (after TeamDelete + synthesis)
 
@@ -1425,9 +1356,9 @@ Cross-batch:
 | ONNX Runtime build failures | Low | High | The build.sh pattern is battle-tested (YOLO, ResNet). ViT uses standard ONNX ops — no custom ops needed. SuperPoint and SuperGlue also use standard ops. |
 | Worktree merge conflicts | Low | Medium | Each app writes to isolated paths (applications/onnxrt/<app>/, docs/report/<app>/). No shared files. The only conflict surface is rvv-patches/ if multiple apps modify the same patch — but each app's patches are independent. Serial execution further reduces this risk since each worktree is merged before the next is created. |
 | Teammate fails verification repeatedly | Medium | Medium | Rework limit of 3 iterations. If teammate cannot pass after 3 attempts, Lead manually intervenes to fix critical issues, then re-verifies. Serial execution means this blocks progress, but ensures quality. |
-| Serial execution takes too long | Medium | Medium | Serial wall-clock time is ~7-10 hours total (sum of all 4 apps). Acceptable trade-off for device performance constraints and quality assurance. If needed, vit-base-32 can be deprioritized (lowest unique value). |
+| Serial execution takes too long | Medium | Medium | Serial wall-clock time is ~10-14 hours total (sum of all 4 apps, including Phase 1 perf). Acceptable trade-off for device performance constraints and quality assurance. If needed, vit-base-32 can be deprioritized (lowest unique value). |
 | Guardian malfunctions (false idle detection, over-intervention) | Low | Medium | Guardian intervention rules are priority-ordered with explicit conditions. False positives (e.g., intervening when Lead is actively thinking) are minimized by checking for the idle prompt pattern (❯ with no spinner). Guardian log provides audit trail — Lead can review and override any incorrect intervention. If Guardian becomes disruptive, Lead can temporarily pause its cron and resume later. |
-| Guardian cron expires (7-day recurring limit) | Low | Low | Batch runs ~8-11 hours, well within the 7-day auto-expiry. Not a concern for this batch. |
+| Guardian cron expires (7-day recurring limit) | Low | Low | Batch runs ~10-14 hours, well within the 7-day auto-expiry. Not a concern for this batch. |
 | Lead or Guardian session terminated (power loss, crash) | Low | High | Guardian cron is `durable=False` (session-only). If Lead's session dies, Guardian dies with it. Worktrees persist on disk. Recovery: re-create team, re-spawn Guardian, resume from last completed app. Guardian log provides last-known state. |
 
 ## 11. Timeline Estimate (Serial Execution)
@@ -1435,23 +1366,21 @@ Cross-batch:
 | Phase | superpoint (1st) | superglue (2nd) | vit-base-16 (3rd) | vit-base-32 (4th) |
 |-------|-----------------|-----------------|-------------------|-------------------|
 | 0 (Setup) | 30-45 min | 45-60 min (complex) | 30-45 min | 15-20 min (reuse) |
-| 1 (Perf) | Skip* | Skip* | Skip* | Skip* |
+| 1 (Perf) | 15-25 min | 15-25 min | 15-25 min | 15-25 min |
 | 2 (RVV) | 20-30 min | 30-45 min | 20-30 min | 10-15 min |
 | 3 (BBV) | 20-30 min | 25-35 min | 20-30 min | 15-20 min |
 | 4 (Gap) | 25-35 min | 35-50 min | 30-45 min | 20-30 min |
 | 5 (Report) | 10-15 min | 10-15 min | 10-15 min | 10-15 min |
-| **Per-app Total** | **~105-155 min** | **~145-205 min** | **~110-165 min** | **~70-100 min** |
+| **Per-app Total** | **~120-180 min** | **~165-230 min** | **~130-190 min** | **~85-125 min** |
 
 | Overhead | Estimate |
 |----------|----------|
 | Verification (opus subagent per app) | ~5-10 min each |
 | Rework buffer (1 round per app avg) | ~15-30 min each |
 | Worktree merge + next spawn | ~5 min each |
-| **Total wall-clock (serial)** | **~7-10 hours** |
+| **Total wall-clock (serial)** | **~9-13 hours** |
 | Cross-app synthesis (Lead, Phase E) | ~30-45 min |
-| **Grand Total** | **~8-11 hours** |
-
-*Phase 1 skipped for initial run; can be added later with Lead serialization.
+| **Grand Total** | **~10-14 hours** |
 
 **Guardian overhead**: Negligible. The Guardian runs a lightweight cron check every 5 minutes (tmux state inspection + log append). It does not consume significant CPU or memory, and the cron fires are sub-second operations. No adjustment to the timeline estimates is needed.
 
