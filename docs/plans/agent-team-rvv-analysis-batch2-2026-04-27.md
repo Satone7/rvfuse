@@ -118,6 +118,7 @@ The Lead (current Claude session) executes a strict **serial workflow**: spawn �
 │     ┌─ PASS ───────────────────────────────────┐        │
 │     │  4a. SendMessage shutdown_request         │        │
 │     │  5a. Wait for teammate to exit            │        │
+│     │  5b. Kill teammate tmux pane (keep ≤4)    │        │
 │     │  6a. TaskUpdate(status="completed")       │        │
 │     │  7a. Merge worktree (--no-ff)             │        │
 │     │  8a. Move to NEXT application             │        │
@@ -144,9 +145,10 @@ The Lead (current Claude session) executes a strict **serial workflow**: spawn �
 5. **Verify**: Lead dispatches an **opus verification subagent** (standalone, no `team_name`) to check all deliverables
 6. **Rework loop**: If verification FAILS, Lead sends fix instructions via `SendMessage(to="<teammate-name>")`, teammate fixes and re-reports → go to step 5
 7. **Shutdown**: After PASS, Lead sends `shutdown_request` via `SendMessage`
-8. **Merge**: Lead merges worktree back to master (`--no-ff`)
-9. **Next**: Lead spawns the next teammate (go to step 1)
-10. **Final Cleanup**: After all 4 teammates complete and shut down: run Phase E (synthesis) → `TeamDelete` → **cancel Guardian cron last**
+8. **Kill Pane**: After teammate confirms shutdown, Lead kills its tmux pane (`tmux kill-pane -t %<N>`). This keeps total panes ≤ 4 (Lead + active teammate + Guardian = 3; verification subagents are fire-and-forget without panes). Required because Guardian reads panes via tmux capture-pane, and too many panes causes output truncation.
+9. **Merge**: Lead merges worktree back to master (`--no-ff`)
+10. **Next**: Lead spawns the next teammate (go to step 1)
+11. **Final Cleanup**: After all 4 teammates complete and shut down: run Phase E (synthesis) → `TeamDelete` → **cancel Guardian cron last**
 
 #### 2.4.3 Stage-Gate Verification (Opus Subagent)
 
@@ -248,6 +250,7 @@ The Guardian provides continuous cron monitoring (see §2.6). In addition, the L
    - **采取的操作**: ...
    - **操作结果**: ...
    ```
+4. **Pane limit**: Keep tmux panes ≤ 4 at all times (Lead + Guardian + active teammate + max 1 buffer). Kill completed teammate panes immediately after shutdown confirmation. Too many panes causes `tmux capture-pane` output truncation, preventing Guardian from accurately reading teammate states.
 
 ### 2.5 Worker Types
 
