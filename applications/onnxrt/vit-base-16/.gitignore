@@ -1,0 +1,19 @@
+# Build artifacts
+vendor/
+*.o
+*.so
+*.so.*
+*.a
+
+# Model files (large, stored separately)
+model/*.onnx
+model/*.onnx.data
+
+# Output directory
+output/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
