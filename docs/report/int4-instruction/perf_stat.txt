@@ -1,0 +1,18 @@
+# started on Tue Apr 28 19:32:10 2026
+
+
+ Performance counter stats for './llama-completion -m /root/llama-int4/models/Qwen2.5-0.5B-Instruct-Q4_0.gguf -p Explain what machine learning is in 2-3 sentences. -n 20 -t 4 --temp 0.7':
+
+    12,675,765,599      instructions                     #    0.34  insn per cycle              (16.69%)
+    37,351,429,742      cycles                                                                  (33.36%)
+       982,432,768      branches                                                                (50.01%)
+        11,215,128      branch-misses                    #    1.14% of all branches             (66.72%)
+     <not counted>      cache-misses                                                            (0.00%)
+     <not counted>      cache-references                                                        (0.00%)
+
+      12.850800053 seconds time elapsed
+
+      22.351737000 seconds user
+       1.115587000 seconds sys
+
+
