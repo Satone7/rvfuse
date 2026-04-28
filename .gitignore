@@ -98,3 +98,6 @@ third_party/llvm-install
 # Cloned reference repos
 applications/onnxrt/superpoint/reference/
 applications/onnxrt/superglue/reference/
+
+# Broken recursive symlink (local-llvm self-reference)
+tools/local-llvm/local-llvm
