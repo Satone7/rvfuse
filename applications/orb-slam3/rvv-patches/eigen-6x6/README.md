@@ -1,7 +1,7 @@
 # g2o Eigen 6x6 — RVV512 Implementation
 
-**Status**: IMPLEMENTED (eigen_rvv.inl + test.cpp + patch.diff)
-**Date**: 2026-04-29
+**Status**: VERIFIED (eigen_rvv.inl + test.cpp + patch.diff — all 3 tests PASS)
+**Date**: 2026-04-30 (fixed + verified), originally 2026-04-29
 **Target**: Eigen 3.4.0 + g2o Bundle Adjustment
 **Hotspot**: ~16% (largest remaining scalar hotspot after OpenCV rebuild)
 

@@ -6,6 +6,9 @@
 // When __riscv_vector is defined, this overrides Eigen's default
 // dense_assignment_loop for 6x6 fixed-size matrices.
 
+#ifndef EIGEN_RVV_6X6_INL
+#define EIGEN_RVV_6X6_INL
+
 #ifdef __riscv_vector
 #include <riscv_vector.h>
 
@@ -19,82 +22,97 @@ namespace rvv {
 // C[i][j] = Σ(k=0..5) A[i][k] * B[k][j]
 //
 // Column-major layout (Eigen default):
-//   Col 0: [0, 6, 12, 18, 24, 30]  (bytes)
-//   Col 1: [48, 54, 60, 66, 72, 78]
+//   Col 0: indices 0..5   = A(0,0)..A(5,0)
+//   Col 1: indices 6..11  = A(0,1)..A(5,1)
 //   ...
 //
-// RVV512: vfloat64m1_t with vl=6 holds one column (48 bytes)
+// RVV512: vfloat64m1_t with vl=6 holds one column (6 doubles = 48 bytes)
+//
+// Algorithm: C_col_j = Σ(k=0..5) B(k,j) * A_col_k
+//   Load A columns as vectors (6 loads)
+//   For each C column j: accumulate B(k,j)*A_col_k using vfmacc.vf
+//   Store C columns (6 stores)
 
 inline void eigen_6x6_mul_rvv(double* C, const double* A, const double* B) {
-    // Load B columns: 6 columns × 6 doubles each = 48 bytes per column
-    vfloat64m1_t b0 = __riscv_vle64_v_f64m1(&B[0], 6);
-    vfloat64m1_t b1 = __riscv_vle64_v_f64m1(&B[6], 6);
-    vfloat64m1_t b2 = __riscv_vle64_v_f64m1(&B[12], 6);
-    vfloat64m1_t b3 = __riscv_vle64_v_f64m1(&B[18], 6);
-    vfloat64m1_t b4 = __riscv_vle64_v_f64m1(&B[24], 6);
-    vfloat64m1_t b5 = __riscv_vle64_v_f64m1(&B[30], 6);
+    // Load A columns as vectors
+    vfloat64m1_t a0 = __riscv_vle64_v_f64m1(&A[0], 6);
+    vfloat64m1_t a1 = __riscv_vle64_v_f64m1(&A[6], 6);
+    vfloat64m1_t a2 = __riscv_vle64_v_f64m1(&A[12], 6);
+    vfloat64m1_t a3 = __riscv_vle64_v_f64m1(&A[18], 6);
+    vfloat64m1_t a4 = __riscv_vle64_v_f64m1(&A[24], 6);
+    vfloat64m1_t a5 = __riscv_vle64_v_f64m1(&A[30], 6);
 
-    // Compute C column 0 = A[0]*b0 + A[6]*b1 + A[12]*b2 + A[18]*b3 + A[24]*b4 + A[30]*b5
-    vfloat64m1_t c0 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[0],  b0, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[6],  b1, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[12], b2, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[18], b3, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[24], b4, 6);
-    c0 = __riscv_vfmacc_vf_f64m1(c0, A[30], b5, 6);
+    // C column 0 = B(0,0)*a0 + B(1,0)*a1 + ... + B(5,0)*a5
+    {
+        vfloat64m1_t c0 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[0],  a0, 6);  // B(0,0)
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[1],  a1, 6);  // B(1,0)
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[2],  a2, 6);  // B(2,0)
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[3],  a3, 6);  // B(3,0)
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[4],  a4, 6);  // B(4,0)
+        c0 = __riscv_vfmacc_vf_f64m1(c0, B[5],  a5, 6);  // B(5,0)
+        __riscv_vse64_v_f64m1(&C[0], c0, 6);
+    }
 
-    // C column 1
-    vfloat64m1_t c1 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[1],  b0, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[7],  b1, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[13], b2, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[19], b3, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[25], b4, 6);
-    c1 = __riscv_vfmacc_vf_f64m1(c1, A[31], b5, 6);
+    // C column 1 = B(0,1)*a0 + B(1,1)*a1 + ... + B(5,1)*a5
+    {
+        vfloat64m1_t c1 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[6],  a0, 6);   // B(0,1)
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[7],  a1, 6);   // B(1,1)
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[8],  a2, 6);   // B(2,1)
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[9],  a3, 6);   // B(3,1)
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[10], a4, 6);   // B(4,1)
+        c1 = __riscv_vfmacc_vf_f64m1(c1, B[11], a5, 6);   // B(5,1)
+        __riscv_vse64_v_f64m1(&C[6], c1, 6);
+    }
 
     // C column 2
-    vfloat64m1_t c2 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[2],  b0, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[8],  b1, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[14], b2, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[20], b3, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[26], b4, 6);
-    c2 = __riscv_vfmacc_vf_f64m1(c2, A[32], b5, 6);
+    {
+        vfloat64m1_t c2 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[12], a0, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[13], a1, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[14], a2, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[15], a3, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[16], a4, 6);
+        c2 = __riscv_vfmacc_vf_f64m1(c2, B[17], a5, 6);
+        __riscv_vse64_v_f64m1(&C[12], c2, 6);
+    }
 
     // C column 3
-    vfloat64m1_t c3 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[3],  b0, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[9],  b1, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[15], b2, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[21], b3, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[27], b4, 6);
-    c3 = __riscv_vfmacc_vf_f64m1(c3, A[33], b5, 6);
+    {
+        vfloat64m1_t c3 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[18], a0, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[19], a1, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[20], a2, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[21], a3, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[22], a4, 6);
+        c3 = __riscv_vfmacc_vf_f64m1(c3, B[23], a5, 6);
+        __riscv_vse64_v_f64m1(&C[18], c3, 6);
+    }
 
     // C column 4
-    vfloat64m1_t c4 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[4],  b0, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[10], b1, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[16], b2, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[22], b3, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[28], b4, 6);
-    c4 = __riscv_vfmacc_vf_f64m1(c4, A[34], b5, 6);
+    {
+        vfloat64m1_t c4 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[24], a0, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[25], a1, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[26], a2, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[27], a3, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[28], a4, 6);
+        c4 = __riscv_vfmacc_vf_f64m1(c4, B[29], a5, 6);
+        __riscv_vse64_v_f64m1(&C[24], c4, 6);
+    }
 
     // C column 5
-    vfloat64m1_t c5 = __riscv_vfmv_vf_f64m1(0.0, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[5],  b0, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[11], b1, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[17], b2, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[23], b3, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[29], b4, 6);
-    c5 = __riscv_vfmacc_vf_f64m1(c5, A[35], b5, 6);
-
-    // Store C columns (column-major: columns are contiguous)
-    __riscv_vse64_v_f64m1(&C[0],  c0, 6);
-    __riscv_vse64_v_f64m1(&C[6],  c1, 6);
-    __riscv_vse64_v_f64m1(&C[12], c2, 6);
-    __riscv_vse64_v_f64m1(&C[18], c3, 6);
-    __riscv_vse64_v_f64m1(&C[24], c4, 6);
-    __riscv_vse64_v_f64m1(&C[30], c5, 6);
+    {
+        vfloat64m1_t c5 = __riscv_vfmv_v_f_f64m1(0.0, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[30], a0, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[31], a1, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[32], a2, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[33], a3, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[34], a4, 6);
+        c5 = __riscv_vfmacc_vf_f64m1(c5, B[35], a5, 6);
+        __riscv_vse64_v_f64m1(&C[30], c5, 6);
+    }
 }
 
 // ============================================================
@@ -119,9 +137,9 @@ inline void eigen_6x6_triangular_solve_rvv(double* x, const double* L, const dou
     // Forward: x[0] = b[0] / L[0][0]
     x[0] = b[0] / L[0];  // L[0][0] is at column-major index 0
 
-    // x[i] = (b[i] - Σ(k=0..i-1) L[i_k] * x[k]) / L[i][i]
+    // x[i] = (b[i] - Σ(k=0..i-1) L[i][k] * x[k]) / L[i][i]
     for (int i = 1; i < 6; i++) {
-        // Gather L[i][0..i-1] into vector (column-major: L[i_k] is at index k*6+i)
+        // Gather L[i][0..i-1] into vector (column-major: L[i][k] is at index k*6+i)
         double L_row[6] = {0};
         for (int k = 0; k < i; k++) {
             L_row[k] = L[k * 6 + i];  // L[i][k] in column-major
@@ -131,39 +149,19 @@ inline void eigen_6x6_triangular_solve_rvv(double* x, const double* L, const dou
         vfloat64m1_t x_vec = __riscv_vle64_v_f64m1(x, i);
         vfloat64m1_t L_vec = __riscv_vle64_v_f64m1(L_row, i);
 
-        // Dot product: L_row · x_vec
+        // Dot product using vfredusum.vs (vector reduction sum)
         vfloat64m1_t prod = __riscv_vfmul_vv_f64m1(L_vec, x_vec, i);
-        double dot = 0.0;
-        // Horizontal sum of prod
-        for (int k = 0; k < i; k++) {
-            dot += __riscv_vfmv_f_s_f64m1_f64m1(prod); // Extract first element
-            // Note: proper reduction needs vfredusum
-        }
+        vfloat64m1_t zero = __riscv_vfmv_v_f_f64m1(0.0, i);
+        vfloat64m1_t sum_vec = __riscv_vfredusum_vs_f64m1_f64m1(prod, zero, i);
+        double dot = __riscv_vfmv_f_s_f64m1_f64(sum_vec);
 
         x[i] = (b[i] - dot) / L[i * 6 + i];  // L[i][i]
     }
 }
 
 } // namespace rvv
-
-// ============================================================
-// Override Eigen's dense_assignment_loop for 6x6 double matrices
-// ============================================================
-
-template<>
-EIGEN_STRONG_INLINE void dense_assignment_loop<
-    Matrix<double, 6, 6, ColMajor>,
-    Matrix<double, 6, 6, ColMajor>,
-    Matrix<double, 6, 6, ColMajor>,
-    assign_op<double, double>
->(Matrix<double,6,6,ColMajor>& dst, const Matrix<double,6,6,ColMajor>& src,
-  const assign_op<double,double>& op) {
-    for (int j = 0; j < 6; j++)
-        for (int i = 0; i < 6; i++)
-            dst.coeffRef(i,j) = op(src.coeff(i,j));
-}
-
 } // namespace internal
 } // namespace Eigen
 
 #endif // __riscv_vector
+#endif // EIGEN_RVV_6X6_INL
