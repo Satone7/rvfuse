@@ -225,11 +225,12 @@ cross_compile() {
         -DCMAKE_BUILD_TYPE=Release \
         -G Ninja \
         -DOPENCV_EXTRA_MODULES_PATH="${OPENCV_CONTRIB_SOURCE}/modules" \
-        -DBUILD_LIST="core,imgproc,imgcodecs,video,videoio,highgui,tracking" \
+        -DBUILD_LIST="core,imgproc,features2d,imgcodecs,calib3d,flann,highgui,video,videoio,tracking" \
+        -DRISCV_RVV_SCALABLE=ON \
         -DBUILD_TESTS=OFF \
         -DBUILD_PERF_TESTS=OFF \
         -DBUILD_EXAMPLES=OFF \
-        -DBUILD_opencv_apps=ON \
+        -DBUILD_opencv_apps=OFF \
         -DBUILD_SHARED_LIBS=ON \
         -DWITH_OPENCL=OFF \
         -DWITH_CUDA=OFF \

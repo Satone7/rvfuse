@@ -14,7 +14,7 @@ set(CMAKE_CXX_COMPILER "${LLVM_INSTALL}/bin/clang++")
 set(CMAKE_C_COMPILER_TARGET riscv64-unknown-linux-gnu)
 set(CMAKE_CXX_COMPILER_TARGET riscv64-unknown-linux-gnu)
 
-set(RISCV_FLAGS "-march=rv64gc -mabi=lp64d -g")
+set(RISCV_FLAGS "-march=rv64gcv_zvl512b -mabi=lp64d -g")
 set(CMAKE_C_FLAGS "${RISCV_FLAGS}" CACHE STRING "" FORCE)
 set(CMAKE_CXX_FLAGS "${RISCV_FLAGS}" CACHE STRING "" FORCE)
 

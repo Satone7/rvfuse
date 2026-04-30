@@ -1,0 +1,59 @@
+diff --git a/Eigen/src/Core/arch/RVV/PacketMath.h b/Eigen/src/Core/arch/RVV/PacketMath.h
+new file mode 100644
+--- /dev/null
++++ b/Eigen/src/Core/arch/RVV/PacketMath.h
+@@ -0,0 +1,45 @@
++// RVV PacketMath for Eigen 3.4.0
++// Enables RVV vectorization for fixed-size matrix operations
++
++#ifndef EIGEN_PACKET_MATH_RVV_H
++#define EIGEN_PACKET_MATH_RVV_H
++
++#include <riscv_vector.h>
++
++namespace Eigen {
++namespace internal {
++
++// Default packet: vfloat64m1_t (VLEN=512, 8 doubles max, 6 for 6x6 columns)
++template<> struct packet_traits<double> : default_packet_traits {
++    typedef vfloat64m1_t type;
++    enum {
++        Vectorizable = 1,
++        size = 6,  // 6 doubles per packet for 6x6
++        HasAdd = 1, HasSub = 1, HasMul = 1, HasDiv = 1,
++        HasFma = 1, HasNegate = 1, HasAbs = 1,
++        HasBlend = 1,
++        AlignedOnScalar = 1
++    };
++};
++
++// Include the specialized 6x6 kernels
++EIGEN_STRONG_INLINE void padd(vfloat64m1_t& c, const vfloat64m1_t& a, const vfloat64m1_t& b) {
++    c = __riscv_vfadd_vv_f64m1(a, b, 6);
++}
++
++EIGEN_STRONG_INLINE void pmul(vfloat64m1_t& c, const vfloat64m1_t& a, const vfloat64m1_t& b) {
++    c = __riscv_vfmul_vv_f64m1(a, b, 6);
++}
++
++EIGEN_STRONG_INLINE void pmadd(vfloat64m1_t& c, const vfloat64m1_t& a,
++                                const vfloat64m1_t& b, const vfloat64m1_t& d) {
++    c = __riscv_vfmacc_vv_f64m1(d, a, b, 6);  // c = a*b + d
++}
++
++} // namespace internal
++} // namespace Eigen
++
++#include "eigen_rvv.inl"
++
++#endif // EIGEN_PACKET_MATH_RVV_H
+
+diff --git a/Eigen/src/Core/util/ConfigureVectorization.h b/Eigen/src/Core/util/ConfigureVectorization.h
+--- a/Eigen/src/Core/util/ConfigureVectorization.h
++++ b/Eigen/src/Core/util/ConfigureVectorization.h
+@@ -0,0 +1,5 @@
++// Enable RVV when compiled with __riscv_vector
++#if defined(__riscv_vector) && !defined(EIGEN_VECTORIZE_RVV)
++  #define EIGEN_VECTORIZE_RVV 1
++  #include "arch/RVV/PacketMath.h"
++#endif
