@@ -1,17 +1,21 @@
 // Test: Eigen 6x6 RVV vs Scalar Correctness
-// Compile: clang++ -march=rv64gcv_zvl512b -O3 -I<eigen> test.cpp -o eigen6x6_test
+// Compile: clang++ --target=riscv64-unknown-linux-gnu --sysroot=<sysroot> \
+//   -march=rv64gcv_zvl512b -O3 \
+//   -I<eigen_dir> -I<rvv-patches/eigen-6x6> \
+//   test.cpp -o eigen6x6_test
 // Run: qemu-riscv64 -cpu rv64,v=true,vlen=512 eigen6x6_test
 
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
 
-// Define before including eigen_rvv.inl
-#define EIGEN_DONT_VECTORIZE  // Force scalar path for comparison
+// Define before including Eigen to force scalar path for comparison
+#define EIGEN_DONT_VECTORIZE
 #include <Eigen/Core>
 #undef EIGEN_DONT_VECTORIZE
 
 #ifdef __riscv_vector
+// Include the RVV kernels (found via -I path to rvv-patches/eigen-6x6/)
 #include "eigen_rvv.inl"
 #endif
 
