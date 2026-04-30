@@ -39,9 +39,9 @@ Phase 1+2 完成了 OpenCV 重编译（39,828 RVV 指令），GaussianBlur（25%
 
 | ID | Task | Model | Status | Deps |
 |----|------|-------|--------|------|
-| T1 | State Verification + Auto-vectorization Check | sonnet | [ ] | None |
-| T2 | LLVM 22 Bug Verification (accum.dispatch.cpp) | opus | [ ] | T1 |
-| T3 | g2o Eigen 6x6 RVV — Fix, Verify, Integrate | opus | [ ] | T2 |
+| T1 | State Verification + Auto-vectorization Check | sonnet | [x] | None |
+| T2 | LLVM 22 Bug Verification (accum.dispatch.cpp) | opus | [x] | T1 |
+| T3 | g2o Eigen 6x6 RVV — Fix, Verify, Integrate | opus | [x] | T2 |
 | T4 | ORB Descriptor RVV Implementation | opus | [ ] | T2 |
 | T5 | QEMU BBV Profiling (all patches applied) | sonnet | [ ] | T3, T4 |
 | T6 | Per-Operator Gap Analysis | sonnet | [ ] | T3, T4 |
@@ -109,6 +109,8 @@ ssh root@192.168.100.221 "clang++ -march=rv64gcv_zvl256b -O2 minimal_test.cpp -o
 
 **Reference**: Phase 1 consolidated report §Challenges Encountered #1, `accum.dispatch.cpp` at `vendor/opencv/modules/core/src/`
 
+**Outcome (completed 2026-04-30)**: Confirmed as a real LLVM 22.1.3 backend bug — Inliner+SROA interaction fails on scalable vector types (assert in `TypeSize::operator ScalarTy()`). Reproducible at all VLEN (128/256/512) and at `-O2` (not `-O1` or `-O0`). Disabling inlining or SLP vectorization avoids the crash. Current workaround (`#undef CV_RVV`) is correct. Recommend upgrading LLVM to a version with PR #130973 (merged June 2025). Full report: `skills/aitc-task-orb-slam3-p3/t2-report.md`. Artifacts: `output/orb-slam3/bug-reports/llvm22-accum-dispatch/`.
+
 ### T3: g2o Eigen 6x6 RVV — Fix, Verify, Integrate (opus)
 
 修复现有 `eigen_rvv.inl` 的 bug，QEMU 下编译验证正确性，apply patch.diff 到 Eigen 3.4.0，重编译 ORB-SLAM3，确认 RVV 指令生成。
@@ -139,6 +141,8 @@ ssh root@192.168.100.221 "clang++ -march=rv64gcv_zvl256b -O2 minimal_test.cpp -o
 **Output**: Verified working `eigen_rvv.inl` + passing `test.cpp` + patched Eigen + rebuilt libs with RVV instructions confirmed
 
 **Reference**: `eigen_rvv.inl`, `test.cpp`, `patch.diff` at `applications/orb-slam3/rvv-patches/eigen-6x6/`, g2o gap analysis
+
+**Outcome (completed 2026-04-30)**: 3 bugs fixed in `eigen_rvv.inl`: (1) triangular solve reduction replaced empty loop with `vfredusum.vs`, (2) matrix multiply indexing corrected for B scalars × A columns, (3) non-existent intrinsics removed. All 3 QEMU correctness tests PASS (multiply, add, triangular solve). After patching Eigen 3.4.0 with `PacketMath.h` (size=1 safe mode for non-6x6 operations) and rebuilding: libg2o.so 0 → 1,439 RVV instructions, libORB_SLAM3.so 0 → 5,633 RVV instructions (auto-vectorization). Full `packet_traits` integration (size=6) requiring ~500+ lines of partial packet ops is deferred — current size=1 approach enables auto-vectorization without risking non-6x6 Eigen operations.
 
 ### T4: ORB Descriptor RVV Implementation (opus)
 
